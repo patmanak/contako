@@ -1,0 +1,57 @@
+import groovy.json.JsonOutput
+import java.security.MessageDigest
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+
+static String sha256(File file) {
+    MessageDigest digest = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int read
+        while ((read = input.read(buffer)) >= 0) {
+            if (read > 0) digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().collect { String.format('%02X', it) }.join()
+}
+
+static String encoded(Map value) {
+    return JsonOutput.toJson(value).bytes.encodeBase64().toString()
+}
+
+gradle.afterProject { project ->
+    if (project != project.rootProject) return
+    project.tasks.register('contakoRuntimeArtifactInventory') {
+        group = 'verification'
+        description = 'Emits exact release runtime artifacts for the offline QA notice audit.'
+        doLast {
+            def configuration = project.configurations.getByName('releaseRuntimeClasspath')
+            def artifacts = configuration.resolvedConfiguration.resolvedArtifacts.toList().sort { a, b ->
+                def left = "${a.moduleVersion.id.group}:${a.moduleVersion.id.name}:${a.moduleVersion.id.version}:${a.file.name}"
+                def right = "${b.moduleVersion.id.group}:${b.moduleVersion.id.name}:${b.moduleVersion.id.version}:${b.file.name}"
+                left <=> right
+            }
+            artifacts.each { artifact ->
+                println('CONTAKO_ARTIFACT|' + encoded([
+                    group: artifact.moduleVersion.id.group,
+                    module: artifact.moduleVersion.id.name,
+                    version: artifact.moduleVersion.id.version,
+                    classifier: artifact.classifier ?: '',
+                    extension: artifact.extension ?: artifact.file.name.tokenize('.').last(),
+                    fileName: artifact.file.name,
+                    filePath: artifact.file.absolutePath,
+                    size: artifact.file.length(),
+                    sha256: sha256(artifact.file)
+                ]))
+            }
+
+            def componentIds = configuration.incoming.resolutionResult.allComponents
+                .findAll { it.id instanceof ModuleComponentIdentifier }
+                .collect { [group: it.id.group, module: it.id.module, version: it.id.version] }
+                .unique { "${it.group}:${it.module}:${it.version}" }
+                .sort { a, b -> "${a.group}:${a.module}:${a.version}" <=> "${b.group}:${b.module}:${b.version}" }
+            componentIds.each { component ->
+                println('CONTAKO_COMPONENT|' + encoded(component))
+            }
+        }
+    }
+}

@@ -1,0 +1,15 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-006
+N:Lovelace;Ada;M;Dr;PhD
+TEL;TYPE=WORK;TYPE=CELL:+33111111111
+TEL;TYPE=HOME,FAX:+33222222222
+ADR;TYPE=WORK:Box 1;Building A;1 Main Street;Paris;Ile-de-France;75001;France
+ORG:Analytical Engines;Research;Algorithms
+TITLE:Mathematician
+ROLE:Researcher
+URL;TYPE=WORK:https://example.test/ada
+NOTE:First note
+NOTE:Second note
+NICKNAME:Ada
+END:VCARD

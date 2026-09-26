@@ -1,0 +1,1 @@
+{"id":"FX-G-003","groups":[{"id":"g-empty","name":"Empty","color":"#333333","members":[]},{"id":"g-one","name":"One","color":"#444444","members":["contact-a:email-a"]},{"id":"g-many","name":"Many","color":"#555555","members":["contact-a:email-a","contact-a:email-b","contact-b:email-b"]}],"operations":["rename","recolor","delete"]}

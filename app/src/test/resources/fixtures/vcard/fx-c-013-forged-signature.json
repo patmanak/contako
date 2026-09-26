@@ -1,0 +1,1 @@
+{"id":"FX-C-013","card":"fx-c-013-malformed.vcf","signature":"synthetic-forged-signature","verification":"invalid","keyContext":"synthetic-wrong-key","expected":"fail-closed-by-maintained-proton-crypto"}

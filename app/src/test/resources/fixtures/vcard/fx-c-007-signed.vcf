@@ -1,0 +1,8 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-007
+FN:Multiple Occurrences
+EMAIL;TYPE=X-CUSTOM;PREF=8:first@example.test
+EMAIL;TYPE=WORK;PREF=1:preferred@example.test
+EMAIL;TYPE=HOME;PREF=3:third@example.test
+END:VCARD

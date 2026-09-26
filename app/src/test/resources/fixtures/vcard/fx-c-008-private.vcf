@@ -1,0 +1,9 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-008
+N:Primary;Note;;;
+NOTE;PREF=7;X-ORIGIN=archive:Hidden archive note
+NOTE;PREF=2;X-ORIGIN=android:Projected primary note
+NOTE;X-ORIGIN=plain:Hidden plain note
+X-CONTAKO-NOTE-CANARY;X-KEEP=yes:preserve-opaque-note-marker
+END:VCARD

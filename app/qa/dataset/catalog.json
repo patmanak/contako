@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "prefix": "CTK-QA",
+  "datasets": [
+    "nominal.json",
+    "compatibility.json",
+    "boundaries.json"
+  ]
+}

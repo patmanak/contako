@@ -1,0 +1,6 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-004
+FN:
+EMAIL;TYPE=HOME;PREF=1:email-only@example.test
+END:VCARD

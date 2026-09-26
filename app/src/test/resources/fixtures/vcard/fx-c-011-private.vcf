@@ -1,0 +1,10 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-011
+PHOTO;VALUE=uri;MEDIATYPE=image/png;PREF=3;X-IMAGE-SIZE=small:https://img.example.test/photo-small.png
+PHOTO;VALUE=uri;MEDIATYPE=image/jpeg;PREF=1;X-IMAGE-SIZE=large:https://img.example.test/photo-large.jpg
+PHOTO;VALUE=uri;MEDIATYPE=image/png;PREF=8;X-CORRUPT=yes:data:image/png;base64,not-valid-base64
+LOGO;VALUE=uri;MEDIATYPE=image/png;PREF=2:https://img.example.test/logo-secondary.png
+LOGO;VALUE=uri;MEDIATYPE=image/png;PREF=1:https://img.example.test/logo-primary.png
+X-CONTAKO-IMAGE-CANARY;X-KEEP=yes:opaque-image-marker
+END:VCARD

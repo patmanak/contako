@@ -1,0 +1,13 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-012
+N:Fixture;Advanced;;;
+LANG:fr-FR
+TZ:Europe/Paris
+GENDER:F;nonbinary
+MEMBER:urn:uuid:00000000-0000-4000-8000-000000000012
+ROLE:Maintainer
+LOGO;VALUE=uri:https://img.example.test/logo.png
+ANNIVERSARY:--02-29
+X-CONTako-CANARY;X-KEEP=yes:unknown-value
+END:VCARD

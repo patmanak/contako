@@ -1,0 +1,2281 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 14,
+    "identityHash": "06c4b1c5bf2596b971b1e65a8e7c97ee",
+    "entities": [
+      {
+        "tableName": "contacts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `id` TEXT NOT NULL, `owner_key` TEXT NOT NULL, `first_name` TEXT NOT NULL, `last_name` TEXT NOT NULL, `display_name` TEXT NOT NULL, `sort_name` TEXT NOT NULL, `revision` INTEGER NOT NULL, `updated_at_epoch_millis` INTEGER NOT NULL, `remote_contact_id` TEXT, `remote_vcard_uid` TEXT, `remote_version` TEXT, `action_required_reasons` TEXT NOT NULL, `pending_mutation_revision` INTEGER, `conflict_state` TEXT, `is_deleted` INTEGER NOT NULL, PRIMARY KEY(`account_id`, `id`))",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerKey",
+            "columnName": "owner_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstName",
+            "columnName": "first_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastName",
+            "columnName": "last_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "display_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sortName",
+            "columnName": "sort_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updated_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteContactId",
+            "columnName": "remote_contact_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteVCardUid",
+            "columnName": "remote_vcard_uid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteVersion",
+            "columnName": "remote_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "actionRequiredReasonsEncoding",
+            "columnName": "action_required_reasons",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pendingMutationRevision",
+            "columnName": "pending_mutation_revision",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "conflictState",
+            "columnName": "conflict_state",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isDeleted",
+            "columnName": "is_deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_contacts_owner_key",
+            "unique": true,
+            "columnNames": [
+              "owner_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_contacts_owner_key` ON `${TABLE_NAME}` (`owner_key`)"
+          },
+          {
+            "name": "index_contacts_account_id_is_deleted_sort_name",
+            "unique": false,
+            "columnNames": [
+              "account_id",
+              "is_deleted",
+              "sort_name"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_contacts_account_id_is_deleted_sort_name` ON `${TABLE_NAME}` (`account_id`, `is_deleted`, `sort_name`)"
+          }
+        ]
+      },
+      {
+        "tableName": "contact_values",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `contact_id` TEXT NOT NULL, `owner_key` TEXT NOT NULL, `id` TEXT NOT NULL, `kind` TEXT NOT NULL, `value` TEXT NOT NULL, `label` TEXT, `position` INTEGER NOT NULL, `is_primary` INTEGER NOT NULL, `components_encoding` TEXT NOT NULL, `metadata_encoding` TEXT NOT NULL, `binary_reference` TEXT, `preservation_key` TEXT, PRIMARY KEY(`account_id`, `contact_id`, `id`), FOREIGN KEY(`owner_key`) REFERENCES `contacts`(`owner_key`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contactId",
+            "columnName": "contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerKey",
+            "columnName": "owner_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isPrimary",
+            "columnName": "is_primary",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "componentsEncoding",
+            "columnName": "components_encoding",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "metadataEncoding",
+            "columnName": "metadata_encoding",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "binaryReference",
+            "columnName": "binary_reference",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "preservationKey",
+            "columnName": "preservation_key",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "contact_id",
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_contact_values_owner_key",
+            "unique": false,
+            "columnNames": [
+              "owner_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_contact_values_owner_key` ON `${TABLE_NAME}` (`owner_key`)"
+          },
+          {
+            "name": "index_contact_values_account_id_contact_id_kind_position",
+            "unique": false,
+            "columnNames": [
+              "account_id",
+              "contact_id",
+              "kind",
+              "position"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_contact_values_account_id_contact_id_kind_position` ON `${TABLE_NAME}` (`account_id`, `contact_id`, `kind`, `position`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "contacts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "owner_key"
+            ],
+            "referencedColumns": [
+              "owner_key"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "contact_payloads",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_key` TEXT NOT NULL, `raw_properties_encoding` TEXT NOT NULL, `remote_baseline` TEXT, PRIMARY KEY(`owner_key`), FOREIGN KEY(`owner_key`) REFERENCES `contacts`(`owner_key`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "ownerKey",
+            "columnName": "owner_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawPropertiesEncoding",
+            "columnName": "raw_properties_encoding",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteBaseline",
+            "columnName": "remote_baseline",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_key"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "contacts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "owner_key"
+            ],
+            "referencedColumns": [
+              "owner_key"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "contact_groups",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `id` TEXT NOT NULL, `owner_key` TEXT NOT NULL, `name` TEXT NOT NULL, `color` TEXT NOT NULL, `display_order` INTEGER NOT NULL, `is_visible` INTEGER NOT NULL, `revision` INTEGER NOT NULL, `updated_at_epoch_millis` INTEGER NOT NULL, `remote_label_id` TEXT, `remote_version` TEXT, `pending_mutation_revision` INTEGER, `conflict_state` TEXT, `is_deleted` INTEGER NOT NULL, PRIMARY KEY(`account_id`, `id`))",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerKey",
+            "columnName": "owner_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "color",
+            "columnName": "color",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayOrder",
+            "columnName": "display_order",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isVisible",
+            "columnName": "is_visible",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updated_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteLabelId",
+            "columnName": "remote_label_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteVersion",
+            "columnName": "remote_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pendingMutationRevision",
+            "columnName": "pending_mutation_revision",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "conflictState",
+            "columnName": "conflict_state",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isDeleted",
+            "columnName": "is_deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_contact_groups_owner_key",
+            "unique": true,
+            "columnNames": [
+              "owner_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_contact_groups_owner_key` ON `${TABLE_NAME}` (`owner_key`)"
+          },
+          {
+            "name": "index_contact_groups_account_id_is_deleted_name",
+            "unique": false,
+            "columnNames": [
+              "account_id",
+              "is_deleted",
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_contact_groups_account_id_is_deleted_name` ON `${TABLE_NAME}` (`account_id`, `is_deleted`, `name`)"
+          }
+        ]
+      },
+      {
+        "tableName": "group_memberships",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `group_id` TEXT NOT NULL, `group_owner_key` TEXT NOT NULL, `contact_id` TEXT NOT NULL, `email_value_id` TEXT NOT NULL, PRIMARY KEY(`account_id`, `group_id`, `contact_id`, `email_value_id`), FOREIGN KEY(`group_owner_key`) REFERENCES `contact_groups`(`owner_key`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`account_id`, `contact_id`, `email_value_id`) REFERENCES `contact_values`(`account_id`, `contact_id`, `id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "group_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupOwnerKey",
+            "columnName": "group_owner_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contactId",
+            "columnName": "contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "emailValueId",
+            "columnName": "email_value_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "group_id",
+            "contact_id",
+            "email_value_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_group_memberships_group_owner_key",
+            "unique": false,
+            "columnNames": [
+              "group_owner_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_group_memberships_group_owner_key` ON `${TABLE_NAME}` (`group_owner_key`)"
+          },
+          {
+            "name": "index_group_memberships_account_id_contact_id_email_value_id",
+            "unique": false,
+            "columnNames": [
+              "account_id",
+              "contact_id",
+              "email_value_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_group_memberships_account_id_contact_id_email_value_id` ON `${TABLE_NAME}` (`account_id`, `contact_id`, `email_value_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "contact_groups",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "group_owner_key"
+            ],
+            "referencedColumns": [
+              "owner_key"
+            ]
+          },
+          {
+            "table": "contact_values",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "contact_id",
+              "email_value_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "contact_id",
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "outbox_mutations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `aggregate_type` TEXT NOT NULL, `aggregate_id` TEXT NOT NULL, `operation` TEXT NOT NULL, `revision` INTEGER NOT NULL, `created_at_epoch_millis` INTEGER NOT NULL, `updated_at_epoch_millis` INTEGER NOT NULL, `attempt_count` INTEGER NOT NULL, `next_attempt_at_epoch_millis` INTEGER NOT NULL, `error_category` TEXT, `blocked_reason` TEXT, `remote_identity` TEXT, `remote_version` TEXT, `idempotency_key` TEXT NOT NULL, `state` TEXT NOT NULL, `requires_reconciliation` INTEGER NOT NULL, `last_attempt_at_epoch_millis` INTEGER, `device_elapsed_realtime_millis` INTEGER NOT NULL, `server_offset_millis` INTEGER, `calibration_age_millis` INTEGER, `round_trip_millis` INTEGER, `server_precision_millis` INTEGER, `uncertainty_millis` INTEGER, `interval_earliest_epoch_millis` INTEGER, `interval_latest_epoch_millis` INTEGER, `clock_jump_detected` INTEGER NOT NULL, PRIMARY KEY(`account_id`, `aggregate_type`, `aggregate_id`))",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateType",
+            "columnName": "aggregate_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateId",
+            "columnName": "aggregate_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "operation",
+            "columnName": "operation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "created_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updated_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attempt_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextAttemptAtEpochMillis",
+            "columnName": "next_attempt_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "errorCategory",
+            "columnName": "error_category",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "blockedReason",
+            "columnName": "blocked_reason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteIdentity",
+            "columnName": "remote_identity",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteVersion",
+            "columnName": "remote_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "idempotencyKey",
+            "columnName": "idempotency_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requiresReconciliation",
+            "columnName": "requires_reconciliation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAttemptAtEpochMillis",
+            "columnName": "last_attempt_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "deviceElapsedRealtimeMillis",
+            "columnName": "device_elapsed_realtime_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverOffsetMillis",
+            "columnName": "server_offset_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "calibrationAgeMillis",
+            "columnName": "calibration_age_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "roundTripMillis",
+            "columnName": "round_trip_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "serverPrecisionMillis",
+            "columnName": "server_precision_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "uncertaintyMillis",
+            "columnName": "uncertainty_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "intervalEarliestEpochMillis",
+            "columnName": "interval_earliest_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "intervalLatestEpochMillis",
+            "columnName": "interval_latest_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "clockJumpDetected",
+            "columnName": "clock_jump_detected",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "aggregate_type",
+            "aggregate_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_outbox_mutations_account_id_next_attempt_at_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "account_id",
+              "next_attempt_at_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_outbox_mutations_account_id_next_attempt_at_epoch_millis` ON `${TABLE_NAME}` (`account_id`, `next_attempt_at_epoch_millis`)"
+          }
+        ]
+      },
+      {
+        "tableName": "contact_inventory_checkpoints",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `generation` INTEGER NOT NULL, PRIMARY KEY(`account_id`))",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id"
+          ]
+        }
+      },
+      {
+        "tableName": "contact_inventory_entries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `contact_id` TEXT NOT NULL, `display_name` TEXT, `remote_version` TEXT NOT NULL, `size_bytes` INTEGER NOT NULL, `modified_at_epoch_seconds` INTEGER NOT NULL, PRIMARY KEY(`account_id`, `contact_id`), FOREIGN KEY(`account_id`) REFERENCES `contact_inventory_checkpoints`(`account_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contactId",
+            "columnName": "contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "display_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteVersion",
+            "columnName": "remote_version",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "size_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "modifiedAtEpochSeconds",
+            "columnName": "modified_at_epoch_seconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "contact_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "contact_inventory_checkpoints",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id"
+            ],
+            "referencedColumns": [
+              "account_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "contact_inventory_groups",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `contact_id` TEXT NOT NULL, `group_id` TEXT NOT NULL, PRIMARY KEY(`account_id`, `contact_id`, `group_id`), FOREIGN KEY(`account_id`, `contact_id`) REFERENCES `contact_inventory_entries`(`account_id`, `contact_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contactId",
+            "columnName": "contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "group_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "contact_id",
+            "group_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "contact_inventory_entries",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "contact_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "contact_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "contact_inventory_email_memberships",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `contact_id` TEXT NOT NULL, `email_id` TEXT NOT NULL, PRIMARY KEY(`account_id`, `contact_id`, `email_id`), FOREIGN KEY(`account_id`, `contact_id`) REFERENCES `contact_inventory_entries`(`account_id`, `contact_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contactId",
+            "columnName": "contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "emailId",
+            "columnName": "email_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "contact_id",
+            "email_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "contact_inventory_entries",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "contact_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "contact_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "contact_inventory_email_groups",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `contact_id` TEXT NOT NULL, `email_id` TEXT NOT NULL, `group_id` TEXT NOT NULL, PRIMARY KEY(`account_id`, `contact_id`, `email_id`, `group_id`), FOREIGN KEY(`account_id`, `contact_id`, `email_id`) REFERENCES `contact_inventory_email_memberships`(`account_id`, `contact_id`, `email_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contactId",
+            "columnName": "contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "emailId",
+            "columnName": "email_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "group_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "contact_id",
+            "email_id",
+            "group_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "contact_inventory_email_memberships",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "contact_id",
+              "email_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "contact_id",
+              "email_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "sync_account_status",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `state` TEXT NOT NULL, `updated_at_epoch_millis` INTEGER NOT NULL, `last_success_at_epoch_millis` INTEGER, `pending_mutation_count` INTEGER NOT NULL, `action_required_count` INTEGER NOT NULL, `action_reason` TEXT, `blocked_since_epoch_millis` INTEGER, `notification_claimed_for_block_epoch_millis` INTEGER, PRIMARY KEY(`account_id`))",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updated_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSuccessAtEpochMillis",
+            "columnName": "last_success_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pendingMutationCount",
+            "columnName": "pending_mutation_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actionRequiredCount",
+            "columnName": "action_required_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actionReason",
+            "columnName": "action_reason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "blockedSinceEpochMillis",
+            "columnName": "blocked_since_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "notificationClaimedForBlockEpochMillis",
+            "columnName": "notification_claimed_for_block_epoch_millis",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id"
+          ]
+        }
+      },
+      {
+        "tableName": "full_repair_progress",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `revision` INTEGER NOT NULL, `phase` TEXT NOT NULL, `phase_rank` INTEGER NOT NULL, `completed_units` INTEGER NOT NULL, `total_units` INTEGER, `started_at_epoch_millis` INTEGER NOT NULL, `updated_at_epoch_millis` INTEGER NOT NULL, `non_wifi_confirmed` INTEGER NOT NULL, `cancellation_requested` INTEGER NOT NULL, PRIMARY KEY(`account_id`))",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phase",
+            "columnName": "phase",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phaseRank",
+            "columnName": "phase_rank",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedUnits",
+            "columnName": "completed_units",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalUnits",
+            "columnName": "total_units",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "startedAtEpochMillis",
+            "columnName": "started_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updated_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nonWifiConfirmed",
+            "columnName": "non_wifi_confirmed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cancellationRequested",
+            "columnName": "cancellation_requested",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id"
+          ]
+        }
+      },
+      {
+        "tableName": "android_projection_accounts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `revision` INTEGER NOT NULL, `provider_epoch` INTEGER NOT NULL, `android_account_name` TEXT, `provider_repair_pending` INTEGER NOT NULL, PRIMARY KEY(`account_id`))",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerEpoch",
+            "columnName": "provider_epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "androidAccountName",
+            "columnName": "android_account_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "providerRepairPending",
+            "columnName": "provider_repair_pending",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id"
+          ]
+        }
+      },
+      {
+        "tableName": "android_projection_ledger",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_contact_id` TEXT NOT NULL, `revision` INTEGER NOT NULL, `provider_epoch` INTEGER NOT NULL, `raw_contact_locator` INTEGER, `source_identity` TEXT, `canonical_projection_fingerprint` TEXT, `android_baseline_fingerprint` TEXT, `pending_projection_fingerprint` TEXT, `observed_android_fingerprint` TEXT, `projection_state` TEXT NOT NULL, `ingestion_state` TEXT NOT NULL, `tombstone_state` TEXT NOT NULL, `adoption_state` TEXT NOT NULL, PRIMARY KEY(`account_id`, `canonical_contact_id`), FOREIGN KEY(`account_id`) REFERENCES `android_projection_accounts`(`account_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`account_id`, `canonical_contact_id`) REFERENCES `contacts`(`account_id`, `id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalContactId",
+            "columnName": "canonical_contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerEpoch",
+            "columnName": "provider_epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawContactLocator",
+            "columnName": "raw_contact_locator",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sourceIdentity",
+            "columnName": "source_identity",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "canonicalProjectionFingerprint",
+            "columnName": "canonical_projection_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "androidBaselineFingerprint",
+            "columnName": "android_baseline_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pendingProjectionFingerprint",
+            "columnName": "pending_projection_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "observedAndroidFingerprint",
+            "columnName": "observed_android_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "projectionState",
+            "columnName": "projection_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ingestionState",
+            "columnName": "ingestion_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tombstoneState",
+            "columnName": "tombstone_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "adoptionState",
+            "columnName": "adoption_state",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_contact_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_android_projection_ledger_account_id_provider_epoch_raw_contact_locator",
+            "unique": true,
+            "columnNames": [
+              "account_id",
+              "provider_epoch",
+              "raw_contact_locator"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_android_projection_ledger_account_id_provider_epoch_raw_contact_locator` ON `${TABLE_NAME}` (`account_id`, `provider_epoch`, `raw_contact_locator`)"
+          },
+          {
+            "name": "index_android_projection_ledger_account_id_source_identity",
+            "unique": true,
+            "columnNames": [
+              "account_id",
+              "source_identity"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_android_projection_ledger_account_id_source_identity` ON `${TABLE_NAME}` (`account_id`, `source_identity`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "android_projection_accounts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id"
+            ],
+            "referencedColumns": [
+              "account_id"
+            ]
+          },
+          {
+            "table": "contacts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_contact_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_provider_identity_owners",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_contact_id` TEXT NOT NULL, `canonical_value_id` TEXT NOT NULL, PRIMARY KEY(`account_id`, `canonical_contact_id`, `canonical_value_id`), FOREIGN KEY(`account_id`, `canonical_contact_id`) REFERENCES `contacts`(`account_id`, `id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalContactId",
+            "columnName": "canonical_contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalValueId",
+            "columnName": "canonical_value_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_contact_id",
+            "canonical_value_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_android_provider_identity_owners_account_id_canonical_contact_id",
+            "unique": false,
+            "columnNames": [
+              "account_id",
+              "canonical_contact_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_android_provider_identity_owners_account_id_canonical_contact_id` ON `${TABLE_NAME}` (`account_id`, `canonical_contact_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "contacts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_contact_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_provider_row_bindings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_contact_id` TEXT NOT NULL, `provider_epoch` INTEGER NOT NULL, `raw_contact_locator` INTEGER NOT NULL, `binding_primary_id` TEXT NOT NULL, `role` TEXT NOT NULL, `canonical_value_id` TEXT NOT NULL, `android_account_name` TEXT NOT NULL, `kind` TEXT NOT NULL, `data_row_locator` INTEGER, `state` TEXT NOT NULL, PRIMARY KEY(`account_id`, `canonical_contact_id`, `provider_epoch`, `raw_contact_locator`, `binding_primary_id`, `role`), FOREIGN KEY(`account_id`, `canonical_contact_id`) REFERENCES `android_projection_ledger`(`account_id`, `canonical_contact_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`account_id`, `canonical_contact_id`, `canonical_value_id`) REFERENCES `android_provider_identity_owners`(`account_id`, `canonical_contact_id`, `canonical_value_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalContactId",
+            "columnName": "canonical_contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerEpoch",
+            "columnName": "provider_epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawContactLocator",
+            "columnName": "raw_contact_locator",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bindingPrimaryId",
+            "columnName": "binding_primary_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalValueId",
+            "columnName": "canonical_value_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "androidAccountName",
+            "columnName": "android_account_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dataRowLocator",
+            "columnName": "data_row_locator",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_contact_id",
+            "provider_epoch",
+            "raw_contact_locator",
+            "binding_primary_id",
+            "role"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_android_provider_row_bindings_account_id_canonical_contact_id",
+            "unique": false,
+            "columnNames": [
+              "account_id",
+              "canonical_contact_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_android_provider_row_bindings_account_id_canonical_contact_id` ON `${TABLE_NAME}` (`account_id`, `canonical_contact_id`)"
+          },
+          {
+            "name": "index_android_provider_row_bindings_account_id_canonical_contact_id_canonical_value_id",
+            "unique": false,
+            "columnNames": [
+              "account_id",
+              "canonical_contact_id",
+              "canonical_value_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_android_provider_row_bindings_account_id_canonical_contact_id_canonical_value_id` ON `${TABLE_NAME}` (`account_id`, `canonical_contact_id`, `canonical_value_id`)"
+          },
+          {
+            "name": "index_android_provider_row_bindings_account_id_canonical_contact_id_provider_epoch_canonical_value_id",
+            "unique": true,
+            "columnNames": [
+              "account_id",
+              "canonical_contact_id",
+              "provider_epoch",
+              "canonical_value_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_android_provider_row_bindings_account_id_canonical_contact_id_provider_epoch_canonical_value_id` ON `${TABLE_NAME}` (`account_id`, `canonical_contact_id`, `provider_epoch`, `canonical_value_id`)"
+          },
+          {
+            "name": "index_android_provider_row_bindings_account_id_canonical_contact_id_provider_epoch_raw_contact_locator_data_row_locator_role",
+            "unique": true,
+            "columnNames": [
+              "account_id",
+              "canonical_contact_id",
+              "provider_epoch",
+              "raw_contact_locator",
+              "data_row_locator",
+              "role"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_android_provider_row_bindings_account_id_canonical_contact_id_provider_epoch_raw_contact_locator_data_row_locator_role` ON `${TABLE_NAME}` (`account_id`, `canonical_contact_id`, `provider_epoch`, `raw_contact_locator`, `data_row_locator`, `role`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "android_projection_ledger",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_contact_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "canonical_contact_id"
+            ]
+          },
+          {
+            "table": "android_provider_identity_owners",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_contact_id",
+              "canonical_value_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "canonical_contact_id",
+              "canonical_value_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_projection_baselines",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_contact_id` TEXT NOT NULL, `fingerprint` TEXT NOT NULL, `encoded_snapshot` BLOB NOT NULL, PRIMARY KEY(`account_id`, `canonical_contact_id`), FOREIGN KEY(`account_id`, `canonical_contact_id`) REFERENCES `android_projection_ledger`(`account_id`, `canonical_contact_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalContactId",
+            "columnName": "canonical_contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fingerprint",
+            "columnName": "fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encodedSnapshot",
+            "columnName": "encoded_snapshot",
+            "affinity": "BLOB",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_contact_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "android_projection_ledger",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_contact_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "canonical_contact_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_group_projection_ledger",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_group_id` TEXT NOT NULL, `revision` INTEGER NOT NULL, `provider_epoch` INTEGER NOT NULL, `group_row_locator` INTEGER, `provider_version` INTEGER, `source_identity` TEXT, `canonical_projection_fingerprint` TEXT, `android_baseline_fingerprint` TEXT, `pending_projection_fingerprint` TEXT, `projection_state` TEXT NOT NULL, `ingestion_state` TEXT NOT NULL, `tombstone_state` TEXT NOT NULL, `adoption_state` TEXT NOT NULL, PRIMARY KEY(`account_id`, `canonical_group_id`), FOREIGN KEY(`account_id`) REFERENCES `android_projection_accounts`(`account_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`account_id`, `canonical_group_id`) REFERENCES `contact_groups`(`account_id`, `id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalGroupId",
+            "columnName": "canonical_group_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerEpoch",
+            "columnName": "provider_epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupRowLocator",
+            "columnName": "group_row_locator",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "providerVersion",
+            "columnName": "provider_version",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sourceIdentity",
+            "columnName": "source_identity",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "canonicalProjectionFingerprint",
+            "columnName": "canonical_projection_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "androidBaselineFingerprint",
+            "columnName": "android_baseline_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pendingProjectionFingerprint",
+            "columnName": "pending_projection_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "projectionState",
+            "columnName": "projection_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ingestionState",
+            "columnName": "ingestion_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tombstoneState",
+            "columnName": "tombstone_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "adoptionState",
+            "columnName": "adoption_state",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_group_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_android_group_projection_ledger_account_id_provider_epoch_group_row_locator",
+            "unique": true,
+            "columnNames": [
+              "account_id",
+              "provider_epoch",
+              "group_row_locator"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_android_group_projection_ledger_account_id_provider_epoch_group_row_locator` ON `${TABLE_NAME}` (`account_id`, `provider_epoch`, `group_row_locator`)"
+          },
+          {
+            "name": "index_android_group_projection_ledger_account_id_source_identity",
+            "unique": true,
+            "columnNames": [
+              "account_id",
+              "source_identity"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_android_group_projection_ledger_account_id_source_identity` ON `${TABLE_NAME}` (`account_id`, `source_identity`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "android_projection_accounts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id"
+            ],
+            "referencedColumns": [
+              "account_id"
+            ]
+          },
+          {
+            "table": "contact_groups",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_group_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_group_projection_baselines",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_group_id` TEXT NOT NULL, `fingerprint` TEXT NOT NULL, `encoded_snapshot` BLOB NOT NULL, PRIMARY KEY(`account_id`, `canonical_group_id`), FOREIGN KEY(`account_id`, `canonical_group_id`) REFERENCES `android_group_projection_ledger`(`account_id`, `canonical_group_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalGroupId",
+            "columnName": "canonical_group_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fingerprint",
+            "columnName": "fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encodedSnapshot",
+            "columnName": "encoded_snapshot",
+            "affinity": "BLOB",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_group_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "android_group_projection_ledger",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_group_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "canonical_group_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_group_membership_projection_ledger",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_contact_id` TEXT NOT NULL, `revision` INTEGER NOT NULL, `provider_epoch` INTEGER NOT NULL, `raw_contact_locator` INTEGER, `preferred_email_value_id` TEXT, `canonical_projection_fingerprint` TEXT, `android_baseline_fingerprint` TEXT, `pending_projection_fingerprint` TEXT, `projection_state` TEXT NOT NULL, `ingestion_state` TEXT NOT NULL, PRIMARY KEY(`account_id`, `canonical_contact_id`), FOREIGN KEY(`account_id`, `canonical_contact_id`) REFERENCES `android_projection_ledger`(`account_id`, `canonical_contact_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalContactId",
+            "columnName": "canonical_contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerEpoch",
+            "columnName": "provider_epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawContactLocator",
+            "columnName": "raw_contact_locator",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "preferredEmailValueId",
+            "columnName": "preferred_email_value_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "canonicalProjectionFingerprint",
+            "columnName": "canonical_projection_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "androidBaselineFingerprint",
+            "columnName": "android_baseline_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pendingProjectionFingerprint",
+            "columnName": "pending_projection_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "projectionState",
+            "columnName": "projection_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ingestionState",
+            "columnName": "ingestion_state",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_contact_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_android_group_membership_projection_ledger_account_id_provider_epoch_raw_contact_locator",
+            "unique": true,
+            "columnNames": [
+              "account_id",
+              "provider_epoch",
+              "raw_contact_locator"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_android_group_membership_projection_ledger_account_id_provider_epoch_raw_contact_locator` ON `${TABLE_NAME}` (`account_id`, `provider_epoch`, `raw_contact_locator`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "android_projection_ledger",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_contact_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "canonical_contact_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_group_membership_baselines",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_contact_id` TEXT NOT NULL, `fingerprint` TEXT NOT NULL, `encoded_snapshot` BLOB NOT NULL, PRIMARY KEY(`account_id`, `canonical_contact_id`), FOREIGN KEY(`account_id`, `canonical_contact_id`) REFERENCES `android_group_membership_projection_ledger`(`account_id`, `canonical_contact_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalContactId",
+            "columnName": "canonical_contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fingerprint",
+            "columnName": "fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encodedSnapshot",
+            "columnName": "encoded_snapshot",
+            "affinity": "BLOB",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_contact_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "android_group_membership_projection_ledger",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_contact_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "canonical_contact_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_group_membership_commit_receipts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_contact_id` TEXT NOT NULL, `provider_epoch` INTEGER NOT NULL, `expected_account_revision` INTEGER NOT NULL, `expected_membership_ledger_revision` INTEGER NOT NULL, `committed_account_revision` INTEGER NOT NULL, `committed_membership_ledger_revision` INTEGER NOT NULL, `command_fingerprint` TEXT NOT NULL, PRIMARY KEY(`account_id`, `canonical_contact_id`), FOREIGN KEY(`account_id`, `canonical_contact_id`) REFERENCES `android_group_membership_projection_ledger`(`account_id`, `canonical_contact_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalContactId",
+            "columnName": "canonical_contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerEpoch",
+            "columnName": "provider_epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedAccountRevision",
+            "columnName": "expected_account_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedMembershipLedgerRevision",
+            "columnName": "expected_membership_ledger_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "committedAccountRevision",
+            "columnName": "committed_account_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "committedMembershipLedgerRevision",
+            "columnName": "committed_membership_ledger_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "commandFingerprint",
+            "columnName": "command_fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_contact_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "android_group_membership_projection_ledger",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_contact_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "canonical_contact_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_group_observation_commit_receipts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_group_id` TEXT NOT NULL, `provider_epoch` INTEGER NOT NULL, `expected_account_revision` INTEGER NOT NULL, `expected_group_ledger_revision` INTEGER NOT NULL, `committed_account_revision` INTEGER NOT NULL, `committed_group_ledger_revision` INTEGER NOT NULL, `command_fingerprint` TEXT NOT NULL, `post_state_fingerprint` TEXT NOT NULL, PRIMARY KEY(`account_id`, `canonical_group_id`), FOREIGN KEY(`account_id`, `canonical_group_id`) REFERENCES `android_group_projection_ledger`(`account_id`, `canonical_group_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalGroupId",
+            "columnName": "canonical_group_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerEpoch",
+            "columnName": "provider_epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedAccountRevision",
+            "columnName": "expected_account_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedGroupLedgerRevision",
+            "columnName": "expected_group_ledger_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "committedAccountRevision",
+            "columnName": "committed_account_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "committedGroupLedgerRevision",
+            "columnName": "committed_group_ledger_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "commandFingerprint",
+            "columnName": "command_fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "postStateFingerprint",
+            "columnName": "post_state_fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_group_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "android_group_projection_ledger",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_group_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "canonical_group_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_unified_observation_commit_receipts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_contact_id` TEXT NOT NULL, `provider_epoch` INTEGER NOT NULL, `raw_contact_locator` INTEGER NOT NULL, `raw_contact_version` INTEGER NOT NULL, `expected_account_revision` INTEGER NOT NULL, `committed_account_revision` INTEGER NOT NULL, `committed_contact_ledger_revision` INTEGER NOT NULL, `committed_membership_ledger_revision` INTEGER NOT NULL, `command_fingerprint` TEXT NOT NULL, `post_state_fingerprint` TEXT NOT NULL, PRIMARY KEY(`account_id`, `canonical_contact_id`), FOREIGN KEY(`account_id`, `canonical_contact_id`) REFERENCES `android_projection_ledger`(`account_id`, `canonical_contact_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalContactId",
+            "columnName": "canonical_contact_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerEpoch",
+            "columnName": "provider_epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawContactLocator",
+            "columnName": "raw_contact_locator",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawContactVersion",
+            "columnName": "raw_contact_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedAccountRevision",
+            "columnName": "expected_account_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "committedAccountRevision",
+            "columnName": "committed_account_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "committedContactLedgerRevision",
+            "columnName": "committed_contact_ledger_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "committedMembershipLedgerRevision",
+            "columnName": "committed_membership_ledger_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "commandFingerprint",
+            "columnName": "command_fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "postStateFingerprint",
+            "columnName": "post_state_fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_contact_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "android_projection_ledger",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_contact_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "canonical_contact_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "android_group_provider_write_journal",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_id` TEXT NOT NULL, `canonical_group_id` TEXT NOT NULL, `android_account_name` TEXT NOT NULL, `provider_epoch` INTEGER NOT NULL, `operation` TEXT NOT NULL, `state` TEXT NOT NULL, `expected_account_revision` INTEGER NOT NULL, `expected_canonical_group_revision` INTEGER NOT NULL, `expected_group_ledger_revision` INTEGER NOT NULL, `expected_group_row_locator` INTEGER, `expected_provider_version` INTEGER, `expected_source_identity` TEXT, `source_identity_after_write` TEXT, `expected_deleted` INTEGER NOT NULL, `desired_semantic_fingerprint` TEXT, `desired_snapshot_integrity_fingerprint` TEXT, `desired_snapshot` BLOB, `command_fingerprint` TEXT NOT NULL, `result_group_row_locator` INTEGER, `result_provider_version` INTEGER, `result_source_identity` TEXT, `result_deleted` INTEGER, `result_provider_state_fingerprint` TEXT, `completed_account_revision` INTEGER, `completed_group_ledger_revision` INTEGER, PRIMARY KEY(`account_id`, `canonical_group_id`), FOREIGN KEY(`account_id`, `canonical_group_id`) REFERENCES `android_group_projection_ledger`(`account_id`, `canonical_group_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalGroupId",
+            "columnName": "canonical_group_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "androidAccountName",
+            "columnName": "android_account_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerEpoch",
+            "columnName": "provider_epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "operation",
+            "columnName": "operation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedAccountRevision",
+            "columnName": "expected_account_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedCanonicalGroupRevision",
+            "columnName": "expected_canonical_group_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedGroupLedgerRevision",
+            "columnName": "expected_group_ledger_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedGroupRowLocator",
+            "columnName": "expected_group_row_locator",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "expectedProviderVersion",
+            "columnName": "expected_provider_version",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "expectedSourceIdentity",
+            "columnName": "expected_source_identity",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceIdentityAfterWrite",
+            "columnName": "source_identity_after_write",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "expectedDeleted",
+            "columnName": "expected_deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "desiredSemanticFingerprint",
+            "columnName": "desired_semantic_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "desiredSnapshotIntegrityFingerprint",
+            "columnName": "desired_snapshot_integrity_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "desiredSnapshot",
+            "columnName": "desired_snapshot",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "commandFingerprint",
+            "columnName": "command_fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resultGroupRowLocator",
+            "columnName": "result_group_row_locator",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "resultProviderVersion",
+            "columnName": "result_provider_version",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "resultSourceIdentity",
+            "columnName": "result_source_identity",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "resultDeleted",
+            "columnName": "result_deleted",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "resultProviderStateFingerprint",
+            "columnName": "result_provider_state_fingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "completedAccountRevision",
+            "columnName": "completed_account_revision",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "completedGroupLedgerRevision",
+            "columnName": "completed_group_ledger_revision",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_id",
+            "canonical_group_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_android_group_provider_write_journal_account_id_state",
+            "unique": false,
+            "columnNames": [
+              "account_id",
+              "state"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_android_group_provider_write_journal_account_id_state` ON `${TABLE_NAME}` (`account_id`, `state`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "android_group_projection_ledger",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "account_id",
+              "canonical_group_id"
+            ],
+            "referencedColumns": [
+              "account_id",
+              "canonical_group_id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '06c4b1c5bf2596b971b1e65a8e7c97ee')"
+    ]
+  }
+}

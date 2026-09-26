@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "boundaries",
+  "contacts": [],
+  "groups": [],
+  "negative": [
+    {
+      "id": "N01",
+      "cases": [
+        "UT-04",
+        "SW-04",
+        "FT-09"
+      ],
+      "expected": "reject",
+      "vCard": "BEGIN:VCARD\nVERSION:4.0\nFN:CTK-QA N01\nNOTE;VALUE=text;VALUE=uri:conflict\nEND:VCARD\n"
+    },
+    {
+      "id": "N02",
+      "cases": [
+        "UT-04",
+        "SW-04",
+        "FT-09"
+      ],
+      "expected": "reject",
+      "vCard": "BEGIN:VCARD\nVERSION:4.0\nFN:CTK-QA N02\nEMAIL;PREF=1;PREF=2:n02@example.test\nEND:VCARD\n"
+    },
+    {
+      "id": "N03",
+      "cases": [
+        "UT-04",
+        "SW-12",
+        "FT-26"
+      ],
+      "expected": "reject",
+      "vCard": "BEGIN:VCARD\nVERSION:4.0\nFN:CTK-QA N03\nBEGIN:VCARD\nVERSION:4.0\nFN:Nested\nEND:VCARD\n"
+    }
+  ],
+  "loadProfiles": [
+    {
+      "id": "load-300",
+      "contacts": 300,
+      "groups": 20
+    },
+    {
+      "id": "load-5000",
+      "contacts": 5000,
+      "groups": 200
+    }
+  ]
+}

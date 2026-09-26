@@ -1,0 +1,6 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-010
+FN:Local Date Fixture
+X-CONTAKO-CUSTOM-DATE;X-LABEL=Jour-spécial:--07-14
+END:VCARD

@@ -1,0 +1,6 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-013-duplicate-parameters
+FN:Duplicate Parameters
+EMAIL;PREF=1;PREF=2:duplicate@example.test
+END:VCARD

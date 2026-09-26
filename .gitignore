@@ -1,0 +1,40 @@
+# IDE and local Android configuration
+.idea/
+*.iml
+local.properties
+.gradle/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Credentials and signing material
+.env
+.env.*
+secrets.properties
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+google-services.json
+
+# Local diagnostics and OS metadata
+*.log
+*.hprof
+Thumbs.db
+.DS_Store
+
+# Local repository recovery archives (never publish or remove during builds)
+.repository-backups/
+__pycache__/
+*.pyc
+
+# Local audit reports (keep tooling and product documentation tracked)
+/docs/AUDIT*.md
+/docs/audit*.md
+
+# Private operator instructions and local agent working notes
+AGENTS.local.md
+AGENTS.override.md
+.agent-local/

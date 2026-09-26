@@ -1,0 +1,20 @@
+{
+  "Contacts": [
+    {
+      "Cards": [
+        {
+          "Type": 3,
+          "Data": "encrypted-card",
+          "Signature": "encrypted-signature"
+        },
+        {
+          "Type": 2,
+          "Data": "signed-card",
+          "Signature": "signed-signature"
+        }
+      ]
+    }
+  ],
+  "Overwrite": 0,
+  "Labels": 0
+}

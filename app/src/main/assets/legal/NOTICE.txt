@@ -1,0 +1,10 @@
+Contako is independent software licensed GPL-3.0-or-later.
+
+Corresponding source and build instructions:
+https://github.com/patmanak/contako
+
+Project license and exact third-party notices:
+https://github.com/patmanak/contako/blob/main/LICENSE
+https://github.com/patmanak/contako/tree/main/app/legal
+
+Contako is not affiliated with, endorsed by, or sponsored by Proton AG.

@@ -1,0 +1,351 @@
+{
+  "schemaVersion": 1,
+  "id": "nominal",
+  "contacts": [
+    {
+      "id": "C01",
+      "label": "Minimal named",
+      "displayName": "CTK-QA C01 Minimal named",
+      "cases": [
+        "UT-01",
+        "SW-01",
+        "FT-03",
+        "FT-10",
+        "FT-11",
+        "FT-13",
+        "FT-14",
+        "FT-21"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c01\nFN:CTK-QA C01 Minimal named\nEMAIL;PREF=1:c01@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c01\nN:Nominal;Ada;;;\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Ada",
+        "lastName": "Nominal",
+        "emails": [
+          "c01@example.test"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": "C02",
+      "label": "Display only",
+      "displayName": "CTK-QA C02 Display only",
+      "cases": [
+        "UT-01",
+        "UT-07",
+        "SW-06",
+        "FT-02",
+        "FT-03",
+        "FT-24"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c02\nFN:CTK-QA C02 Display only\nEMAIL;PREF=1:c02@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c02\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "",
+        "lastName": "",
+        "emails": [
+          "c02@example.test"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": "C03",
+      "label": "Distinct alias",
+      "displayName": "CTK-QA C03 Distinct alias",
+      "cases": [
+        "UT-01",
+        "UT-03",
+        "UT-07",
+        "SW-03",
+        "SW-06",
+        "SW-08",
+        "FT-04",
+        "FT-05",
+        "FT-06",
+        "FT-07",
+        "FT-14",
+        "FT-17",
+        "FT-23",
+        "FT-24",
+        "FT-25"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c03\nFN:CTK-QA C03 Distinct alias\nITEM1.EMAIL;TYPE=home;PREF=1:c03.home@example.test\nITEM2.EMAIL;TYPE=work;PREF=2:c03.work@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c03\nN:River;Nora;Middle;Dr;Jr\nNOTE;PREF=1:Primary note\nNOTE;PREF=2:Secondary note\nTEL;TYPE=cell:+12025550103\nEND:VCARD\n"
+        },
+        {
+          "kind": "ClearText",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c03\nITEM1.CATEGORIES:G01,G02\nITEM2.CATEGORIES:G03\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Nora",
+        "lastName": "River",
+        "emails": [
+          "c03.home@example.test",
+          "c03.work@example.test"
+        ],
+        "notes": [
+          "Primary note",
+          "Secondary note"
+        ]
+      }
+    },
+    {
+      "id": "C04",
+      "label": "Rich imported",
+      "displayName": "CTK-QA C04 Rich imported",
+      "cases": [
+        "UT-03",
+        "UT-05",
+        "UT-06",
+        "SW-04",
+        "SW-07",
+        "FT-04",
+        "FT-05",
+        "FT-08",
+        "FT-09",
+        "FT-15",
+        "FT-20",
+        "FT-21",
+        "FT-26"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c04\nFN:CTK-QA C04 Rich imported\nITEM1.EMAIL;TYPE=home;PREF=1;X-KEEP=home:c04.home@example.test\nITEM2.EMAIL;TYPE=work;PREF=2:c04.work@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c04\nN:D’Aubépine-Meadow;Alex-Élie;Robin;Dr;III\nNICKNAME:Lex\nORG:Atelier fictif Écureuil;Qualité\nTITLE:Responsable qualité – essais\nROLE:Référent des données fictives\nTEL;TYPE=work:+12025550104\nADR;TYPE=work:Boîte QA;Bâtiment β;12 rue Imaginaire;Cité Test;Région QA;00000;Pays fictif\nBDAY:20000229\nANNIVERSARY:20200229\nGENDER:F;Invented identity\nLANG:fr\nTZ:Europe/Paris\nNOTE;PREF=1:First line\\nSecond line\nNOTE;PREF=2:Hidden secondary note\nX-CONTAKO-QA;X-KEEP=keep:preserve-me\nPHOTO;VALUE=uri;MEDIATYPE=image/png:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=\nTEL;TYPE=home:+12025550144\nTEL;TYPE=cell:+12025550145\nADR;TYPE=home:;Étage 2;7 allée Fictive;Ville Démo;Région Test;00001;Pays fictif\nURL;TYPE=work:https://atelier.example.test/équipe\nRELATED;TYPE=friend;VALUE=text:Camille Fictif\nEND:VCARD\n"
+        },
+        {
+          "kind": "ClearText",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c04\nITEM1.CATEGORIES:G01\nITEM2.CATEGORIES:G02,G03\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Alex-Élie",
+        "lastName": "D’Aubépine-Meadow",
+        "emails": [
+          "c04.home@example.test",
+          "c04.work@example.test"
+        ],
+        "notes": [
+          "First line\nSecond line",
+          "Hidden secondary note"
+        ],
+        "values": {
+          "PHONE": [
+            "+12025550104",
+            "+12025550144",
+            "+12025550145"
+          ],
+          "TITLE": [
+            "Responsable qualité – essais"
+          ],
+          "ROLE": [
+            "Référent des données fictives"
+          ],
+          "URL": [
+            "https://atelier.example.test/équipe"
+          ]
+        }
+      },
+      "preserved": [
+        "X-CONTAKO-QA;X-KEEP=keep:preserve-me"
+      ]
+    },
+    {
+      "id": "C12",
+      "label": "Élodie Łukasz 東京",
+      "displayName": "CTK-QA C12 Élodie Łukasz 東京",
+      "cases": [
+        "UT-02",
+        "UT-03",
+        "SW-11",
+        "FT-02",
+        "FT-04",
+        "FT-16",
+        "FT-19",
+        "FT-25"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c12\nFN:CTK-QA C12 Élodie Łukasz 東京\nEMAIL;TYPE=x-qa-custom:c12@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c12\nN:Łukasz;Élodie;;;\nNICKNAME:東京\nORG:Invented International QA\nNOTE:Été à Noël : cœur\\, naïve\\, façade — 東京 / العربية / Ελληνικά / 🐙\\nApostrophes l’été et d'essai \\; virgule\\, barre \\\\ \\; é et é distincts.\\nDonnées fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. \nTEL;TYPE=x-qa-custom:+12025550112\nTITLE:Chargée d’essais internationaux\nADR;TYPE=home:;Étage β;3 rue Fictive;Cité Imaginaire;Région Démo;00000;Pays fictif\nURL:https://unicode.example.test/東京\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Élodie",
+        "lastName": "Łukasz",
+        "emails": [
+          "c12@example.test"
+        ],
+        "notes": [
+          "Été à Noël : cœur, naïve, façade — 東京 / العربية / Ελληνικά / 🐙\nApostrophes l’été et d'essai ; virgule, barre \\ ; é et é distincts.\nDonnées fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. Données fictives très longues pour contrôler le repli UTF-8 et la conservation. "
+        ],
+        "values": {
+          "PHONE": [
+            "+12025550112"
+          ],
+          "TITLE": [
+            "Chargée d’essais internationaux"
+          ],
+          "URL": [
+            "https://unicode.example.test/東京"
+          ]
+        }
+      }
+    },
+    {
+      "id": "C13",
+      "label": "No email",
+      "displayName": "CTK-QA C13 No email",
+      "cases": [
+        "UT-01",
+        "UT-12",
+        "SW-03",
+        "FT-03",
+        "FT-05",
+        "FT-18"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c13\nFN:CTK-QA C13 No email\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c13\nN:NoEmail;Case;;;\nTEL;TYPE=home:+12025550113\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Case",
+        "lastName": "NoEmail",
+        "emails": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "C14",
+      "label": "Overlap source",
+      "displayName": "CTK-QA C14 Overlap source",
+      "cases": [
+        "UT-07",
+        "SW-06",
+        "SW-07",
+        "FT-07",
+        "FT-24"
+      ],
+      "liveImport": false,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c14\nFN:CTK-QA C14 Overlap source\nEMAIL:c03.home@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c14\nN:Different;Robin;;;\nNOTE:Other-source comparison seed\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Robin",
+        "lastName": "Different",
+        "emails": [
+          "c03.home@example.test"
+        ],
+        "notes": [
+          "Other-source comparison seed"
+        ]
+      }
+    }
+  ],
+  "groups": [
+    {
+      "id": "G01",
+      "name": "CTK-QA G01 Home",
+      "color": "#8080FF",
+      "members": [
+        [
+          "C03",
+          "c03.home@example.test"
+        ],
+        [
+          "C04",
+          "c04.home@example.test"
+        ]
+      ]
+    },
+    {
+      "id": "G02",
+      "name": "CTK-QA G02 Équipe – 東京",
+      "color": "#8080FF",
+      "members": [
+        [
+          "C03",
+          "c03.home@example.test"
+        ],
+        [
+          "C04",
+          "c04.work@example.test"
+        ]
+      ]
+    },
+    {
+      "id": "G03",
+      "name": "CTK-QA G03 Secondary",
+      "color": "#8080FF",
+      "members": [
+        [
+          "C03",
+          "c03.work@example.test"
+        ],
+        [
+          "C04",
+          "c04.work@example.test"
+        ]
+      ]
+    },
+    {
+      "id": "G04",
+      "name": "CTK-QA G04 Empty",
+      "color": "#8080FF",
+      "members": []
+    }
+  ],
+  "negative": []
+}

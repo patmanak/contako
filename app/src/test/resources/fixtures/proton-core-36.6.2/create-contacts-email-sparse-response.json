@@ -1,0 +1,27 @@
+{
+  "Code": 1000,
+  "Responses": [
+    {
+      "Index": 0,
+      "Response": {
+        "Code": 1000,
+        "Contact": {
+          "ID": "fixture-contact-id",
+          "Name": "Fixture Contact",
+          "ContactEmails": [
+            {
+              "ID": "fixture-email-id",
+              "Name": "Fixture Contact",
+              "Email": "fixture@example.test",
+              "Defaults": 1,
+              "Order": 0,
+              "ContactID": "fixture-contact-id",
+              "CanonicalEmail": "fixture@example.test",
+              "IsProton": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

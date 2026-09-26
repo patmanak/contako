@@ -1,0 +1,6 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-009
+FN:Date Fixture
+X-CONTAKO-DATE-CANARY;X-KEEP=yes:opaque-date-marker
+END:VCARD

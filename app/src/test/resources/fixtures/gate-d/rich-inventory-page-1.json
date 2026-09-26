@@ -1,0 +1,16 @@
+{
+  "Code": 1000,
+  "Total": 2,
+  "Contacts": [
+    {
+      "ID": "fixture-contact-2",
+      "Name": null,
+      "UID": "fixture-uid-2",
+      "Size": 456,
+      "CreateTime": 101,
+      "ModifyTime": 201,
+      "LabelIDs": [],
+      "ContactEmails": []
+    }
+  ]
+}

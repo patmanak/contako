@@ -1,0 +1,13 @@
+{
+  "Code": 1000,
+  "Total": 1,
+  "Contacts": [
+    {
+      "ID": "fixture-contact-missing-version",
+      "Name": "Missing version",
+      "UID": "fixture-uid-missing",
+      "Size": 1,
+      "ContactEmails": []
+    }
+  ]
+}

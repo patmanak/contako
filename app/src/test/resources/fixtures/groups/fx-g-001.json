@@ -1,0 +1,1 @@
+{"id":"FX-G-001","groups":[{"id":"g-primary","name":"Preferred","color":"#123456","members":["contact-a:email-preferred"]}],"contacts":[{"id":"contact-a","emails":[{"id":"email-secondary","pref":2},{"id":"email-preferred","pref":1}]}]}

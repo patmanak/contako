@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "assets": [
+    {
+      "id": "AST-003",
+      "purpose": "adaptive launcher mascot",
+      "runtime": "drawable-nodpi/contako_mascot_v2.png",
+      "sha256": "D1CC2C70589DD66AE42C05FE35BC105DC9457033559183C4E4C1FB3BCB439094",
+      "provenance": "OpenAI built-in image generation, 2026-09-24; transparent raster redraw; prompt and references in app/design/brand/README.md",
+      "fallback": "Contako"
+    },
+    {
+      "id": "AST-001",
+      "purpose": "wordmark light",
+      "runtime": "drawable-nodpi/contako_brand_light.png",
+      "sha256": "80E2FC7183C0552E6DA09002A6719C2859E14E96ACB0EB46AE53A07B005E1902",
+      "provenance": "OpenAI built-in transparent kawaii redraw, 2026-09-24; prompt in app/design/brand/wordmarks/README.md",
+      "fallback": "Contako - Contacts for Proton"
+    },
+    {
+      "id": "AST-002",
+      "purpose": "wordmark dark",
+      "runtime": "drawable-nodpi/contako_brand_dark.png",
+      "sha256": "3B5F8C89474E6FBE97269A91D41E6733223F30EF83891485A1F1A6A82A1EDC12",
+      "provenance": "OpenAI built-in transparent dark edit of approved light wordmark, 2026-09-24; prompt in app/design/brand/wordmarks/DARK_PROMPT.md",
+      "fallback": "Contako - Contacts for Proton"
+    },
+    {
+      "id": "AST-005",
+      "purpose": "Proton attribution",
+      "runtime": "drawable-nodpi/proton_logo.png",
+      "sha256": "DF93AA5523E5388362A592D1D261BA9E3C09CE4CD393E45F32BF2100019BCA1C",
+      "provenance": "third-party mark shown under D-020 with prominent unofficial-project notice; removable on request",
+      "fallback": "Works with Proton Contacts"
+    },
+    {
+      "id": "AST-007",
+      "purpose": "creator credit",
+      "runtime": "drawable-nodpi/patmanak_logo.png",
+      "sha256": "18D596C54C97ED8F9106D86B6EB9A6076F51C6C537A8D2ABB770EC8AC8415AA6",
+      "provenance": "owner mark, supplied from the prototype",
+      "fallback": "Created by Patmanak"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:allowBackup="false"
+        android:label="Contako hostile security fixture"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <receiver
+            android:name=".HostileProbeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.patmanak.contako.hostile.RUN" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

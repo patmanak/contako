@@ -1,0 +1,3 @@
+-dontwarn javax.lang.model.element.Modifier
+-keep class androidx.tracing.** { *; }
+-keep class androidx.activity.** { *; }

@@ -1,0 +1,266 @@
+{
+  "schemaVersion": 1,
+  "id": "compatibility",
+  "contacts": [
+    {
+      "id": "C05",
+      "label": "Legacy clear public",
+      "displayName": "CTK-QA C05 Legacy clear public",
+      "cases": [
+        "UT-03",
+        "UT-04",
+        "SW-04",
+        "FT-04",
+        "FT-09"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "ClearText",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c05\nFN:CTK-QA C05 Legacy clear public\nITEM1.EMAIL;TYPE=home;X-KEEP=legacy:c05@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "Encrypted",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c05\nN:Legacy;Case;;;\nNOTE:Legacy private note\nEND:VCARD\n"
+        },
+        {
+          "kind": "ClearText",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c05\nITEM1.CATEGORIES:G01\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Case",
+        "lastName": "Legacy",
+        "emails": [
+          "c05@example.test"
+        ],
+        "notes": [
+          "Legacy private note"
+        ]
+      }
+    },
+    {
+      "id": "C06",
+      "label": "Encrypted unsigned",
+      "displayName": "CTK-QA C06 Encrypted unsigned",
+      "cases": [
+        "UT-03",
+        "SW-05",
+        "FT-09",
+        "FT-26"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c06\nFN:CTK-QA C06 Encrypted unsigned\nEMAIL;PREF=1:c06@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "Encrypted",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c06\nN:Unsigned;Case;;;\nNOTE:Unsigned private note\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Case",
+        "lastName": "Unsigned",
+        "emails": [
+          "c06@example.test"
+        ],
+        "notes": [
+          "Unsigned private note"
+        ]
+      }
+    },
+    {
+      "id": "C07",
+      "label": "Equivalent parameters",
+      "displayName": "CTK-QA C07 Equivalent parameters",
+      "cases": [
+        "UT-04",
+        "SW-04",
+        "FT-09"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c07\nFN:CTK-QA C07 Equivalent parameters\nEMAIL;PREF=1;PREF=01;TYPE=home:c07@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c07\nN:Repeated;Case;;;\nNOTE;VALUE=text;VALUE=TEXT:Equivalent parameters\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Case",
+        "lastName": "Repeated",
+        "emails": [
+          "c07@example.test"
+        ],
+        "notes": [
+          "Equivalent parameters"
+        ]
+      }
+    },
+    {
+      "id": "C08",
+      "label": "Yearless leap date",
+      "displayName": "CTK-QA C08 Yearless leap date",
+      "cases": [
+        "UT-05",
+        "SW-04",
+        "FT-04",
+        "FT-09"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c08\nFN:CTK-QA C08 Yearless leap date\nEMAIL:c08@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c08\nN:Yearless;Case;;;\nBDAY:--0229\nANNIVERSARY:--1231\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Case",
+        "lastName": "Yearless",
+        "emails": [
+          "c08@example.test"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": "C09",
+      "label": "Imported textual date",
+      "displayName": "CTK-QA C09 Imported textual date",
+      "cases": [
+        "UT-05",
+        "SW-04",
+        "FT-04",
+        "FT-09",
+        "FT-26"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c09\nFN:CTK-QA C09 Imported textual date\nEMAIL:c09@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c09\nN:TextDate;Case;;;\nBDAY;VALUE=text:Early spring\nNOTE:Keep original date spelling\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Case",
+        "lastName": "TextDate",
+        "emails": [
+          "c09@example.test"
+        ],
+        "notes": [
+          "Keep original date spelling"
+        ]
+      }
+    },
+    {
+      "id": "C10",
+      "label": "Legacy binary images",
+      "displayName": "CTK-QA C10 Legacy binary images",
+      "cases": [
+        "UT-06",
+        "SW-04",
+        "SW-07",
+        "FT-08",
+        "FT-20",
+        "FT-26"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c10\nFN:CTK-QA C10 Legacy binary images\nEMAIL:c10@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c10\nN:Binary;Case;;;\nPHOTO;ENCODING=b;TYPE=PNG;VALUE=binary;PREF=1;X-KEEP=photo:iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=\nLOGO;ENCODING=BASE64;MEDIATYPE=image/png:iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=\nNOTE:Image preservation\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Case",
+        "lastName": "Binary",
+        "emails": [
+          "c10@example.test"
+        ],
+        "notes": [
+          "Image preservation"
+        ]
+      }
+    },
+    {
+      "id": "C11",
+      "label": "Remote image references",
+      "displayName": "CTK-QA C11 Remote image references",
+      "cases": [
+        "UT-06",
+        "UT-12",
+        "SW-12",
+        "FT-08",
+        "FT-26"
+      ],
+      "liveImport": true,
+      "cards": [
+        {
+          "kind": "Signed",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c11\nFN:CTK-QA C11 Remote image references\nEMAIL:c11@example.test\nEND:VCARD\n"
+        },
+        {
+          "kind": "EncryptedAndSigned",
+          "vCard": "BEGIN:VCARD\nVERSION:4.0\nUID:ctk-qa-c11\nN:Remote;Case;;;\nPHOTO;VALUE=uri:https://images.example.test/qa-photo.png\nLOGO;VALUE=uri:https://images.example.test/qa-logo.png\nEND:VCARD\n"
+        }
+      ],
+      "expected": {
+        "firstName": "Case",
+        "lastName": "Remote",
+        "emails": [
+          "c11@example.test"
+        ],
+        "notes": []
+      }
+    }
+  ],
+  "groups": [
+    {
+      "id": "G01",
+      "name": "CTK-QA G01 Home",
+      "color": "#8080FF",
+      "members": [
+        [
+          "C05",
+          "c05@example.test"
+        ]
+      ]
+    },
+    {
+      "id": "G02",
+      "name": "CTK-QA G02 Équipe – 東京",
+      "color": "#8080FF",
+      "members": []
+    },
+    {
+      "id": "G03",
+      "name": "CTK-QA G03 Secondary",
+      "color": "#8080FF",
+      "members": []
+    },
+    {
+      "id": "G04",
+      "name": "CTK-QA G04 Empty",
+      "color": "#8080FF",
+      "members": []
+    }
+  ],
+  "negative": []
+}

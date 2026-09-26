@@ -1,0 +1,26 @@
+{
+  "Code": 1000,
+  "Total": 2,
+  "Contacts": [
+    {
+      "ID": "fixture-contact-1",
+      "Name": "Fixture One",
+      "UID": "fixture-uid-1",
+      "Size": 123,
+      "CreateTime": 100,
+      "ModifyTime": 200,
+      "LabelIDs": ["fixture-contact-group"],
+      "ContactEmails": [
+        {
+          "ID": "fixture-email-1",
+          "Name": "Fixture One",
+          "Email": "one@example.test",
+          "ContactID": "fixture-contact-1",
+          "Order": 0,
+          "Defaults": 1,
+          "LabelIDs": ["fixture-email-group"]
+        }
+      ]
+    }
+  ]
+}

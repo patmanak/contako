@@ -1,0 +1,6 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-008
+FN:Primary Note Fixture
+EMAIL;TYPE=WORK:primary-note@example.test
+END:VCARD

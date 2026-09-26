@@ -1,0 +1,6 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-012
+FN:Advanced Fixture
+KEY;VALUE=uri:https://keys.example.test/public.asc
+END:VCARD

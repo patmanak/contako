@@ -1,0 +1,7 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:fx-c-006
+FN:Dr Ada M Lovelace PhD
+EMAIL;TYPE=WORK;PREF=5:work@example.test
+EMAIL;TYPE=HOME;PREF=2:home@example.test
+END:VCARD
