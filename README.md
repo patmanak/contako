@@ -56,7 +56,8 @@ data is stored in the Android application sandbox and projected into Android
 contacts. App-private contacts are deliberately not encrypted separately at
 database level. Credentials use the protected Proton/Android storage lifecycle.
 Android backup and device transfer of application data are disabled.
-See [security](docs/SECURITY.md).
+See the [privacy policy](docs/PRIVACY_POLICY.md) for data use, recipients,
+retention and deletion, and [security](docs/SECURITY.md) for technical safeguards.
 
 Contako is licensed **GPL-3.0-or-later**. See [LICENSE](LICENSE),
 [licensing and provenance](docs/LICENSING.md) and

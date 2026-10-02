@@ -101,6 +101,7 @@
     <string name="about_unofficial">Contako non è affiliato, approvato da, o sponsorizzato da Proton AG.</string>
     <string name="about_version">Versione %1$s</string>
     <string name="about_privacy">Privacy</string>
+    <string name="about_privacy_policy">Informativa sulla privacy</string>
     <string name="about_licenses">Licenze</string>
     <string name="contact_detail_title">Contatto</string>
     <string name="contact_detail_empty">Selezionare un contatto per visualizzare i suoi dettagli.</string>

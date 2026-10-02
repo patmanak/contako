@@ -2990,6 +2990,10 @@ private fun InformationScreen(usage: Boolean) {
             item("privacy") {
                 InfoCard(stringResource(R.string.about_privacy)) {
                     Text(stringResource(R.string.about_privacy_summary))
+                    TextButton(onClick = {
+                        context.launchSafe(Intent(Intent.ACTION_VIEW,
+                            Uri.parse("https://github.com/patmanak/contako/blob/main/docs/PRIVACY_POLICY.md")))
+                    }) { Text(stringResource(R.string.about_privacy_policy)) }
                 }
             }
             item("licenses") {

@@ -17,6 +17,9 @@ Information MUST separate project identity, attribution, privacy and licensing
 (About) from concise features, synchronization behavior and limitations (Usage).
 About and Usage MUST have separate menu entries that open their page directly,
 without intermediate tabs. Back MUST return to the underlying directory context.
+The About privacy section MUST link to the publicly readable
+[Privacy Policy](PRIVACY_POLICY.md) using the system URL handler. This policy and
+the Play Store privacy URL MUST describe the same data practices.
 License details link to the maintained repository documentation; internal audit
 status and duplicated field-help cards do not belong on this screen.
 

@@ -117,4 +117,5 @@ Contako is independent of Proton. It has no analytics, ads or remote crash
 reporting. Local contacts use the app sandbox without separate database encryption;
 system copies can be read by apps with Android contact permission. Application
 backup and device transfer are disabled. A future app lock would not hide these
-system copies from authorized apps. See [Security](SECURITY.md).
+system copies from authorized apps. See the [Privacy Policy](PRIVACY_POLICY.md)
+for data handling and deletion, and [Security](SECURITY.md) for technical safeguards.
