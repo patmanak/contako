@@ -212,3 +212,9 @@ untouched values independently on each peer:
 - For FT-23 sign-out: verify remote revocation is attempted before local session
   destruction; offline cleanup succeeds, but pending local/native intent still
   blocks an unconfirmed discard. Test CAPTCHA renderer loss on an isolated target.
+- For FT-15/FT-07 composite organization rows: save a title without a company,
+  then separately replace the title, add/remove a role and add/remove a company.
+  Include a second save before the first projection completes. Verify exact
+  values and durable linked identities after each save in all peers, restart and
+  repeat a no-change pass. No divergent binding, pending Android copy or false
+  acknowledgement may remain; ownership/version guards MUST stay effective.

@@ -1,7 +1,22 @@
+<p align="center">
+  <img src="app/src/main/res/drawable-nodpi/contako_mascot_v2.png" alt="Contako's purple octopus and contact book" width="120">
+</p>
+
 # Contako
 
 Contako is an independent Android application that synchronizes Proton contacts
 with Android's system contacts and lets you manage them from your phone.
+
+Contako is developed by Patmanak with AI assistance for coding, documentation
+and visual assets.
+
+## A look inside
+
+| Sign in | Your contacts | Contact details |
+| :---: | :---: | :---: |
+| <img src="docs/images/login.png" alt="Contako sign-in screen with the octopus wordmark" width="240"> | <img src="docs/images/contacts.png" alt="Contact list with search and alphabet navigation" width="240"> | <img src="docs/images/contact.png" alt="Amelia Reed's contact card with contact actions and details" width="240"> |
+
+Screenshots show the application interface with fictional contacts.
 
 ## Features
 
@@ -16,8 +31,10 @@ with Android's system contacts and lets you manage them from your phone.
   sanitized diagnostic summary from Sync.
 
 Android 12 or later is required. One Proton account is supported at a time.
-The current application is a testing candidate; see [known limitations](docs/KNOWN_LIMITATIONS.md)
-for known limitations. The internal version is not a declaration of a public release.
+The current source candidate is **0.9.0-RC1**; see the
+[changelog](CHANGELOG.md) and [known limitations](docs/KNOWN_LIMITATIONS.md).
+The Android application version remains 0.9.0; the source tag identifies this
+release candidate, not a final stable release.
 
 ## Using Contako
 
@@ -48,6 +65,13 @@ For project work, read the [development guide](docs/DEVELOPMENT.md).
 
 See [Contributing](CONTRIBUTING.md) for bug reports, improvements and pull requests.
 Report suspected vulnerabilities privately using [the security policy](SECURITY.md).
+
+## Support my work
+
+If you enjoy Contako, you can support my open-source projects and help fund
+development tools and testing equipment. Thank you!
+
+[![Support me on Tipeee](https://img.shields.io/badge/Support_me_on_Tipeee-ED1C24?style=for-the-badge&logo=tipeee&logoColor=white)](https://fr.tipeee.com/patmanak/)
 
 ## Privacy and licensing
 

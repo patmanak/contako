@@ -2,6 +2,14 @@
 
 Features and improvements by version.
 
+## 0.9.0-RC1
+
+- Hardened synchronization, concurrent-edit conflict handling and recovery.
+- Added an in-app privacy-policy link and published data-handling documentation.
+- Illustrated the README with English screenshots and fictional contacts, and
+  added project-support and AI-assistance information.
+- Expanded regression coverage for successive composite organization edits.
+
 ## 0.9.0
 
 - Simplified contact editing with progressive field selection and compact field options.
