@@ -185,6 +185,9 @@ dependencies {
     implementation(libs.proton.key.domain)
     implementation(libs.proton.key.data)
     implementation(libs.proton.crypto.android)
+    // Contact decryption uses the maintained bounded streaming reader from the
+    // same strictly constrained native artifact already selected by Proton Core.
+    implementation(libs.proton.golib)
     implementation(libs.proton.contact.domain)
     implementation(libs.proton.contact.data)
     implementation(libs.proton.label.domain)
@@ -197,6 +200,10 @@ dependencies {
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.room.testing)
+    // Room's migration bundles require this serializer ABI. AGP aligns instrumentation
+    // dependencies to its host APK, so the selected test host must include it too.
+    // Release and preview keep their production dependency graph.
+    add("${contakoTestBuildType}Implementation", libs.kotlinx.serialization.room.test)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.tracing)
     androidTestImplementation(platform(libs.androidx.compose.bom))

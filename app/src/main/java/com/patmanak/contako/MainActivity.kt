@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
     /** Survives recomposition so the launch prompt is shown at most once per activity. */
     private var contactsPermissionRequested = false
     private val contactsPermissionGranted = MutableStateFlow(false)
+    private val openSyncRequested = MutableStateFlow(false)
     private val contactsPermissionAction = MutableStateFlow(ContactsPermissionAction.REQUEST)
     private lateinit var authenticatedSyncLifecycle: AuthenticatedSyncLifecycle
 
@@ -57,6 +58,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        openSyncRequested.value = savedInstanceState?.getBoolean("open-sync-requested")
+            ?: (intent?.action == com.patmanak.contako.android.sync.AndroidSyncActionNotifier.OPEN_SYNC_ACTION)
         contactsPermissionRequested = savedInstanceState?.getBoolean(CONTACTS_PERMISSION_REQUESTED_KEY) == true
         refreshContactsPermissionState()
         val contakoApplication = application as ContakoApplication
@@ -80,6 +83,9 @@ class MainActivity : ComponentActivity() {
                 enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
             }
             ContakoTheme(themeMode = themeMode, systemDarkTheme = systemDarkTheme) {
+                val notificationsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+                    application.refreshSyncNotification()
+                }
                 val permissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions(),
                 ) {
@@ -121,6 +127,7 @@ class MainActivity : ComponentActivity() {
                         // ran on ProtonGateCRuntime's scope, so saved contacts and pending
                         // mutations landed in a partition no sync pass ever drained.
                         accountId = application.protonGateCRuntime.accountScope.value,
+                        deniedGroupOperations = application.protonGateCRuntime.gateD.groups.deniedOperations,
                     ),
                 )
                 val authenticationPort = remember(application) {
@@ -135,6 +142,13 @@ class MainActivity : ComponentActivity() {
                     factory = AuthenticationViewModel.factory(authenticationPort),
                 )
                 val authenticationState by authenticationViewModel.state.collectAsState()
+                val openSync by openSyncRequested.collectAsState()
+                LaunchedEffect(openSync, authenticationState.destination) {
+                    if (openSync && authenticationState.destination == AuthenticationDestination.READY) {
+                        contactsViewModel.selectDestination(com.patmanak.contako.ui.RootDestination.SYNC)
+                        openSyncRequested.value = false
+                    }
+                }
                 val humanVerificationState by application.humanVerification.uiState.collectAsState()
                 var signedInAddress by remember { mutableStateOf<String?>(null) }
                 // The Android account only exists once a Proton account is connected, so it is
@@ -181,6 +195,18 @@ class MainActivity : ComponentActivity() {
                                 if (it == SignOutResult.SignedOut) authenticationViewModel.signOut()
                             }
                         },
+                        onConfigureSyncNotifications = {
+                            val preferences = getPreferences(Context.MODE_PRIVATE)
+                            if (Build.VERSION.SDK_INT >= 33 &&
+                                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+                                !preferences.getBoolean("notifications-requested", false)) {
+                                preferences.edit().putBoolean("notifications-requested", true).apply()
+                                notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                            }
+                        },
                     )
                 } else {
                     AuthenticationScreen(
@@ -197,6 +223,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        (application as ContakoApplication).refreshSyncNotification()
         (application as ContakoApplication).syncSchedulingPolicy.onForegroundChanged(true)
         refreshContactsPermissionState()
         authenticatedSyncLifecycle.onActivityStarted()
@@ -208,8 +235,16 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("open-sync-requested", openSyncRequested.value)
         outState.putBoolean(CONTACTS_PERMISSION_REQUESTED_KEY, contactsPermissionRequested)
         super.onSaveInstanceState(outState)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == com.patmanak.contako.android.sync.AndroidSyncActionNotifier.OPEN_SYNC_ACTION) {
+            openSyncRequested.value = true
+        }
     }
 
     private fun hasContactsPermission(): Boolean = CONTACTS_PERMISSIONS.all {

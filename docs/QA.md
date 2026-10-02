@@ -58,13 +58,6 @@ summary with exact build identity. Do not commit every attempt, screenshot,
 installation transcript or obsolete per-campaign report. Ordinary local commits
 preserve cleanup checkpoints; history replacement is a separate operation.
 
-## Current dataset finding
-
-The ignored canonical-name case in RegressionDatasetTest is documented in
-[Known limitations](KNOWN_LIMITATIONS.md#contact-synchronization). Its passing
-structured-value checks do not qualify canonical name selection. Do not reorder
-fixtures or weaken assertions to turn an unresolved reproduction into a pass.
-
 ## Retained executable support
 
 Existing meaningful JVM/instrumentation tests and versioned wire-format fixtures

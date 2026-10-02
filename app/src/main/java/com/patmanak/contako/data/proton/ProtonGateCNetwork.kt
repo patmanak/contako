@@ -260,6 +260,8 @@ internal object GateDRawResponseLimits {
             path == listOf("contacts", "v4", "contacts", "emails")) -> CONTACT_BYTES
         method == "PUT" && (path == listOf("contacts", "v4", "contacts", "emails", "label") ||
             path == listOf("contacts", "v4", "contacts", "emails", "unlabel")) -> MUTATION_BYTES
+        path.take(3) == listOf("contacts", "v4", "contacts") -> CONTACT_BYTES
+        path.take(3) == listOf("core", "v4", "labels") -> 4 * 1_024 * 1_024
         else -> null
     }
 }

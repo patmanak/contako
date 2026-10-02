@@ -5,7 +5,7 @@
     "dependencyDescriptors":  [
                                   {
                                       "file":  "app/build.gradle.kts",
-                                      "sha256":  "01B246D257CD2ACABCC17CDBBCF16FDB7F410C12865B839AF65D2E08E4056879"
+                                      "sha256":  "8B8E8C76A2F63DE7F3F6DB9359FE33DA891A323BFB0D5222EB589AE6F4A45CDF"
                                   },
                                   {
                                       "file":  "app/settings.gradle.kts",
@@ -17,7 +17,7 @@
                                   },
                                   {
                                       "file":  "app/gradle/libs.versions.toml",
-                                      "sha256":  "EF42CB12CF254691FB23E0FDEE69D492FC5A3BE26610947E3A5CF87E2DD7171E"
+                                      "sha256":  "4B4C175086ADED927FD95891E1F19AAAE497B7DFE9840944A314FBB99980F010"
                                   },
                                   {
                                       "file":  "app/gradle/wrapper/gradle-wrapper.properties",

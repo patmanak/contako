@@ -52,6 +52,8 @@ import me.proton.core.label.domain.entity.UpdateLabel
 import me.proton.core.label.domain.repository.LabelRemoteDataSource
 import me.proton.core.network.domain.ApiException
 import me.proton.core.network.domain.ApiResult
+import com.patmanak.contako.data.gateway.ProtonContactExistenceGateway
+import com.patmanak.contako.data.gateway.RemoteContactPresence
 
 /** Account identity supplied by the already established Gate C session graph. */
 internal fun interface ProtonReadyUserProvider {
@@ -62,6 +64,10 @@ internal fun interface ProtonReadyUserProvider {
 internal interface ProtonContactRemotePort {
     suspend fun inventory(userId: UserId): List<Contact>
     suspend fun hydrate(userId: UserId, contactId: ContactId): ContactWithCards
+    suspend fun presence(userId: UserId, contactId: ContactId): RemoteContactPresence {
+        require(hydrate(userId, contactId).contact.id == contactId)
+        return RemoteContactPresence.PRESENT
+    }
     suspend fun create(userId: UserId, cards: List<ContactCard>): Contact
     suspend fun update(userId: UserId, contactId: ContactId, cards: List<ContactCard>): Contact
     suspend fun delete(userId: UserId, contactId: ContactId)
@@ -94,8 +100,21 @@ internal class ProtonCoreContactRemotePort(
     private val remote: ContactRemoteDataSource,
     private val rawCreate: ProtonRawContactCreateTransport,
     private val createStageObserver: ProtonContactCreateStageObserver = ProtonContactCreateStageObserver { },
+    private val inventoryLoader: suspend (UserId) -> List<Contact> = remote::getAllContacts,
 ) : ProtonContactRemotePort {
-    override suspend fun inventory(userId: UserId): List<Contact> = remote.getAllContacts(userId)
+    override suspend fun inventory(userId: UserId): List<Contact> = inventoryLoader(userId)
+
+    override suspend fun presence(userId: UserId, contactId: ContactId): RemoteContactPresence = try {
+        val found = remote.getContactWithCards(userId, contactId)
+        if (found.contact.id != contactId) throw ProtonMalformedContactResponse()
+        RemoteContactPresence.PRESENT
+    } catch (error: ApiException) {
+        val http = error.error as? ApiResult.Error.Http
+        // Only the structured Proton absence response from this targeted GET is proof.
+        if (http?.httpCode in setOf(400, 404, 422) && http?.proton?.code == me.proton.core.network.domain.ResponseCodes.NOT_EXISTS) {
+            RemoteContactPresence.CONFIRMED_ABSENT
+        } else throw error
+    }
 
     override suspend fun hydrate(userId: UserId, contactId: ContactId): ContactWithCards =
         hydrateMapped(remote, userId, contactId)
@@ -135,7 +154,7 @@ internal class ProtonPublicContactGateway(
     private val pageSize: Int = DEFAULT_PAGE_SIZE,
     private val createStageObserver: ProtonContactCreateStageObserver = ProtonContactCreateStageObserver { },
     private val updateFailureObserver: ProtonContactUpdateFailureObserver = ProtonContactUpdateFailureObserver { _, _, _, _ -> },
-) : ProtonContactInventoryGateway, ProtonVerifiedContactCardGateway, ProtonContactMutationGateway {
+) : ProtonContactInventoryGateway, ProtonVerifiedContactCardGateway, ProtonContactMutationGateway, ProtonContactExistenceGateway {
     private val inventoryMutex = Mutex()
     private var generation = 0L
     private var snapshot: InventorySnapshot? = null
@@ -178,16 +197,15 @@ internal class ProtonPublicContactGateway(
                 requestedCursor = cursor,
                 nextCursor = next,
                 totalCount = active.contacts.size,
-                // Collection-level authority, distinct from per-contact revision metadata. The
-                // maintained public route returns the account's complete contact list in one
-                // successful call, and pages are served from that single immutable snapshot, so
-                // membership of the collection is attested even though entries carry only a local
-                // fingerprint. D-032 needs exactly this to authorize deletion by absence; without
-                // it no ordinary pass could ever plan. D-096 records the decision.
-                snapshotAuthority = ContactInventorySnapshotAuthority.AUTHORITATIVE_REMOTE_REVISION,
+                // Core aggregates independent network pages, not a server snapshot.
+                // Missing IDs require targeted confirmation before deletion.
+                snapshotAuthority = ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY,
             )
         }
     }
+
+    override suspend fun check(account: AccountScope, id: RemoteContactId): GatewayOutcome<RemoteContactPresence> =
+        gatewayCall { remote.presence(requireUser(account), ContactId(id.value)) }
 
     override suspend fun fetch(
         account: AccountScope,

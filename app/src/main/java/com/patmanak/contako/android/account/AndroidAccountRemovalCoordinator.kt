@@ -128,7 +128,9 @@ internal class AndroidAccountRemovalCoordinator(
         }
         platformCleanup.stopScheduledWork(account)
         if (phase == AccountRemovalPhase.PROJECTION_CLEARED_SESSION_PENDING) {
-            if (protonSession.clearLocal(accountScope) !is GatewayOutcome.Success) return false
+            val cleanup = if (removeAndroidAccount) protonSession.clearAfterBestEffortRevocation(accountScope)
+                else protonSession.clearLocal(accountScope)
+            if (cleanup !is GatewayOutcome.Success) return false
             phase = AccountRemovalPhase.PROJECTION_CLEARED.also { checkpoints.save(accountScope, account, it) }
         }
         // Resume checkpoints written by older versions, which cleared the session first.

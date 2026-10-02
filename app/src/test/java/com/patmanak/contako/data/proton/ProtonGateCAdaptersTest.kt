@@ -825,6 +825,17 @@ class ProtonGateCAdaptersTest {
         assertEquals(USER_ID, sessions.lastClearedUser)
     }
 
+    @Test fun appSignOutDoesNotFailLocalCleanupBecauseRevocationIsOffline() = runTest {
+        val core = FakeCore().apply { revokeFailure = IOException("synthetic") }
+        val sessions = FakeSessions().apply { currentUser = USER_ID; currentSession = SESSION_ID }
+        assertTrue(ProtonCoreSessionAdapter(account, core, sessions).clearAfterBestEffortRevocation(account) is GatewayOutcome.Success)
+        assertEquals(listOf(SESSION_ID), core.revokedSessions)
+        assertEquals(listOf(USER_ID), core.lockedUsers)
+        assertEquals(USER_ID, sessions.lastClearedUser)
+        val failed = FakeSessions().apply { currentUser = USER_ID; currentSession = SESSION_ID; clearFailure = IllegalStateException() }
+        assertTrue(ProtonCoreSessionAdapter(account, core, failed).clearAfterBestEffortRevocation(account) is GatewayOutcome.Failure)
+    }
+
     @Test
     fun lockOrLocalClearFailureCannotSkipLocalClearAttempt() = runTest {
         val lockCore = FakeCore().apply { lockFailure = IllegalStateException() }

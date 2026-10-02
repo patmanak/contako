@@ -107,5 +107,25 @@ class GateCInteractiveHumanVerificationTest {
         assertTrue(result.await() === HumanVerificationListener.HumanVerificationResult.Success)
     }
 
+    @Test fun failedRendererGenerationCannotAffectANewChallenge() = runTest {
+        val coordinator = GateCInteractiveHumanVerification()
+        val client = cookieClient("renderer-fixture")
+        val first = async { coordinator.onHumanVerificationNeeded(client,
+            HumanVerificationAvailableMethods(listOf("captcha"), "first")) }
+        runCurrent()
+        val old = coordinator.uiState.value.generation
+        coordinator.failGeneration(old)
+        assertFalse(coordinator.uiState.value.isRequired)
+        assertTrue(first.await() === HumanVerificationListener.HumanVerificationResult.Failure)
+        assertFalse(coordinator.acceptSolution(old, "captcha", "stale"))
+        val next = async { coordinator.onHumanVerificationNeeded(client,
+            HumanVerificationAvailableMethods(listOf("captcha"), "second")) }
+        runCurrent()
+        coordinator.failGeneration(old)
+        assertTrue(coordinator.uiState.value.isRequired)
+        assertTrue(coordinator.acceptSolution(coordinator.uiState.value.generation, "captcha", "current"))
+        assertTrue(next.await() === HumanVerificationListener.HumanVerificationResult.Success)
+    }
+
     private fun cookieClient(value: String) = ClientId.CookieSession(CookieSessionId(value))
 }

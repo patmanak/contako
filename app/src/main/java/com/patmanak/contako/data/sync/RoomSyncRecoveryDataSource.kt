@@ -29,6 +29,17 @@ internal class RoomSyncRecoveryDataSource(
     private val repairStore = RoomFullRepairProgressStore(database)
     private val projectionDao = database.androidProjectionLedgerDao()
     private val outboxDao = database.outboxDao()
+    private val conflicts = com.patmanak.contako.data.local.RoomContactConflictStore(database)
+
+    override fun observeConflicts(accountId: String) = conflicts.observe(boundAccount(accountId).value)
+    override suspend fun loadConflict(accountId: String, contactId: String) = conflicts.detail(boundAccount(accountId).value, contactId)
+    override suspend fun chooseConflict(accountId: String,
+        expected: com.patmanak.contako.domain.sync.ContactConflictSummary,
+        choice: com.patmanak.contako.domain.sync.ContactConflictChoice): Boolean {
+        val queued = conflicts.choose(boundAccount(accountId).value, expected, choice)
+        if (queued) runner.request(SyncTrigger.MUTATION_COMMITTED, SyncScope.INCREMENTAL)
+        return queued
+    }
 
     override fun observeStatus(accountId: String): Flow<SyncDashboardSnapshot?> =
         combine(

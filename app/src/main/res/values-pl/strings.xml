@@ -364,4 +364,22 @@
     <string name="about_privacy_summary">Bez reklam, analizy użytkowania i zdalnego raportowania awarii. Diagnostyka jest eksportowana tylko na żądanie. Dane Contako są wyłączone z kopii zapasowych i transferów Androida.</string>
     <string name="about_license_summary">© 2026 Patmanak · GPL-3.0-or-later.\nContako korzysta z Proton Core, AndroidX i innych bibliotek open source na ich własnych licencjach. Nazwy i logo Proton należą do ich właścicieli.</string>
     <string name="about_license_details">Licencje i autorstwo</string>
+    <string name="error_stale_contact_edit">Ten kontakt zmieniono w innym miejscu. Szkic został zachowany. Otwórz kontakt ponownie przed zastosowaniem zmian.</string>
+    <string name="error_group_operation_unavailable">Proton nie zezwala obecnie na niektóre operacje grupowe na tym koncie. Kontakty można nadal edytować.</string>
+    <string name="sync_alert_title">Powiadomienia o synchronizacji</string>
+    <string name="sync_alert_body">Otwórz Contako, aby sprawdzić problem z synchronizacją.</string>
+    <string name="sync_alert_configure">Konfiguruj powiadomienia o synchronizacji</string>
+    <string name="conflict_title">Równoczesne zmiany</string>
+    <string name="conflict_review">Porównaj wersje</string>
+    <string name="conflict_queued">Wybór zapisany; oczekiwanie na synchronizację</string>
+    <string name="conflict_explanation">Obie wersje są zachowane do zastosowania wyboru. Nowe zmiany wymagają ponownego sprawdzenia.</string>
+    <string name="conflict_refresh">Wersje mogły się zmienić. Wczytaj je ponownie przed wyborem.</string>
+    <string name="conflict_local">Wersja Contako</string>
+    <string name="conflict_proton">Wersja Proton</string>
+    <string name="conflict_keep_local">Zachowaj wersję Contako</string>
+    <string name="conflict_use_proton">Użyj wersji Proton</string>
+    <string name="conflict_deleted">Kontakt oznaczony do usunięcia</string>
+    <string name="conflict_group_pending">Wersja Proton usuwa adres e-mail z oczekującymi zmianami grup. Rozwiąż te przypisania przed jej użyciem.</string>
+    <string name="conflict_remote_deleted">Kontakt został usunięty w Proton. Lokalny szkic jest zachowany; poprzednie porównanie nie rozwiąże usunięcia.</string>
+    <string name="field_structured_name">Nazwa strukturalna</string>
 </resources>

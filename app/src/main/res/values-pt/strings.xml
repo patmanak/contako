@@ -357,4 +357,22 @@
     <string name="about_privacy_summary">Sem publicidade, análise de utilização ou relatórios remotos de falhas. Os diagnósticos só são exportados a pedido. Os dados do Contako são excluídos das cópias de segurança e transferências do Android.</string>
     <string name="about_license_summary">© 2026 Patmanak · GPL-3.0-or-later.\nO Contako utiliza Proton Core, AndroidX e outras bibliotecas de código aberto sob as respetivas licenças. Os nomes e logótipos do Proton pertencem aos seus proprietários.</string>
     <string name="about_license_details">Licenças e atribuições</string>
+    <string name="error_stale_contact_edit">Este contacto foi alterado noutro local. O rascunho foi preservado. Reabra o contacto antes de aplicar as alterações.</string>
+    <string name="error_group_operation_unavailable">O Proton não permite algumas operações de grupos nesta conta. Os contactos continuam editáveis.</string>
+    <string name="sync_alert_title">Alertas de sincronização</string>
+    <string name="sync_alert_body">Abra o Contako para verificar um problema de sincronização.</string>
+    <string name="sync_alert_configure">Configurar alertas de sincronização</string>
+    <string name="conflict_title">Alterações simultâneas</string>
+    <string name="conflict_review">Comparar versões</string>
+    <string name="conflict_queued">Escolha guardada; sincronização pendente</string>
+    <string name="conflict_explanation">Ambas as versões são mantidas até aplicar a sua escolha. Novas alterações exigem outra verificação.</string>
+    <string name="conflict_refresh">As versões podem ter mudado. Volte a carregá-las antes de escolher.</string>
+    <string name="conflict_local">Versão Contako</string>
+    <string name="conflict_proton">Versão Proton</string>
+    <string name="conflict_keep_local">Manter versão Contako</string>
+    <string name="conflict_use_proton">Usar versão Proton</string>
+    <string name="conflict_deleted">Contacto marcado para eliminar</string>
+    <string name="conflict_group_pending">A versão Proton remove um email com alterações de grupos pendentes. Resolva essas associações antes de a utilizar.</string>
+    <string name="conflict_remote_deleted">Este contacto foi eliminado no Proton. O rascunho local é mantido; a comparação anterior não resolve uma eliminação.</string>
+    <string name="field_structured_name">Nome estruturado</string>
 </resources>

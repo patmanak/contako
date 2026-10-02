@@ -357,4 +357,22 @@
     <string name="about_privacy_summary">Nessuna pubblicità, analisi dell’utilizzo o segnalazione remota degli arresti anomali. La diagnostica viene esportata solo su richiesta. I dati Contako sono esclusi da backup e trasferimenti Android.</string>
     <string name="about_license_summary">© 2026 Patmanak · GPL-3.0-or-later.\nContako utilizza Proton Core, AndroidX e altre librerie open source con le rispettive licenze. I nomi e i loghi Proton appartengono ai rispettivi proprietari.</string>
     <string name="about_license_details">Licenze e attribuzioni</string>
+    <string name="error_stale_contact_edit">Questo contatto è stato modificato altrove. La bozza è conservata. Riapri il contatto prima di applicare le modifiche.</string>
+    <string name="error_group_operation_unavailable">Proton non consente alcune operazioni sui gruppi per questo account. I contatti restano modificabili.</string>
+    <string name="sync_alert_title">Avvisi di sincronizzazione</string>
+    <string name="sync_alert_body">Apri Contako per esaminare un problema di sincronizzazione.</string>
+    <string name="sync_alert_configure">Configura gli avvisi di sincronizzazione</string>
+    <string name="conflict_title">Modifiche simultanee</string>
+    <string name="conflict_review">Confronta versioni</string>
+    <string name="conflict_queued">Scelta salvata; sincronizzazione in attesa</string>
+    <string name="conflict_explanation">Entrambe le versioni vengono conservate fino alla conferma della scelta. Nuove modifiche richiedono un altro controllo.</string>
+    <string name="conflict_refresh">Le versioni potrebbero essere cambiate. Ricaricale prima di scegliere.</string>
+    <string name="conflict_local">Versione Contako</string>
+    <string name="conflict_proton">Versione Proton</string>
+    <string name="conflict_keep_local">Mantieni versione Contako</string>
+    <string name="conflict_use_proton">Usa versione Proton</string>
+    <string name="conflict_deleted">Contatto da eliminare</string>
+    <string name="conflict_group_pending">La versione Proton elimina un indirizzo con modifiche ai gruppi in attesa. Risolvi le assegnazioni prima di usarla.</string>
+    <string name="conflict_remote_deleted">Questo contatto è stato eliminato da Proton. La bozza locale è conservata; il confronto precedente non risolve una cancellazione.</string>
+    <string name="field_structured_name">Nome strutturato</string>
 </resources>

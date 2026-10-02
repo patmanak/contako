@@ -24,7 +24,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
@@ -166,13 +165,18 @@ class LocalFoundationJourneyTest {
         compose.onNodeWithContentDescription(string(R.string.contacts_new)).performClick()
         compose.onNodeWithText(string(R.string.field_first_name)).performTextInput("Alpha Journey")
         compose.runOnIdle { activeViewModel.addContactValue(ContactValueKind.EMAIL) }
-        compose.onNode(hasScrollAction()).performScrollToIndex(1)
+        compose.onNodeWithTag("contact_editor_fields").performScrollToNode(
+            hasSetTextAction() and androidx.compose.ui.test.hasText(string(R.string.field_email)))
         compose.onNode(hasSetTextAction() and androidx.compose.ui.test.hasText(string(R.string.field_email)))
             .performTextInput("synthetic.journey@example.test")
         compose.onNodeWithTag(CONTACT_EDITOR_TOP_SAVE_TAG).performClick()
         compose.waitUntilNodeExists("Alpha Journey")
 
-        compose.onNodeWithText(string(R.string.directory_search)).performTextInput("journey")
+        // Creation opens the saved detail; return to the directory before searching.
+        compose.onNodeWithContentDescription(string(R.string.action_back)).performClick()
+        compose.onNodeWithContentDescription(string(R.string.directory_search)).performClick()
+        compose.onNode(hasSetTextAction() and androidx.compose.ui.test.hasText(string(R.string.directory_search)))
+            .performTextInput("journey")
         compose.onNodeWithText("Alpha Journey").assertIsDisplayed()
         compose.onNodeWithContentDescription(string(R.string.directory_search_clear)).performClick()
         compose.onNodeWithContentDescription(string(R.string.directory_search_clear)).assertDoesNotExist()
@@ -184,9 +188,12 @@ class LocalFoundationJourneyTest {
         compose.onNodeWithText(string(R.string.nav_groups)).performClick()
         compose.onNodeWithContentDescription(string(R.string.groups_new)).performClick()
         compose.onNodeWithText(string(R.string.groups_name)).performTextInput("Synthetic Journey Group")
-        compose.onNodeWithContentDescription(string(R.string.groups_color_choice, 2, 2)).performClick()
+        val selectedColorOrdinal = EditorPresentationPolicy.groupColorPalette.indexOf("#5252CC") + 1
+        assertTrue(selectedColorOrdinal > 0)
+        compose.onNodeWithContentDescription(string(R.string.groups_color_choice,
+            selectedColorOrdinal, EditorPresentationPolicy.groupColorPalette.size)).performClick()
         compose.runOnIdle {
-            assert(activeViewModel.uiState.value.groupEditor?.color == "#5252CC")
+            assertEquals("#5252CC", activeViewModel.uiState.value.groupEditor?.color)
         }
         compose.onNode(
             androidx.compose.ui.test.hasClickAction() and
@@ -202,17 +209,21 @@ class LocalFoundationJourneyTest {
         compose.onNodeWithText(plural(R.plurals.groups_member_count, 1, 1)).assertIsDisplayed()
         pauseForVisualInspectionIfRequested()
 
+        compose.onNodeWithContentDescription(string(R.string.action_back)).performClick()
         compose.onNodeWithText(string(R.string.nav_contacts)).performClick()
-        compose.onNodeWithText(string(R.string.directory_search)).performTextInput("synthetic journey group")
+        compose.onNodeWithContentDescription(string(R.string.directory_search)).performClick()
+        compose.onNode(hasSetTextAction() and androidx.compose.ui.test.hasText(string(R.string.directory_search)))
+            .performTextInput("synthetic journey group")
         compose.onNodeWithText("Alpha Journey").assertIsDisplayed()
-        compose.onNode(hasSetTextAction()).performTextClearance()
+        compose.onNodeWithContentDescription(string(R.string.directory_search_clear)).performClick()
         compose.onNodeWithText(string(R.string.nav_groups)).performClick()
 
         compose.onNodeWithText("Synthetic Journey Group").performClick()
         compose.onNodeWithContentDescription(string(R.string.groups_edit)).assertIsDisplayed()
         compose.onNodeWithContentDescription(string(R.string.groups_edit)).performClick()
         compose.onNodeWithText(string(R.string.nav_contacts)).assertDoesNotExist()
-        compose.onNodeWithContentDescription(string(R.string.groups_color_choice, 2, 2))
+        compose.onNodeWithContentDescription(string(R.string.groups_color_choice,
+            selectedColorOrdinal, EditorPresentationPolicy.groupColorPalette.size))
             .assertIsSelected()
         compose.onNodeWithContentDescription(string(R.string.action_cancel)).performClick()
         compose.waitUntil(timeoutMillis = 5_000) {
@@ -232,20 +243,27 @@ class LocalFoundationJourneyTest {
 
         compose.onNodeWithContentDescription(string(R.string.contacts_new)).performClick()
         compose.runOnIdle { activeViewModel.addContactValue(ContactValueKind.EMAIL) }
-        compose.onNode(hasScrollAction()).performScrollToIndex(1)
+        compose.onNodeWithTag("contact_editor_fields").performScrollToNode(
+            hasSetTextAction() and androidx.compose.ui.test.hasText(string(R.string.field_email)))
         compose.onNode(hasSetTextAction() and androidx.compose.ui.test.hasText(string(R.string.field_email)))
             .performTextInput("draft@example.test")
         compose.onNodeWithTag(CONTACT_EDITOR_TOP_SAVE_TAG).performClick()
         compose.waitUntilNodeExists("Unnamed contact")
-        compose.onNodeWithText(string(R.string.action_required_missing_name)).assertIsDisplayed()
+        compose.onNode(hasScrollAction()).performScrollToNode(
+            androidx.compose.ui.test.hasText(string(R.string.actions_missing_name_body)))
+        compose.onNodeWithText(string(R.string.actions_missing_name_body)).performScrollTo().assertIsDisplayed()
 
-        compose.onNodeWithText("Unnamed contact").performClick()
+        // The newly saved draft is already open in detail.
         compose.onNodeWithContentDescription(string(R.string.contact_edit_action)).performClick()
         compose.onNodeWithText(string(R.string.field_first_name)).performTextInput("Corrected Draft")
         compose.onNodeWithTag(CONTACT_EDITOR_TOP_SAVE_TAG).performClick()
         compose.waitUntilNodeExists("Corrected Draft")
-        compose.waitUntilNodeDoesNotExist(string(R.string.action_required_missing_name))
-        compose.runOnIdle { assert(activeViewModel.uiState.value.contacts.any { it.resolvedDisplayName == "Alpha Journey" }) }
+        compose.waitUntilNodeDoesNotExist(string(R.string.actions_missing_name_body))
+        compose.runOnIdle {
+            assertTrue(activeViewModel.uiState.value.contacts
+                .single { it.resolvedDisplayName == "Corrected Draft" }.actionRequiredReasons.isEmpty())
+            assert(activeViewModel.uiState.value.contacts.any { it.resolvedDisplayName == "Alpha Journey" })
+        }
     }
 
     @Test
@@ -261,11 +279,10 @@ class LocalFoundationJourneyTest {
         compose.onNodeWithText(string(R.string.field_first_name)).performTextInput("Navigation Fixture")
         compose.onNodeWithTag(CONTACT_EDITOR_TOP_SAVE_TAG).performClick()
         compose.waitUntilNodeExists("Navigation Fixture")
-        compose.onNodeWithText("Navigation Fixture").performClick()
         compose.onNodeWithContentDescription(string(R.string.contact_edit_action)).assertIsDisplayed()
         compose.onNodeWithText(string(R.string.nav_groups)).assertDoesNotExist()
         compose.onNodeWithContentDescription(string(R.string.action_back)).assertIsDisplayed().performClick()
-        compose.onNodeWithText(string(R.string.directory_search)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(string(R.string.directory_search)).assertIsDisplayed()
         compose.onNodeWithText(string(R.string.nav_groups)).assertIsDisplayed()
 
         compose.onNodeWithContentDescription(string(R.string.account_menu)).performClick()
@@ -276,8 +293,8 @@ class LocalFoundationJourneyTest {
         compose.onNodeWithText(string(R.string.settings_appearance)).assertIsDisplayed()
         compose.onNodeWithText(string(R.string.settings_language)).assertIsDisplayed()
         compose.onNodeWithText(string(R.string.settings_android)).assertDoesNotExist()
-        compose.onNodeWithText(string(R.string.action_back)).performClick()
-        compose.onNodeWithText(string(R.string.directory_search)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(string(R.string.action_back)).performClick()
+        compose.onNodeWithContentDescription(string(R.string.directory_search)).assertIsDisplayed()
         compose.onNodeWithContentDescription(string(R.string.account_menu)).performClick()
         compose.onNodeWithText(string(R.string.nav_about)).performClick()
         compose.waitUntilNodeExists(string(R.string.nav_about))
@@ -353,7 +370,7 @@ class LocalFoundationJourneyTest {
         compose.onNodeWithText(string(R.string.dialog_delete_title, longName)).assertIsDisplayed()
         compose.onNodeWithText(string(R.string.action_cancel)).performClick()
         compose.onNodeWithContentDescription(string(R.string.action_back)).performClick()
-        compose.onNodeWithText(string(R.string.directory_search)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(string(R.string.directory_search)).assertIsDisplayed()
         compose.onNodeWithText(longName).assertIsDisplayed()
     }
 
@@ -424,7 +441,7 @@ class LocalFoundationJourneyTest {
         compose.onNodeWithText(string(R.string.dialog_delete_title, name)).assertIsDisplayed()
         compose.onNodeWithText(string(R.string.action_delete)).performClick()
         compose.waitUntilNodeDoesNotExist(name)
-        compose.onNodeWithText(string(R.string.directory_search)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(string(R.string.directory_search)).assertIsDisplayed()
     }
 
     @Test
@@ -476,7 +493,7 @@ class LocalFoundationJourneyTest {
             }
 
             compose.waitUntilNodeExists(longName)
-            compose.onNodeWithText(string(R.string.directory_search)).assertIsDisplayed()
+            compose.onNodeWithContentDescription(string(R.string.directory_search)).assertIsDisplayed()
             compose.onNodeWithText(string(R.string.nav_groups)).assertIsDisplayed()
             compose.onNodeWithText(longName).performClick()
             compose.onNodeWithContentDescription(string(R.string.contact_edit_action)).assertIsDisplayed()
@@ -486,7 +503,7 @@ class LocalFoundationJourneyTest {
             pauseForVisualInspectionIfRequested()
 
             compose.onNodeWithContentDescription(string(R.string.action_back)).performClick()
-            compose.onNodeWithText(string(R.string.directory_search)).assertIsDisplayed()
+            compose.onNodeWithContentDescription(string(R.string.directory_search)).assertIsDisplayed()
             compose.onNode(hasScrollAction()).performScrollToIndex(1)
             compose.onNodeWithText(otherName)
                 .assertIsDisplayed()
@@ -696,18 +713,21 @@ class LocalFoundationJourneyTest {
                 selectedLanguage = com.patmanak.contako.ui.locale.AppLanguage.SYSTEM
             }
             compose.onNode(
-                androidx.compose.ui.test.hasText(string(R.string.nav_sync)) and
+                androidx.compose.ui.test.hasContentDescription(string(R.string.nav_sync)) and
                     androidx.compose.ui.test.hasClickAction(),
             ).performClick()
-            compose.onNode(hasScrollAction()).performScrollToIndex(2)
+            compose.onNode(hasScrollAction()).performScrollToNode(
+                androidx.compose.ui.test.hasText(string(R.string.settings_android)))
             pauseForVisualInspectionIfRequested()
             compose.onNodeWithText(string(R.string.settings_android)).assertIsDisplayed()
-            compose.onNode(hasScrollAction()).performScrollToIndex(3)
-            compose.onNodeWithText(string(R.string.sync_now)).assertIsDisplayed()
-            compose.onNodeWithText(string(R.string.repair_start)).assertIsDisplayed()
+            compose.onNode(hasScrollAction()).performScrollToNode(
+                androidx.compose.ui.test.hasText(string(R.string.sync_now)))
+            compose.onNodeWithText(string(R.string.sync_now)).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText(string(R.string.repair_start)).performScrollTo().assertIsDisplayed()
             pauseForVisualInspectionIfRequested()
 
-            compose.onNode(hasScrollAction()).performScrollToIndex(1)
+            compose.onNode(hasScrollAction()).performScrollToNode(
+                androidx.compose.ui.test.hasText(plural(R.plurals.sync_action_required_count, 1, 1)))
             compose.onNode(
                 androidx.compose.ui.test.hasClickAction() and
                     androidx.compose.ui.test.hasAnyDescendant(
@@ -718,7 +738,8 @@ class LocalFoundationJourneyTest {
             compose.onNodeWithText("Unnamed contact")
                 .assertIsDisplayed().assertHasClickAction().performClick()
             compose.onNodeWithText(string(R.string.contacts_edit)).assertIsDisplayed()
-            compose.onNode(hasScrollAction()).performScrollToIndex(1)
+            compose.onNodeWithTag("contact_editor_fields").performScrollToNode(
+                androidx.compose.ui.test.hasText("secondary.action@example.test"))
             compose.onNodeWithText("secondary.action@example.test").assertIsDisplayed()
             compose.onNodeWithContentDescription(string(R.string.action_cancel)).performClick()
             compose.waitUntil(timeoutMillis = 5_000) {
@@ -730,7 +751,7 @@ class LocalFoundationJourneyTest {
             }
             compose.waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.contactEditor == null }
             compose.onNodeWithText(string(R.string.actions_missing_name_body)).performScrollTo().assertIsDisplayed()
-            compose.onNodeWithText(string(R.string.action_back)).performClick()
+            compose.onNodeWithContentDescription(string(R.string.action_back)).performClick()
             compose.onNodeWithContentDescription(string(R.string.account_menu)).performClick()
             compose.onNodeWithText("ui-test@example.test").assertIsDisplayed()
             compose.onNodeWithText(string(R.string.nav_account)).assertDoesNotExist()
@@ -744,7 +765,10 @@ class LocalFoundationJourneyTest {
             compose.onNodeWithContentDescription(
                 "${string(R.string.settings_appearance)}, ${string(R.string.settings_theme_system)}",
             ).performClick()
-            compose.onNodeWithText(string(R.string.settings_theme_system)).assertIsDisplayed()
+            compose.onNode(
+                androidx.compose.ui.test.hasText(string(R.string.settings_theme_system)) and
+                    androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isPopup()),
+            ).assertIsDisplayed()
             compose.onNodeWithText(string(R.string.settings_theme_dark)).performClick()
             compose.runOnIdle {
                 assert(selectedTheme == com.patmanak.contako.ui.theme.ThemeMode.DARK)
@@ -753,16 +777,16 @@ class LocalFoundationJourneyTest {
                 "${string(R.string.settings_appearance)}, ${string(R.string.settings_theme_dark)}",
             ).assertIsDisplayed()
             compose.onNodeWithContentDescription(
-                "${string(R.string.settings_language)}, ${string(R.string.settings_language_system)}",
+                "${string(R.string.settings_language)}, 🌐  ${string(R.string.settings_language_system)}",
             ).performClick()
-            compose.onNodeWithText(string(R.string.language_portuguese)).performClick()
+            compose.onNodeWithText("🇵🇹  ${string(R.string.language_portuguese)}").performClick()
             compose.runOnIdle {
                 assert(selectedLanguage == com.patmanak.contako.ui.locale.AppLanguage.PORTUGUESE)
             }
             compose.onNodeWithContentDescription(
-                "${string(R.string.settings_language)}, ${string(R.string.language_portuguese)}",
+                "${string(R.string.settings_language)}, 🇵🇹  ${string(R.string.language_portuguese)}",
             ).assertIsDisplayed()
-            compose.onNodeWithText(string(R.string.action_back)).performClick()
+            compose.onNodeWithContentDescription(string(R.string.action_back)).performClick()
             compose.onNodeWithContentDescription(string(R.string.account_menu)).performClick()
             compose.onNodeWithText(string(R.string.account_sign_out)).performClick()
             compose.onNodeWithText(string(R.string.dialog_signout_title)).assertIsDisplayed()
@@ -778,7 +802,7 @@ class LocalFoundationJourneyTest {
                 androidx.compose.ui.test.hasText(string(R.string.about_limits_summary)))
             compose.onNodeWithText(string(R.string.about_limits_summary)).performScrollTo().assertIsDisplayed()
             pauseForVisualInspectionIfRequested()
-            compose.onNodeWithText(string(R.string.action_back)).performClick()
+            compose.onNodeWithContentDescription(string(R.string.action_back)).performClick()
         }
     }
 
@@ -886,7 +910,10 @@ class LocalFoundationJourneyTest {
         }
 
         compose.onNodeWithContentDescription(string(R.string.contacts_new)).performClick()
-        compose.onNode(hasScrollAction()).performScrollToIndex(4)
+        compose.onNodeWithText(string(R.string.editor_add_field)).performClick()
+        compose.onNodeWithTag("contact_editor_field_picker").performScrollToNode(
+            androidx.compose.ui.test.hasText(string(R.string.field_custom_date)))
+        compose.onNodeWithText(string(R.string.field_custom_date)).performClick()
         compose.onNodeWithContentDescription(string(R.string.field_custom_date_local_only))
             .performScrollTo().assertIsDisplayed()
 
@@ -895,7 +922,9 @@ class LocalFoundationJourneyTest {
             viewModel.addImage(ContactValueKind.PHOTO)
             viewModel.addImage(ContactValueKind.LOGO)
         }
-        compose.onNode(hasScrollAction()).performScrollToIndex(0)
+        compose.onNode(hasScrollAction()).performScrollToNode(
+            androidx.compose.ui.test.hasText(string(R.string.contact_identity_gallery_section)))
+        compose.onNodeWithText(string(R.string.contact_identity_gallery_section)).performClick()
         val firstPhoto = string(R.string.field_value_occurrence, string(R.string.field_photo), 1, 2)
         compose.onNodeWithContentDescription(string(R.string.field_preferred, firstPhoto))
             .performScrollTo().assertIsDisplayed()
@@ -909,7 +938,8 @@ class LocalFoundationJourneyTest {
         compose.onNode(hasScrollAction()).performScrollToIndex(0)
         compose.onNodeWithContentDescription(string(R.string.field_preferred, firstPhoto))
             .performScrollTo().assertIsDisplayed()
-        compose.onNode(hasScrollAction()).performScrollToIndex(4)
+        compose.onNode(hasScrollAction()).performScrollToNode(
+            androidx.compose.ui.test.hasContentDescription(string(R.string.field_custom_date_local_only)))
         compose.onNodeWithContentDescription(string(R.string.field_custom_date_local_only))
             .performScrollTo().assertIsDisplayed()
     }

@@ -295,7 +295,10 @@ internal class ContakoSyncPassExecutor(
         // remain durable for scheduling. Never retry a failure or bypass a server retry delay.
         repeat(2) {
             if (result.cancelled || isCancelled()) return result.copy(cancelled = true)
-            if (result.actionRequired > 0 || result.retryWaiting > 0 || result.progressPending == 0) return result
+            // A completed contact acknowledgement can make previously blocked dependent
+            // assignments eligible. Re-read the durable queue after successful uploads too.
+            if (result.actionRequired > 0 || result.retryWaiting > 0 ||
+                (result.progressPending == 0 && result.uploaded == 0)) return result
             val next = mutationOrchestrator.drain(account.value, wallClock(), isCancelled)
             result = MutationDrainResult(
                 examined = result.examined + next.examined,

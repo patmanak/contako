@@ -64,14 +64,17 @@ and safe cancellation; a retained interrupted checkpoint can be resumed.
 
 Android controls background execution. Automatic-sync switches, connectivity and
 battery restrictions can delay work. Contako does not promise an exact background
-deadline. The current app has no delivered Android blocked-work notifications,
-so consult Sync rather than relying on a notification to report a problem.
+deadline. Use **Configure synchronization alerts** in Sync to allow notifications
+or open Android notification settings. Notifications contain no contact or account
+details; denied permission does not prevent synchronization.
 
-For simultaneous local/Web edits, Contako currently cannot reliably establish
-which happened last: the production directory lacks remote modification times.
-An incomparable update/update conflict favors the pending local edit. Edit/delete
-conflicts have a separate recovery policy. Avoid parallel editing of the same
-contact when the preceding change has not converged.
+When local and Proton changes conflict, Sync offers **Compare versions**. Both
+versions are kept. Choose **Keep Contako version** or **Use Proton version**; the
+choice waits for synchronization and is checked again against Proton. A newer
+edit requires another review. Pending group assignments can prevent adopting a
+Proton version that removes their email; remote deletion requires separate recovery.
+Avoid editing the same contact simultaneously: Proton does not provide an atomic
+version check for the final write.
 
 ## Report a problem safely
 

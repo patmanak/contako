@@ -15,6 +15,12 @@ internal class OriginBoundVerificationBridge private constructor(
     private var active = true
     private var script: ScriptHandler? = null
 
+    /** Invalidate queued messages without invoking a renderer that has already terminated. */
+    fun abandon() {
+        active = false
+        script = null
+    }
+
     // The private constructor is reached only after install checks both provider features.
     @SuppressLint("RequiresFeature")
     fun close() {

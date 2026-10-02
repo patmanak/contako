@@ -285,6 +285,29 @@ class DurableMutationOrchestratorTest {
         assertFalse(store.current?.requiresReconciliation ?: true)
     }
 
+    @Test
+    fun `dependent assignments retain intent without upload or retry budget consumption`() = runTest {
+        val store = FakeMutationStore(command(operation = RemoteMutationOperation.ASSIGNMENTS, attemptCount = 2))
+        var ready = false
+        var uploads = 0
+        val runner = orchestrator(store,
+            prepare = { success(if (ready) MutationPreparation.UploadAllowed else MutationPreparation.WaitingForDependencies) },
+            upload = { uploads++; success(ack()) })
+        repeat(3) {
+            val waiting = runner.drain(ACCOUNT, 1_000)
+            assertEquals(1, waiting.progressPending)
+            assertEquals(0, waiting.retryWaiting)
+            assertEquals(0, waiting.actionRequired)
+            assertEquals(2, store.current?.attemptCount)
+            assertFalse(store.actionRequired)
+            assertEquals(0, uploads)
+        }
+        ready = true
+        assertEquals(1, runner.drain(ACCOUNT, 1_000).uploaded)
+        assertEquals(1, uploads)
+        assertEquals(0, store.remaining)
+    }
+
     private fun orchestrator(
         store: FakeMutationStore,
         prepare: suspend (DurableMutationCommand) -> GatewayOutcome<MutationPreparation>,

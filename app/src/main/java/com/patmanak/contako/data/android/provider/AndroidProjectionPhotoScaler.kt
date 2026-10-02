@@ -30,68 +30,52 @@ internal object AndroidProjectionPhotoScaler {
     private const val MIN_QUALITY = 40
     private const val QUALITY_STEP = 10
 
+    /** Bounds precede pixel allocation, including for very small compressed payloads. */
+    internal fun decodeSampleSize(width: Int, height: Int, target: Int): Int? {
+        if (width <= 0 || height <= 0 || width > 8192 || height > 8192 ||
+            width.toLong() * height > 32L * 1024 * 1024 || target <= 0) return null
+        var sample = 1
+        while (maxOf(width, height) / (sample * 2) >= target) sample *= 2
+        return sample
+    }
+
     fun scaleForProvider(bytes: ByteArray): ByteArray? {
-        // Validate even small payloads. Passing an opaque <=96 KiB value through unchanged lets
-        // ContactsProvider create a Photo row but no usable display_photo, leaving the projection
-        // journal in an endless retry. The canonical payload remains untouched when this returns
-        // null; only the Android projection omits an image it cannot represent.
-        val source = try {
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        } catch (_: OutOfMemoryError) {
-            null
-        } ?: return null
-
-        if (bytes.size <= MAX_INLINE_PHOTO_BYTES) {
-            source.recycle()
-            return bytes
-        }
-
-        val scaled = source.scaleDownToFit(MAX_DIMENSION)
-        return try {
-            ByteArrayOutputStream().use { stream ->
-                var quality = INITIAL_QUALITY
-                do {
-                    stream.reset()
-                    scaled.compress(Bitmap.CompressFormat.JPEG, quality, stream)
-                    quality -= QUALITY_STEP
-                } while (stream.size() > MAX_INLINE_PHOTO_BYTES && quality >= MIN_QUALITY)
-                stream.toByteArray().takeIf { it.isNotEmpty() && it.size <= MAX_INLINE_PHOTO_BYTES }
-            }
-        } catch (_: RuntimeException) {
-            null
-        } catch (_: OutOfMemoryError) {
-            null
-        } finally {
-            if (scaled !== source) scaled.recycle()
-            source.recycle()
-        }
+        return scale(bytes, MAX_DIMENSION, MAX_INLINE_PHOTO_BYTES, INITIAL_QUALITY, preserveSmall = true)
     }
 
     /** Produces a broadly supported, bounded JPEG for the full-resolution display-photo pipe. */
     fun normalizeForDisplayPhoto(bytes: ByteArray): ByteArray? {
-        val source = try {
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        } catch (_: OutOfMemoryError) {
-            null
-        } ?: return null
-        val scaled = source.scaleDownToFit(MAX_DISPLAY_DIMENSION)
+        return scale(bytes, MAX_DISPLAY_DIMENSION, MAX_DISPLAY_PHOTO_BYTES, 92, preserveSmall = false)
+    }
+
+    private fun scale(bytes: ByteArray, target: Int, byteLimit: Int, qualityStart: Int, preserveSmall: Boolean): ByteArray? {
+        if (bytes.isEmpty() || bytes.size > MAX_DISPLAY_PHOTO_BYTES) return null
+        var source: Bitmap? = null
+        var scaled: Bitmap? = null
         return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            val sample = decodeSampleSize(bounds.outWidth, bounds.outHeight, target) ?: return null
+            source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+            if (preserveSmall && bytes.size <= byteLimit && maxOf(bounds.outWidth, bounds.outHeight) <= target) return bytes
+            scaled = source.scaleDownToFit(target)
             ByteArrayOutputStream().use { stream ->
-                var quality = 92
+                var quality = qualityStart
                 do {
                     stream.reset()
                     if (!scaled.compress(Bitmap.CompressFormat.JPEG, quality, stream)) return null
                     quality -= QUALITY_STEP
-                } while (stream.size() > MAX_DISPLAY_PHOTO_BYTES && quality >= MIN_QUALITY)
-                stream.toByteArray().takeIf { it.isNotEmpty() && it.size <= MAX_DISPLAY_PHOTO_BYTES }
+                } while (stream.size() > byteLimit && quality >= MIN_QUALITY)
+                stream.toByteArray().takeIf { it.isNotEmpty() && it.size <= byteLimit }
             }
         } catch (_: RuntimeException) {
             null
         } catch (_: OutOfMemoryError) {
             null
         } finally {
-            if (scaled !== source) scaled.recycle()
-            source.recycle()
+            if (scaled !== source) scaled?.recycle()
+            source?.recycle()
         }
     }
 

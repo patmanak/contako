@@ -592,7 +592,13 @@ internal class ProtonCoreSessionAdapter(
         return cleanup?.let { GatewayOutcome.Failure(it) } ?: GatewayOutcome.Success(Unit)
     }
 
-    override suspend fun revokeAndClear(account: AccountScope): GatewayOutcome<Unit> {
+    override suspend fun clearAfterBestEffortRevocation(account: AccountScope): GatewayOutcome<Unit> =
+        revokeAndClear(account, bestEffort = true)
+
+    override suspend fun revokeAndClear(account: AccountScope): GatewayOutcome<Unit> =
+        revokeAndClear(account, bestEffort = false)
+
+    private suspend fun revokeAndClear(account: AccountScope, bestEffort: Boolean): GatewayOutcome<Unit> {
         if (account != expectedAccount) return GatewayOutcome.Failure(GatewayFailureCategory.AUTHENTICATION_REQUIRED)
         var discoveryFailure: GatewayFailureCategory? = null
         val target = withContext(NonCancellable) {
@@ -616,6 +622,7 @@ internal class ProtonCoreSessionAdapter(
             target.first,
             target.second,
             revokeRemote = true,
+            bestEffortRevocation = bestEffort,
         ) ?: discoveryFailure
         return when (cleanup) {
             null ->
@@ -808,6 +815,7 @@ internal class ProtonGateCRuntime private constructor(
                     ContactRemoteDataSourceImpl(network.apiProvider),
                     rawGateDWire,
                     contactCreateStages,
+                    inventoryLoader = ProtonBoundedContactInventory(network.apiProvider)::read,
                 ),
                 cardCrypto = ProtonCoreContactCardCrypto(
                     ProtonCoreUnlockedKeyHolderContextProvider(userManager, cryptoContext),
@@ -817,25 +825,23 @@ internal class ProtonGateCRuntime private constructor(
                 updateFailureObserver = updateFailureObserver,
             )
             val richInventoryUnitStatus = ProtonRichInventoryUnitStatus.LIVE_VALIDATION_REQUIRED
+            val groupCapabilities = AccountScopedContactGroupCapabilityCoordinator(
+                expectedAccount = accountScope,
+                delegate = ProtonPublicContactGroupGateway(accountScope, readyUserProvider, LabelRemoteDataSourceImpl(network.apiProvider)),
+            )
             val gateD = ProtonGateDComposition(
+                existence = publicContactGateway,
                 inventory = publicContactGateway,
                 verifiedCards = publicContactGateway,
                 contactMutations = publicContactGateway,
                 contactCreateStages = contactCreateStages,
                 emailGroupAssignmentStages = emailGroupAssignmentStages,
-                groups = AccountScopedContactGroupCapabilityCoordinator(
-                    expectedAccount = accountScope,
-                    delegate = ProtonPublicContactGroupGateway(
-                        expectedAccount = accountScope,
-                        userProvider = readyUserProvider,
-                        remote = LabelRemoteDataSourceImpl(network.apiProvider),
-                    ),
-                ),
-                emailLabels = ReconciledProtonEmailGroupAssignmentGateway(
+                groups = groupCapabilities,
+                emailLabels = groupCapabilities.assignments(ReconciledProtonEmailGroupAssignmentGateway(
                     membershipReader = membershipReader,
                     mutationGateway = assignmentAdapter,
                     stageObserver = emailGroupAssignmentStages,
-                ),
+                )),
                 membershipReader = membershipReader,
                 vCardCodec = vCardCodec,
                 richInventoryUnitStatus = richInventoryUnitStatus,
@@ -867,15 +873,20 @@ private suspend fun cleanupGateCSession(
     userId: UserId?,
     sessionId: SessionId?,
     revokeRemote: Boolean,
+    bestEffortRevocation: Boolean = false,
 ): GatewayFailureCategory? = withContext(NonCancellable) {
     var failure: GatewayFailureCategory? = null
     if (revokeRemote && sessionId != null) {
         try {
-            if (!core.revoke(sessionId)) failure = GatewayFailureCategory.REMOTE_SERVICE_FAILURE
+            val revoked = if (bestEffortRevocation) {
+                kotlinx.coroutines.withTimeoutOrNull(5_000L) { core.revoke(sessionId) } == true
+            } else core.revoke(sessionId)
+            if (!revoked) failure = GatewayFailureCategory.REMOTE_SERVICE_FAILURE
         } catch (error: Exception) {
             failure = classifyGateCFailure(error)
         }
     }
+    if (bestEffortRevocation) failure = null
     if (userId != null) {
         try {
             core.lockAndClear(userId)

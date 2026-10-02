@@ -6,6 +6,10 @@
   database is deliberately not encrypted separately at application level.
 - Android backup is disabled and explicit rules exclude cloud, legacy full backup
   and device-to-device transfer.
+- The canonical contact database MUST fail closed on detected SQLite corruption.
+  Its open-helper callback MUST NOT delete and recreate the database; pending
+  local intent remains on disk for recovery. This protection does not repair
+  damaged data or guarantee recovery of every corruption or filesystem failure.
 - Passwords, OTP/recovery values, session tokens, private keys, contact values and
   stable private identifiers MUST NOT enter logs, public evidence or source.
 - Proton/Android protected storage and maintained Proton cryptography are used.
@@ -39,15 +43,24 @@ imports remain supported; lack of a detached signature does not bypass decryptio
 integrity, field validation or bounds. Preserve supported unknown fields.
 
 HTTP responses MUST be bounded before general conversion, closing resources on
-failure. The existing route-specific interceptor does not establish coverage for
-all full-card and label responses; see [Known limitations](KNOWN_LIMITATIONS.md).
+failure. The interceptor covers maintained contacts/v4/contacts and core/v4/labels
+routes, including decompressed/chunked bodies. Directory acquisition separately
+bounds pages, totals, identities, group references and retained strings. The
+Android photo projection checks dimensions before sampled bitmap allocation;
+canonical photo bytes remain unchanged. See [Known limitations](KNOWN_LIMITATIONS.md).
 This requirement MUST NOT be presented as completed universal coverage.
 Do not fetch arbitrary contact-controlled image URLs during sync. Validate and
 bound selected/inline image decoding, including orientation and metadata removal.
 
-Current plaintext limits are checked after full native decryption and therefore
-do not bound peak native allocation before signature work. Upstream decompression
-has a 50 MiB default cap; this is not a process-memory ceiling. Bounded input
+Encrypted contact cards use Proton's maintained streaming reader. Accumulated
+decompressed bytes MUST stay within the remaining 10 MiB contact budget before
+text normalization and parsing. A limit failure MUST reject the entire card;
+only a genuine native EOF completes the integrity check. Detached verification
+and Core's private-key fallback remain required. Cancellation is cooperative
+between reads and MUST NOT permit a partial result or an unbounded fallback.
+This bound is stricter than a limit applied only after CRLF normalization. It
+does not bound every native allocation or guarantee a process-memory ceiling;
+upstream decompression also has a 50 MiB default cap. Bounded input
 handling MUST preserve maintained key fallback and complete integrity checks.
 See [Dependencies](DEPENDENCIES.md) and [Known limitations](KNOWN_LIMITATIONS.md).
 

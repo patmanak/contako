@@ -17,7 +17,9 @@ import me.proton.core.key.domain.entity.key.PublicKeyRing
 import me.proton.core.key.domain.entity.keyholder.KeyHolderContext
 import me.proton.core.key.domain.publicKey
 import me.proton.core.key.domain.encryptText
+import me.proton.core.key.domain.decryptText
 import me.proton.core.key.domain.signData
+import me.proton.core.key.domain.verifyData
 import me.proton.core.key.domain.verifyText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -28,6 +30,93 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ProtonContactCardCryptoDeviceTest {
+    @Test
+    fun corruptedCompressedPacketNeverReturnsUnauthenticatedPlaintext() = runBlocking {
+        val primary = EphemeralKeyMaterial.create("stream-integrity")
+        try {
+            val original = primary.compress(PREPARED_CARD.encryptedPrivate)
+            val crypto = ProtonCoreContactCardCrypto(primary.provider())
+            assertEquals(ContactCardType.Encrypted,
+                crypto.decryptAndVerify(USER_ID, listOf(ContactCard.Encrypted(original, null))).single().type)
+            val binary = com.proton.gopenpgp.crypto.Crypto.newPGPMessageFromArmored(original).binary
+            try {
+                binary[binary.lastIndex] = (binary.last().toInt() xor 1).toByte()
+                val corrupted = com.proton.gopenpgp.crypto.Crypto.newPGPMessage(binary).armored
+                assertVerificationFailure {
+                    crypto.decryptAndVerify(USER_ID, listOf(ContactCard.Encrypted(corrupted, null)))
+                }
+            } finally { binary.fill(0) }
+        } finally { primary.close() }
+    }
+
+    @Test
+    fun boundedReaderKeepsCoreFallbackWhenTheFirstPrivateKeyCannotDecrypt() = runBlocking {
+        val primary = EphemeralKeyMaterial.create("fallback-recipient")
+        val unrelated = EphemeralKeyMaterial.create("fallback-first")
+        try {
+            val cards = ProtonCoreContactCardCrypto(primary.provider()).protect(USER_ID, PREPARED_CARD)
+            val plain = ProtonCoreContactCardCrypto(primary.provider(firstKey = unrelated))
+                .decryptAndVerify(USER_ID, cards)
+            assertEquals(ContactCardType.EncryptedAndSigned, plain.first().type)
+            assertTrue(plain.first().vCard.contains("+33102030405"))
+        } finally { primary.close(); unrelated.close() }
+    }
+
+    @Test
+    fun compressedPlaintextIsBoundedBeforeCanonicalParsingAndExactLimitRequiresRealEof() = runBlocking {
+        val primary = EphemeralKeyMaterial.create("bounded-stream")
+        try {
+            val limit = 10 * 1_024 * 1_024
+            val exact = primary.compress("A".repeat(limit))
+            requireNotNull(primary.provider().acquire(USER_ID)).use { holder ->
+                val text = decryptBoundedContactText(holder, exact, limit)
+                assertEquals(limit, text.length)
+                assertTrue(text.all { it == 'A' })
+            }
+            val excess = primary.compress("A".repeat(limit + 1))
+            assertTrue(excess.toByteArray(Charsets.UTF_8).size < limit)
+            requireNotNull(primary.provider().acquire(USER_ID)).use { holder ->
+                try {
+                    decryptBoundedContactText(holder, excess, limit)
+                    fail("COMPRESSED_PLAINTEXT_LIMIT_REQUIRED")
+                } catch (_: ProtonPlaintextBoundsExceeded) {
+                    // No truncated plaintext is returned; Core fallback cannot bypass the bound.
+                }
+            }
+            try {
+                ProtonCoreContactCardCrypto(primary.provider()).decryptAndVerify(USER_ID,
+                    listOf(ContactCard.Encrypted(excess, null)))
+                fail("CANONICAL_PARTIAL_PLAINTEXT_FORBIDDEN")
+            } catch (failure: ProtonHydrationMalformedResponse) {
+                assertEquals(com.patmanak.contako.data.gateway.GatewayContactHydrationCategory.PLAINTEXT_BOUNDS,
+                    failure.category)
+            }
+        } finally { primary.close() }
+    }
+
+    @Test
+    fun outboundRichEncryptedCardSignatureVerifiesWithoutTrimming() = runBlocking {
+        val material = EphemeralKeyMaterial.create("rich-folding")
+        try {
+            val prepared = PREPARED_CARD.copy(encryptedPrivate =
+                PREPARED_CARD.encryptedPrivate.replace("END:VCARD",
+                    "NOTE:${"Word ".repeat(60).trimEnd()}\nEND:VCARD"))
+            val encrypted = ProtonCoreContactCardCrypto(material.provider())
+                .protect(USER_ID, prepared).filterIsInstance<ContactCard.Encrypted>().single()
+            requireNotNull(material.provider().acquire(USER_ID)).use { holder ->
+                val plaintext = holder.decryptText(encrypted.data)
+                assertTrue("VECTOR_MUST_INCLUDE_TRAILING_SPACE_BEFORE_FOLD",
+                    plaintext.split('\n').zipWithNext().any { (line, next) ->
+                        line.trimEnd('\r').endsWith(' ') && next.startsWith(' ')
+                    })
+                assertTrue("PRIVATE_SIGNATURE_MUST_VERIFY_EXACT_CONTENT",
+                    holder.verifyData(plaintext.toByteArray(Charsets.UTF_8), requireNotNull(encrypted.signature)))
+            }
+        } finally {
+            material.close()
+        }
+    }
+
     @Test
     fun exactContentSignatureSurvivesWhitespaceButRejectsChangedContent() = runBlocking {
         val primary = EphemeralKeyMaterial.create("exact-content")
@@ -152,16 +241,30 @@ class ProtonContactCardCryptoDeviceTest {
         private val privateKey: PrivateKey,
         private val protectedPassphrase: EncryptedByteArray,
     ) : Closeable {
-        fun provider(expectedUser: UserId = USER_ID) = ProtonKeyHolderContextProvider { requestedUser ->
+        fun compress(text: String): String {
+            val key = com.proton.gopenpgp.crypto.Crypto.newKeyFromArmored(privateKey.publicKey(context).key)
+            val ring = com.proton.gopenpgp.crypto.Crypto.newKeyRing(key)
+            val bytes = text.toByteArray(Charsets.UTF_8)
+            return try {
+                ring.encryptWithCompression(com.proton.gopenpgp.crypto.PlainMessage(bytes), null).armored
+            } finally {
+                bytes.fill(0)
+                try { ring.clearPrivateParams() } finally { key.clearPrivateParams() }
+            }
+        }
+
+        fun provider(expectedUser: UserId = USER_ID, firstKey: EphemeralKeyMaterial? = null) = ProtonKeyHolderContextProvider { requestedUser ->
             if (requestedUser != expectedUser) {
                 null
             } else {
-                val privateRing = PrivateKeyRing(context, listOf(privateKey))
+                val keys = if (firstKey == null) listOf(privateKey) else
+                    listOf(firstKey.privateKey.copy(isPrimary = true), privateKey.copy(isPrimary = false))
+                val privateRing = PrivateKeyRing(context, keys)
                 try {
                     KeyHolderContext(
                         context = context,
                         privateKeyRing = privateRing,
-                        publicKeyRing = PublicKeyRing(listOf(privateKey.publicKey(context))),
+                        publicKeyRing = PublicKeyRing(keys.map { it.publicKey(context) }),
                     )
                 } catch (error: Throwable) {
                     privateRing.close()

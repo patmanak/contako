@@ -16,14 +16,14 @@ import ezvcard.VCard
 import ezvcard.VCardVersion
 import java.util.Locale
 import me.proton.core.crypto.common.context.CryptoContext
-import me.proton.core.contact.domain.encryptAndSignContactCard
 import me.proton.core.contact.domain.entity.Contact
 import me.proton.core.contact.domain.entity.ContactCard
 import me.proton.core.contact.domain.entity.ContactCardType
 import me.proton.core.contact.domain.signContactCard
 import me.proton.core.crypto.common.pgp.exception.CryptoException
 import me.proton.core.domain.entity.UserId
-import me.proton.core.key.domain.decryptText
+import me.proton.core.key.domain.encryptText
+import me.proton.core.key.domain.signText
 import me.proton.core.key.domain.entity.key.PrivateKeyRing
 import me.proton.core.key.domain.entity.key.PublicKeyRing
 import me.proton.core.key.domain.entity.keyholder.KeyHolderContext
@@ -161,7 +161,12 @@ internal class ProtonCoreContactCardCrypto(
                         // Core keeps wire type 1 unsigned; type 3 requires a signature in its mapper.
                         val signature = card.signature
                         val decrypted = try {
-                            keyHolder.decryptText(card.data)
+                            decryptBoundedContactText(keyHolder, card.data,
+                                (MAX_PLAIN_CONTACT_BYTES - aggregateBytes).toInt())
+                        } catch (_: ProtonPlaintextBoundsExceeded) {
+                            throw ProtonHydrationMalformedResponse(
+                                GatewayContactHydrationCategory.PLAINTEXT_BOUNDS,
+                            )
                         } catch (_: CryptoException) {
                             throw ProtonHydrationVerificationFailure(
                                 GatewayContactHydrationCategory.DECRYPT_OPERATION,
@@ -250,7 +255,14 @@ internal class ProtonCoreContactCardCrypto(
             val private = parseSingle(vCard.encryptedPrivate)
             val signed = parseSingle(vCard.signed)
             buildList {
-                add(keyHolder.encryptAndSignContactCard(private))
+                // Web verifies encrypted cards without stripping trailing spaces. A folded
+                // rich value can end a physical line with a significant space; Core's
+                // contact helper signs with trimming enabled and changes that content.
+                val privateText = private.write()
+                add(ContactCard.Encrypted(
+                    keyHolder.encryptText(privateText),
+                    keyHolder.signText(privateText, trimTrailingSpaces = false),
+                ))
                 add(keyHolder.signContactCard(signed))
                 if (hasContactCardPayloadProperties(vCard.clear)) {
                     add(ContactCard.ClearText(parseSingle(vCard.clear).write()))
@@ -447,7 +459,7 @@ internal class ProtonContactVCardCodec(
         val remoteUids = parsed.map(ParsedCard::uid).filter(String::isNotBlank).distinct()
         if (remoteUids.size > 1) throw ProtonInconsistentContactIdentity()
         val preferred = parsed.firstOrNull { card ->
-            card.firstName.isNotBlank() || card.lastName.isNotBlank() || card.displayName.isNotBlank()
+            card.firstName.isNotBlank() || card.lastName.isNotBlank()
         } ?: parsed.first()
         val values = parsed.flatMap(ParsedCard::values).toMutableList()
         setOf(ContactValueKind.BIRTHDAY, ContactValueKind.ANNIVERSARY).forEach { kind ->

@@ -88,7 +88,7 @@ object LocalDiagnosticSafetyScanner {
     private val countBand = Regex("none|small|medium|large|very_large")
     private val schema = linkedMapOf(
         "contako_diagnostic_schema" to Regex("1"),
-        "app_version" to Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[a-z]+)?"),
+        "app_version" to Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-(?:debug|preview|diagnostic|sync-diagnostic|benchmark))?"),
         "platform" to Regex("android"),
         "api_level_band" to Regex("below_supported|31_34|35|36_or_later"),
         "build_type" to Regex("debug|release"),

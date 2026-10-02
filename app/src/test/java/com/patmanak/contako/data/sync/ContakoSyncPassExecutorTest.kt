@@ -73,6 +73,17 @@ class ContakoSyncPassExecutorTest {
     }
 
     @Test
+    fun `contact acknowledgement wakes dependent assignment in the same bounded pass`() = runTest {
+        var writes = 0
+        val assignment = DurableMutationCommand("account", "GROUP", "dependent", 1,
+            RemoteMutationOperation.ASSIGNMENTS, 0, 0, true)
+        val executor = executor(prerequisite = { SyncPrerequisiteState.READY }, inventory = {}, canonical = {},
+            store = SingleCommandStore(command(), followUp = assignment), prepare = {}, upload = { writes++ })
+        assertEquals(SyncPassOutcome.SUCCESS, executor.execute(request()))
+        assertEquals(2, writes)
+    }
+
+    @Test
     fun `RF04 continued progress remains bounded when more batches remain`() = runTest {
         var writes = 0
         val executor = executor(
@@ -1294,7 +1305,7 @@ private class MemoryCheckpointStore : ContactInventoryCheckpointStore {
     }
 }
 
-private class SingleCommandStore(private var command: DurableMutationCommand?) : MutationExecutionStore {
+private class SingleCommandStore(private var command: DurableMutationCommand?, private var followUp: DurableMutationCommand? = null) : MutationExecutionStore {
     private var inFlight = false
     override suspend fun recoverInterrupted(accountId: String, nowEpochMillis: Long) = 0
     override suspend fun eligible(accountId: String, nowEpochMillis: Long, limit: Int) = listOfNotNull(command)
@@ -1312,7 +1323,8 @@ private class SingleCommandStore(private var command: DurableMutationCommand?) :
         acknowledgement: RemoteMutationAcknowledgement,
     ): Boolean {
         assertTrue(inFlight)
-        this.command = null
+        this.command = followUp
+        followUp = null
         return true
     }
     override suspend fun supersedeAfterRemoteWinner(command: DurableMutationCommand) = true

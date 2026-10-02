@@ -10,6 +10,9 @@ import com.patmanak.contako.data.gateway.ProtonVerifiedContactCardGateway
 import com.patmanak.contako.data.gateway.RemoteContactId
 import com.patmanak.contako.data.gateway.ValidatedCompleteInventory
 import com.patmanak.contako.data.gateway.VerifiedContactCard
+import com.patmanak.contako.data.gateway.ContactInventorySnapshotAuthority
+import com.patmanak.contako.data.gateway.ProtonContactExistenceGateway
+import com.patmanak.contako.data.gateway.RemoteContactPresence
 import com.patmanak.contako.data.proton.ContactInventoryPlan
 import com.patmanak.contako.data.proton.PersistentContactInventoryPlanner
 import com.patmanak.contako.data.proton.StaleContactInventoryPlan
@@ -43,7 +46,7 @@ internal fun interface RemoteContactBatchObserver {
 }
 
 /** Payload-free boundary for a remote-contact result that requires user or operator action. */
-internal enum class RemoteContactActionRequiredBoundary { INVENTORY, PLANNING, HYDRATION, HYDRATED_IDENTITY }
+internal enum class RemoteContactActionRequiredBoundary { INVENTORY, PLANNING, HYDRATION, HYDRATED_IDENTITY, DELETION_CONFIRMATION }
 
 internal fun interface RemoteContactActionRequiredObserver {
     fun onActionRequired(
@@ -115,6 +118,9 @@ internal class IncrementalRemoteContactStage(
     private val batchObserver: RemoteContactBatchObserver = RemoteContactBatchObserver.NONE,
     private val actionRequiredObserver: RemoteContactActionRequiredObserver =
         RemoteContactActionRequiredObserver { _, _, _ -> },
+    private val existenceGateway: ProtonContactExistenceGateway = ProtonContactExistenceGateway { _, _ ->
+        GatewayOutcome.Failure(GatewayFailureCategory.UNKNOWN)
+    },
 ) {
     private val inventoryReader = BoundedContactInventoryReader(inventoryGateway)
 
@@ -132,6 +138,17 @@ internal class IncrementalRemoteContactStage(
             planner.plan(account, inventory, forceHydration)
         } catch (_: IllegalArgumentException) {
             return actionRequired(RemoteContactActionRequiredBoundary.PLANNING)
+        }
+        if (inventory.snapshotAuthority == ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY) {
+            for (id in plan.deleted.sortedBy { it.value }) {
+                if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
+                when (val result = existenceGateway.check(account, id)) {
+                    is GatewayOutcome.Failure -> return mapFailure(RemoteContactActionRequiredBoundary.DELETION_CONFIRMATION, result)
+                    is GatewayOutcome.Success -> if (result.value != RemoteContactPresence.CONFIRMED_ABSENT) {
+                        return RemoteContactStageResult.StalePlan
+                    }
+                }
+            }
         }
         val hydrationBatches = plan.hydrate.sortedBy { it.value }.chunked(HYDRATION_BATCH_SIZE)
         val durableHydrations = mutableSetOf<RemoteContactId>()

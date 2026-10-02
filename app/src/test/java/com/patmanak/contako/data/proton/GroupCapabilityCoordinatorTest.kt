@@ -24,6 +24,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GroupCapabilityCoordinatorTest {
+    @Test fun uiDenialsRemainOperationScopedIncludingEmailAssignments() = runTest {
+        val fake = FakeGroupGateway()
+        val coordinator = AccountScopedContactGroupCapabilityCoordinator(ACCOUNT, fake)
+        fake.createOutcome = GatewayOutcome.Failure(GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED)
+        coordinator.create(ACCOUNT, ContactGroupMutation.Create("Fixture", null))
+        coordinator.list(ACCOUNT)
+        assertEquals(setOf(com.patmanak.contako.domain.model.GroupOperation.CREATE), coordinator.deniedOperations.value)
+        val assignments = coordinator.assignments(object : com.patmanak.contako.data.gateway.ProtonContactEmailLabelGateway {
+            override suspend fun apply(account: AccountScope, mutation: com.patmanak.contako.data.gateway.EmailLabelMutation) =
+                GatewayOutcome.Failure(GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED)
+        })
+        assignments.apply(ACCOUNT, com.patmanak.contako.data.gateway.EmailLabelMutation.Assign(RemoteGroupId("group"),
+            listOf(com.patmanak.contako.data.gateway.RemoteEmailId("email"))))
+        assertEquals(setOf(com.patmanak.contako.domain.model.GroupOperation.CREATE,
+            com.patmanak.contako.domain.model.GroupOperation.ASSIGN_EMAILS), coordinator.deniedOperations.value)
+        coordinator.invalidate(ACCOUNT)
+        assertTrue(coordinator.deniedOperations.value.isEmpty())
+    }
     @Test
     fun `02-GROUP-CAP success alone proves available and explicit denial alone proves unavailable`() = runTest {
         val fake = FakeGroupGateway()

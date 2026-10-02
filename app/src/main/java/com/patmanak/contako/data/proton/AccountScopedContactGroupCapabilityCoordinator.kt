@@ -31,6 +31,14 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
         ContactGroupCapabilityAvailability.UNKNOWN
     }.toMutableMap()
     private val state = MutableStateFlow(ContactGroupCapabilitySnapshot())
+    private val denied = MutableStateFlow<Set<com.patmanak.contako.domain.model.GroupOperation>>(emptySet())
+    val deniedOperations = denied.asStateFlow()
+
+    fun assignments(delegate: com.patmanak.contako.data.gateway.ProtonContactEmailLabelGateway) =
+        object : com.patmanak.contako.data.gateway.ProtonContactEmailLabelGateway {
+            override suspend fun apply(account: AccountScope, mutation: com.patmanak.contako.data.gateway.EmailLabelMutation): GatewayOutcome<Unit> =
+                observe(account, ContactGroupCapability.ASSIGN_EMAILS) { delegate.apply(account, mutation) }
+        }
 
     fun state(): StateFlow<ContactGroupCapabilitySnapshot> = state.asStateFlow()
 
@@ -64,6 +72,7 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
         requireExpected(account)
         synchronized(lock) {
             availability.keys.forEach { availability[it] = ContactGroupCapabilityAvailability.UNKNOWN }
+            denied.value = emptySet()
             state.value = state.value.copy(
                 availability = ContactGroupCapabilityAvailability.UNKNOWN,
                 evidence = ContactGroupCapabilityEvidence.NONE,
@@ -149,6 +158,9 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
     ) {
         synchronized(lock) {
             availability[capability] = resolved
+            denied.value = com.patmanak.contako.domain.model.GroupOperation.entries.filterTo(mutableSetOf()) {
+                availability[ContactGroupCapability.valueOf(it.name)] == ContactGroupCapabilityAvailability.DENIED
+            }
             state.value = state.value.copy(
                 availability = resolved,
                 evidence = evidence,

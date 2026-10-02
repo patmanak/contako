@@ -175,15 +175,36 @@ function Assert-Archive([string]$Path) {
 }
 
 function Assert-SourceSurfaces {
+    $releaseConfigRoot = Join-Path $appRoot 'build/generated/source/buildConfig/release'
+    $releaseConfigs = @(Get-ChildItem -LiteralPath $releaseConfigRoot -Recurse -File -Filter BuildConfig.java -ErrorAction SilentlyContinue)
+    if ($releaseConfigs.Count -ne 1) { throw 'RELEASE_BUILD_CONFIG_NOT_UNIQUE' }
+    $releaseConfig = Get-Content -LiteralPath $releaseConfigs[0].FullName -Raw
+    foreach ($flag in @('DEBUG', 'SANITIZED_DIAGNOSTICS', 'SYNC_DIAGNOSTICS')) {
+        $declarations = [regex]::Matches($releaseConfig, ('public\s+static\s+final\s+boolean\s+' + $flag + '\s*=\s*(true|false)\s*;'))
+        if ($declarations.Count -ne 1 -or $declarations[0].Groups[1].Value -ne 'false') {
+            throw "RELEASE_DIAGNOSTIC_FLAG:$flag"
+        }
+    }
     $tracked = @(Invoke-Checked 'git' @('-C', $RepositoryRoot, 'ls-files') 'GIT_FILE_INVENTORY_FAILED')
     foreach ($file in $tracked) {
         if ($file -match '(?i)\.(jks|keystore|p12|pem)$|(^|/)secrets?\.(properties|json)$') { throw "TRACKED_SECRET_FILE:$file" }
     }
     $production = Join-Path $appRoot 'src\main'
+    $approvedSinkPath = [IO.Path]::GetFullPath((Join-Path $production 'java/com/patmanak/contako/diagnostics/SanitizedDiagnosticLog.kt'))
     foreach ($file in @(Get-ChildItem -LiteralPath $production -Recurse -File)) {
         if ($file.Extension -notin @('.kt', '.java', '.xml', '.txt', '.json')) { continue }
         $text = Get-Content -LiteralPath $file.FullName -Raw
-        if ($text -match 'android\.util\.Log|Timber\.|println\(|printStackTrace\(|HttpLoggingInterceptor.*BODY') {
+        $scanText = $text
+        if ($file.FullName -eq $approvedSinkPath) {
+            $call = 'android.util.Log.i("ContakoDiagnostic", renderDiagnostic(event))'
+            $guard = 'if (BuildConfig.SANITIZED_DIAGNOSTICS || (BuildConfig.SYNC_DIAGNOSTICS && isSyncDiagnostic(event)))'
+            $pattern = [regex]::Escape($guard) + '\s*\{\s*runCatching\s*\{\s*' + [regex]::Escape($call) + '\s*\}\s*\}'
+            if ([regex]::Matches($text, [regex]::Escape($call)).Count -ne 1 -or
+                -not $text.Contains('fun write(event: SanitizedDiagnosticEvent)') -or
+                -not [regex]::IsMatch($text, $pattern)) { throw 'DIAGNOSTIC_LOG_GUARD_INVALID' }
+            $scanText = $text.Replace($call, '')
+        }
+        if ($scanText -match 'android\.util\.Log|Timber\.|println\(|printStackTrace\(|HttpLoggingInterceptor.*BODY') {
             throw "PRODUCTION_LOG_SURFACE:$($file.Name)"
         }
         if ($text -match '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?i)(?:storePassword|keyPassword)\s*[:=]') {
@@ -213,6 +234,15 @@ function Get-ResolvedCoordinates([string[]]$Lines) {
 
 function Assert-LegalAndWriteSbom([string[]]$Resolved) {
     $legal = Get-Content -LiteralPath $LegalInventoryPath -Raw | ConvertFrom-Json
+    $descriptorPaths = @('app/build.gradle.kts', 'app/settings.gradle.kts', 'app/gradle.properties',
+        'app/gradle/libs.versions.toml', 'app/gradle/wrapper/gradle-wrapper.properties', 'app/gradle/verification-metadata.xml')
+    if (@($legal.dependencyDescriptors).Count -ne $descriptorPaths.Count) { throw 'LEGAL_DESCRIPTOR_SET_INVALID' }
+    foreach ($relative in $descriptorPaths) {
+        $entries = @($legal.dependencyDescriptors | Where-Object { $_.file -ceq $relative })
+        if ($entries.Count -ne 1) { throw 'LEGAL_DESCRIPTOR_SET_INVALID' }
+        $actualHash = (Get-FileHash -LiteralPath (Join-Path $RepositoryRoot $relative) -Algorithm SHA256).Hash
+        if ($entries[0].sha256 -ne $actualHash) { throw "LEGAL_DESCRIPTOR_STALE:$relative" }
+    }
     $artifacts = @($legal.artifacts)
     $metadataOnly = @($legal.metadataOnlyComponents)
     if ($artifacts.Count -eq 0 -or $legal.artifactCount -ne $artifacts.Count) { throw 'LEGAL_INVENTORY_INVALID' }

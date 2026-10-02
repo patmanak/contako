@@ -24,12 +24,16 @@ class FoundationI18nContractTest {
                 "Unsupported postal address component",
                 // Stable navigation/test keys, vCard types, locale pattern and visual flags;
                 // none is untranslated prose presented as a user instruction.
-                "blocked:\${it.id}", "pending:\${it.id}", "android:\${it.id}", "local-diagnostics", "contact-editor-save-error",
+                "conflict:\${it.contactId}", "blocked:\${it.id}", "pending:\${it.id}", "android:\${it.id}", "local-diagnostics", "contact-editor-save-error",
                 "__custom__", "", "home", "work", "cell", "other", "mobile",
                 "contact_editor_top_save", "contact_editor_bottom_save", "group_editor_top_save", "group_editor_bottom_save",
+                "contact_editor_fields", "contact_editor_field_picker", "contact_value_options_\${value.id}",
+                "information_content", "brand", "project", "https://github.com/patmanak/contako", "credits", "privacy", "licenses",
+                "https://github.com/patmanak/contako/blob/main/docs/LICENSING.md",
                 "MMMMd", "\$label, \$selectedLabel", "🌐", "🇬🇧", "🇫🇷", "🇩🇪", "🇪🇸", "🇮🇹", "🇳🇱", "🇵🇱", "🇵🇹", "  ",
             ),
             "ContactsViewModel.kt" to setOf(
+                "ConflictPanelState(REDACTED)",
                 // Imported vCard N component keys and separator, not user-facing copy.
                 "given", "family", "additional", "prefix", "suffix", ";",
                 "",
@@ -222,11 +226,13 @@ class FoundationI18nContractTest {
             val translated = catalog(projectFile("src/main/res/values-$locale/strings.xml"))
             val untranslated = source.keys.filter { name ->
                 val validSharedFrench = locale == "fr" && name in setOf("contact_action_message", "contact_type_mobile")
-                val validSharedDutch = locale == "nl" && name == "nav_sync_compact"
+                val validSharedDutch = locale == "nl" && name in setOf("nav_sync_compact", "about_privacy", "about_credits")
+                val validSharedItalian = locale == "it" && name == "about_privacy" &&
+                    translated.getValue(name).text == "Privacy"
                 // Day/month initials coincide in these languages; this is a format, not English prose.
                 val validSharedDateHint = locale in setOf("es", "nl", "pl", "pt") &&
                     name == "date_input_yearless_hint" && translated.getValue(name).text == "DD/MM"
-                name !in identicalEnglishAllowlist && !validSharedFrench && !validSharedDutch && !validSharedDateHint &&
+                name !in identicalEnglishAllowlist && !validSharedFrench && !validSharedDutch && !validSharedItalian && !validSharedDateHint &&
                     normalizedText(source.getValue(name)) == normalizedText(translated.getValue(name))
             }
             assertTrue(

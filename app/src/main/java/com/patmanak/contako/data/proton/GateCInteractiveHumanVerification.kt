@@ -107,6 +107,7 @@ internal class GateCInteractiveHumanVerification : HumanVerificationProvider, Hu
 
     @SuppressLint("SetJavaScriptEnabled")
     fun load(webView: WebView, generation: Long, darkTheme: Boolean): Boolean {
+        if (releasedViews.containsKey(webView)) return false
         val current = synchronized(guard) { pending?.takeIf { it.generation == generation } } ?: return false
         if (loadedGenerations[webView] == generation) return true
         with(webView.settings) {
@@ -134,20 +135,33 @@ internal class GateCInteractiveHumanVerification : HumanVerificationProvider, Hu
         return true
     }
 
-    fun release(webView: WebView) {
+    private val releasedViews = java.util.WeakHashMap<WebView, Boolean>()
+
+    fun release(webView: WebView) = release(webView, rendererGone = false)
+
+    private fun release(webView: WebView, rendererGone: Boolean) {
+        if (releasedViews.put(webView, true) != null) return
         loadedGenerations.remove(webView)
-        bridges.remove(webView)?.close()
-        webView.stopLoading()
-        webView.webChromeClient = null
-        webView.webViewClient = WebViewClient()
-        webView.clearFormData()
-        webView.clearHistory()
-        webView.clearCache(true)
-        WebStorage.getInstance().deleteOrigin(HUMAN_VERIFICATION_ORIGIN)
-        CookieManager.getInstance().apply {
-            removeAllCookies { flush() }
+        val bridge = bridges.remove(webView)
+        try {
+            if (rendererGone) bridge?.abandon() else {
+                bridge?.close()
+                webView.stopLoading()
+                webView.webChromeClient = null
+                webView.webViewClient = WebViewClient()
+                webView.clearFormData()
+                webView.clearHistory()
+                webView.clearCache(true)
+            }
+            WebStorage.getInstance().deleteOrigin(HUMAN_VERIFICATION_ORIGIN)
+            CookieManager.getInstance().apply { removeAllCookies { flush() } }
+        } catch (_: RuntimeException) {
+            // Cleanup failure must not turn renderer recovery into a host crash.
+            bridge?.abandon()
+        } finally {
+            try { (webView.parent as? android.view.ViewGroup)?.removeView(webView) }
+            finally { webView.destroy() }
         }
-        webView.destroy()
     }
 
     internal fun acceptSolution(generation: Long, tokenType: String, tokenCode: String): Boolean {
@@ -203,6 +217,11 @@ internal class GateCInteractiveHumanVerification : HumanVerificationProvider, Hu
     private inner class RestrictedVerificationWebViewClient(
         private val generation: Long,
     ) : WebViewClient() {
+        override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+            failGeneration(generation)
+            release(view, rendererGone = true)
+            return true
+        }
         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest): Boolean {
             if (!request.isForMainFrame) return false
             return !request.url.isVerificationOrigin()
@@ -222,10 +241,13 @@ internal class GateCInteractiveHumanVerification : HumanVerificationProvider, Hu
         }
     }
 
-    private fun failGeneration(generation: Long) {
+    internal fun failGeneration(generation: Long) {
         synchronized(guard) {
             val current = pending?.takeIf { it.generation == generation } ?: return
-            current.completion.complete(HumanVerificationListener.HumanVerificationResult.Failure)
+            if (!current.completion.complete(HumanVerificationListener.HumanVerificationResult.Failure)) return
+            pending = null
+            solved = null
+            mutableUiState.value = GateCHumanVerificationUiState()
         }
     }
 

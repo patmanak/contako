@@ -68,7 +68,7 @@ otherwise, apply the common setup, exact field comparison and cleanup above.
 | FT-11 | Dedicated phone locked and unplugged, later reboot/first unlock, process restart and natural periodic runs. | Observe actual scheduled work, no attributable crash/ANR or unbounded retry; measure battery over a meaningful interval, not USB-powered CPU snapshots. No exact hourly deadline promised. |
 | FT-12 | load-300, optionally load-5000; large import/projection, partial provider failure and resume. | Bounded work, no missing/duplicate contacts or lost intent; independent sampled fields plus complete owned identity/count reconciliation. Counters alone do not prove full-field equality. |
 | FT-13 | Delete from each supported origin, including unsent creation; restart and next no-change pass. | Scoped deletion/absence in all peers, no resurrection or deletion of another account's row; group deletion never deletes member contacts. |
-| FT-14 | C01/C03; offline concurrent updates in both orders, edit versus delete and lost acknowledgement. | Current D-096 missing-remote-time fallback is honored for updates; no fabricated timestamp. Incomparable edit/delete exposes recovery and retains intent. |
+| FT-14 | C01/C03; offline concurrent updates in both orders, edit versus delete and lost acknowledgement. | Private-only Web edits followed by a local edit MUST block upload and retain both versions. Compare and choose each version in Sync, restart before/after choice, change Proton again before resolution, and test a lost acknowledgement. An obsolete choice MUST NOT overwrite new edits; remote deletion invalidates it. No fabricated timestamp or silent membership loss. |
 | FT-15 | Blank and rich drafts: grouped add-field picker, existing fields, photo from avatar, per-email groups, field options; invalid field in a collapsed section, both Save controls, repeated taps, failure/retry and back. | Empty optional families remain hidden until added; existing values remain reachable. Label/preference/order controls and per-email assignments preserve other fields. Invalid field revealed, busy state, no duplicate submit; draft retained until success or explicit discard. |
 | FT-16 | C12 long/accented/non-Latin text entered with the real keyboard, paste and multiline editing. | Exact input before Save and after reopen; do not classify fast ADB injection loss as an IME defect. |
 | FT-17 | Initial sync with pending Android copies (scheduled/running/idle), then real blocked upload/projection, excluding search filter, group/global error, zero-outbox retry, missing permission; then recovery. | Ordinary pending copies MUST NOT create attention items or a warning badge. Published Android partial failure MUST expose outstanding copies; real conflicts and blocked uploads remain visible during sync. Count/list/contact navigation agree without double counting; pending Proton and Android work remain distinct. After recovery, new ordinary pending copies MUST NOT revive the warning. Notification delivery is a separate implementation-dependent variant, not passed by claim-storage tests. |
@@ -108,6 +108,31 @@ still present, stale epoch/revision and forged phonetic/primary claims. Record
 whether the provider state actually occurred; ordinary photo replacement is not
 proof of internal journal recovery.
 
+### Display alias and separate native source regression
+
+For FT-24, use C03/C14 with a photo on the Contako fixture. Create the second
+source through the system editor on a dedicated test device, using the same
+email/phone but a different given name. Select an explicitly authorized account
+or device-only storage; do not use a third-party account merely because the
+editor selects it by default. Exercise both setup orders: the native duplicate
+before the first Contako projection, and after a completed projection.
+
+Compare Contako's display alias, given/family names and the source-owned Android
+name row independently of the aggregate title. Find the contact by email in the
+general directory and from the attention list when applicable. Add a phone from
+the native editor, then separately change the given name; verify the intended
+change and preservation of the distinct alias, photo, other fields and foreign
+source in Contako, Android and Proton. An unchanged pass MUST NOT rewrite the
+owned rows. Record the actual editor and OS: Google Contacts acceptance does not
+qualify Samsung Contacts on another Android release.
+
+Keep interrupted first-photo recovery separate from this completed-baseline
+journey. With no completed baseline, matching given/family names and coordinates
+MUST NOT authorize replacing an explicit alias with a generated display name or
+clearing native intent. Record interruption as NOT RUN unless the pending journal
+and missing baseline were actually established; an ordinary successful sync is
+not evidence of recovery.
+
 ### Private-only remote changes and imported formats
 
 On C04 separately modify note, gender, address and photo in Web while leaving
@@ -139,3 +164,51 @@ Keep raw screenshots, exports and private locators only in ignored app/build.
 Use the [result template](testing/RESULT_TEMPLATE.md); results do not accumulate
 inside this procedure. A deferred non-blocking defect is a documented limitation,
 not a reason to restart development or to mark an unexecuted case passed.
+
+## Concurrent edits and recovery variants
+
+For FT-06/FT-15, use a rich contact with two emails and different group assignments.
+Change only the secondary email's groups, then make it preferred; repeat the
+preference switch in both directions. Verify each email's independent Proton
+assignments, the Android owned email rows' primary flags and membership following
+the preferred email. A successful upload alone MUST NOT qualify Android projection.
+Restart and run a no-change pass; preference and memberships MUST remain stable.
+
+Extend FT-14/FT-17 with the rich and imported fixtures, comparing changed and
+untouched values independently on each peer:
+
+- Change only a Web note/photo/unknown field, then another local field; public
+  directory equality MUST NOT permit a stale upload. Both snapshots survive restart.
+- Choose Contako and Proton separately. No second choice while an upload is in
+  progress; network failure retains intent; a newer local/remote edit requires review.
+  Open comparison with structured names and preserved read-only fields; every
+  canonical field type MUST have a readable label without crashing.
+- Remove an email on Proton while its group assignments are pending locally.
+  Proton adoption is disabled with an explanation; assignments are never discarded.
+  Choose the local version to restore that email. Dependent assignments MUST wait
+  for contact acknowledgement and use the restored Proton email identity. Older
+  failures caused by the replaced identity MUST recover through ordinary sync,
+  with fresh membership reconciliation; no unrelated group edit or repair is required.
+  Repeat with a removed assignment: an empty desired membership MUST still wait
+  for the pending contact, and the removed label MUST remain absent after restoration.
+- Confirm remote deletion after a conflict: no stale queued-choice display,
+   no orphaned conflict after a pending delete converges, and no implicit recreation.
+   After a remote deletion has already been reconciled, explicitly delete the
+   retained local draft, restart and run another ordinary pass. The pending delete
+   MUST converge on fresh targeted absence proof, remove its owned Android copy
+   and clear attention without manual repair; a failed absence check MUST retain intent.
+- Interrupt group creation while editing/deleting it; a received remote identity
+  attaches to the current revision. An ambiguous creation is never replayed by name.
+- Open an editor, update the canonical contact/remote identity/assignments, then
+  save the old draft. Reject the stale save and retain the draft. While saving or
+  reading a selected photo, input/save actions cannot silently lose the last edit.
+- Exercise structured-name cards with public FN before private N, accented names,
+  highly compressed large photos, unsupported group operations and diagnostic
+  builds. Qualify the minified variant, not only JVM policy tests.
+- For FT-17 alerts: deny permission, grant it later, restart after publication,
+  resolve the block, and open notifications cold/warm. No contact/account data in
+  the notification; no consumed claim after denied/failed publication or stale
+  cancellation of a newly published alert. Natural scheduling remains separate.
+- For FT-23 sign-out: verify remote revocation is attempted before local session
+  destruction; offline cleanup succeeds, but pending local/native intent still
+  blocks an unconfirmed discard. Test CAPTCHA renderer loss on an isolated target.

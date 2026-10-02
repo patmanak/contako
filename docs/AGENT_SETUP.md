@@ -5,6 +5,8 @@
 | File | Purpose | Git policy |
 | --- | --- | --- |
 | Root `AGENTS.md` | Product invariants, development method, evidence and skill routing | Public, versioned |
+| `.codex/config.toml` | Project subagent enablement and concurrency cap | Public, versioned |
+| `.codex/agents/*.toml` | Six specialized project role definitions | Public, versioned |
 | `.agents/skills/*/SKILL.md` | Focused, portable Contako workflows | Public, versioned |
 | Root `AGENTS.local.md` | Operator language, workstation limits, device/account authority and private workflow choices | Local, ignored; never force-add |
 | `.agent-local/` | Optional private agent notes | Local, ignored |
@@ -31,6 +33,27 @@ Ignoring a file is not access control and does not undo earlier publication;
 instruction maintenance does not rewrite Git history or establish a privacy audit.
 
 ## Selected workflows
+
+Six roles complement these workflows: `contako_specifier`, `contako_planner`,
+`contako_researcher`, `contako_developer`, `contako_tester` and `contako_reviewer`.
+[Working method](WORKFLOW.md) defines their routing, handoffs and evidence scope.
+Specification/planning roles use the maintained contracts directly; development,
+testing and review reuse the existing skills rather than duplicating them.
+
+Project configuration enables subagents and caps concurrent children at three.
+It sets no model or reasoning override. The researcher and reviewer request a
+read-only sandbox and also carry explicit no-write instructions; live runtime
+permission overrides may affect sandbox enforcement, so the role restriction
+still applies. No role may delegate further or create separate chats.
+
+Standalone `.codex/agents/*.toml` files follow the official
+[subagent configuration](https://learn.chatgpt.com/docs/agent-configuration/subagents)
+and [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+Use a trusted session rooted in the Contako checkout to check native discovery.
+File parsing and role/path checks do not establish that a session rooted in a
+parent or reference project loaded Contako's configuration. If roles are absent
+after setup, reload the Contako session and verify loading there; do not silently
+change user-level trust or global configuration.
 
 Codex discovers repository skills under `.agents/skills`; see
 [official skill discovery](https://developers.openai.com/codex/skills).
@@ -74,6 +97,7 @@ the test plan in each skill. User instructions and execution permissions remain
 authoritative; a skill never authorizes account mutations or publication.
 
 For changes here, verify Markdown references, YAML frontmatter and skill names,
-ignore behavior, and realistic routing/permission scenarios. Record structural
+agent TOML syntax/required fields, ignore behavior, and realistic routing/permission
+scenarios. Record structural
 checks separately from an actual fresh Codex discovery or behavioral evaluation.
 Instruction-only updates do not require an Android build or live contact tests.

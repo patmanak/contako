@@ -120,16 +120,30 @@ internal class RoomSyncStatusStore(private val database: ContakoDatabase) {
     suspend fun claimNotificationIfDue(
         accountId: String,
         nowEpochMillis: Long,
+    ): SyncNotificationReason? = deliverNotificationIfDue(accountId, nowEpochMillis) { true }
+
+    /** Failed publication leaves the block eligible. Stable Android IDs make replay idempotent. */
+    suspend fun deliverNotificationIfDue(
+        accountId: String,
+        nowEpochMillis: Long,
+        cancelWhenClear: () -> Unit = {},
+        publish: (SyncNotificationReason) -> Boolean,
     ): SyncNotificationReason? = database.withTransaction {
         require(accountId.isNotBlank())
         require(nowEpochMillis >= 0)
-        val status = database.syncAccountStatusDao().get(accountId) ?: return@withTransaction null
-        if (status.state != SyncHealthState.ACTION_REQUIRED.name) return@withTransaction null
+        val status = database.syncAccountStatusDao().get(accountId)
+        if (status == null || status.state != SyncHealthState.ACTION_REQUIRED.name) {
+            cancelWhenClear()
+            return@withTransaction null
+        }
         val blockedSince = status.blockedSinceEpochMillis ?: return@withTransaction null
         if (status.notificationClaimedForBlockEpochMillis != null) return@withTransaction null
         val reason = status.actionReason?.let(SyncActionReason::valueOf) ?: return@withTransaction null
         val due = reason.immediateNotification || elapsedAtLeast(blockedSince, nowEpochMillis, BLOCK_NOTIFICATION_DELAY)
         if (!due) return@withTransaction null
+        val notificationReason = if (reason.immediateNotification) SyncNotificationReason.IMMEDIATE_ACTION_REQUIRED
+            else SyncNotificationReason.BLOCKED_FOR_24_HOURS
+        if (!publish(notificationReason)) return@withTransaction null
         if (database.syncAccountStatusDao().claimNotification(accountId, blockedSince) != 1) {
             return@withTransaction null
         }
@@ -177,6 +191,7 @@ internal class RoomSyncPassStatusPublisher(
     private val wallClock: () -> Long = System::currentTimeMillis,
     private val isOffline: suspend () -> Boolean = { false },
     private val externalActionReason: suspend () -> SyncActionReason? = { null },
+    private val afterPublish: suspend () -> Unit = {},
 ) : SyncPassStatusPublisher {
     override suspend fun publish(outcome: SyncPassOutcome) {
         val all = database.outboxDao().getAll(accountId)
@@ -197,6 +212,7 @@ internal class RoomSyncPassStatusPublisher(
                 offline = outcome == SyncPassOutcome.RETRY_WAITING && isOffline(),
             ),
         )
+        afterPublish()
     }
 
     private fun List<com.patmanak.contako.data.local.OutboxMutationEntity>.toActionReason(): SyncActionReason? {

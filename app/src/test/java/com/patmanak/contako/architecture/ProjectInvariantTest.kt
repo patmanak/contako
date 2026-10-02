@@ -4,6 +4,7 @@ import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 class ProjectInvariantTest {
@@ -106,7 +107,7 @@ class ProjectInvariantTest {
         }
         assertTrue(catalog.contains("protonCore = \"36.8.0\""))
         assertEquals(23, Regex("module = \"me\\.proton\\.core:").findAll(catalog).count())
-        assertEquals(24, Regex("implementation\\(libs\\.proton\\.").findAll(build).count())
+        assertEquals(23, Regex("implementation\\(libs\\.proton\\.(?!golib\\))").findAll(build).count())
         assertTrue(catalog.contains("protonGolib = \"2.10.0-2\""))
         assertTrue(build.contains("strictly(libs.versions.protonGolib.get())"))
         assertEquals(23, Regex("version\\.ref = \"protonCore\"").findAll(catalog).count())
@@ -156,8 +157,10 @@ class ProjectInvariantTest {
             }
         assertTrue(productionText.contains("Other_"))
         assertTrue(productionText.contains("+contako"))
-        assertTrue(build.contains("val contakoReleaseVersion = \"0.8.0\""))
-        assertTrue(build.contains("versionCode = 8"))
+        val version = Regex("val contakoReleaseVersion = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"").find(build)
+        assertNotNull("A single release version must be declared", version)
+        assertTrue(build.contains("versionName = contakoReleaseVersion"))
+        assertTrue(Regex("versionCode = ([0-9]+)").find(build)!!.groupValues[1].toInt() > 0)
         assertTrue(build.contains("buildConfigField(\"String\", \"PROTON_RELEASE_VERSION\""))
         val networkSource = projectFile(
             "src/main/java/com/patmanak/contako/data/proton/ProtonGateCNetwork.kt",
@@ -209,7 +212,12 @@ class ProjectInvariantTest {
             "src/main/java/com/patmanak/contako/data/proton/ProtonContactVCardCodec.kt",
         ).readText()
         assertFalse(vCardCryptoSource.contains("decryptContactCard"))
-        assertTrue(vCardCryptoSource.contains("keyHolder.decryptText(card.data)"))
+        assertTrue(vCardCryptoSource.contains("decryptBoundedContactText(keyHolder, card.data,"))
+        val boundedDecryptSource = projectFile(
+            "src/main/java/com/patmanak/contako/data/proton/ProtonBoundedContactDecryptor.kt",
+        ).readText()
+        assertTrue(boundedDecryptSource.contains("import me.proton.core.key.domain.decryptText"))
+        assertTrue(boundedDecryptSource.contains("ring.decryptStream"))
         assertTrue(vCardCryptoSource.contains("keyHolder.verifyText(decrypted, signature)"))
         // Owner-approved wire type 1 has no signature; signed cards still fail verification closed.
         assertTrue(vCardCryptoSource.contains("val signature = card.signature"))
@@ -333,7 +341,7 @@ class ProjectInvariantTest {
         assertTrue(extractionRules.contains("<cloud-backup"))
         assertTrue(extractionRules.contains("<device-transfer>"))
 
-        assertTrue(databaseSource.contains("version = 16"))
+        assertTrue(databaseSource.contains("version = 17"))
         assertTrue(databaseSource.contains("exportSchema = true"))
         assertFalse(databaseSource.contains("fallbackToDestructiveMigration"))
         listOf(
@@ -352,6 +360,7 @@ class ProjectInvariantTest {
             "MIGRATION_13_14",
             "MIGRATION_14_15",
             "MIGRATION_15_16",
+            "MIGRATION_16_17",
         )
             .forEach { migration -> assertTrue(databaseSource.contains(migration)) }
         assertTrue(schema.contains("\"version\": 16"))

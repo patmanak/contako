@@ -357,4 +357,22 @@
     <string name="about_privacy_summary">Sans publicité, analyse d’usage ni rapport de crash à distance. Les diagnostics sont exportés uniquement sur demande. Les données Contako sont exclues des sauvegardes et transferts Android.</string>
     <string name="about_license_summary">© 2026 Patmanak · GPL-3.0-or-later.\nContako utilise Proton Core, AndroidX et d’autres bibliothèques libres sous leurs licences respectives. Les noms et logos Proton appartiennent à leurs propriétaires.</string>
     <string name="about_license_details">Licences et attributions</string>
+    <string name="error_stale_contact_edit">Ce contact a changé ailleurs. Votre brouillon est conservé. Rouvrez le contact avant de réappliquer vos modifications.</string>
+    <string name="error_group_operation_unavailable">Proton refuse actuellement certaines opérations sur les groupes pour ce compte. Les contacts restent modifiables.</string>
+    <string name="sync_alert_title">Alertes de synchronisation</string>
+    <string name="sync_alert_body">Ouvrez Contako pour consulter un problème de synchronisation.</string>
+    <string name="sync_alert_configure">Configurer les alertes de synchronisation</string>
+    <string name="conflict_title">Modifications concurrentes</string>
+    <string name="conflict_review">Comparer les versions</string>
+    <string name="conflict_queued">Choix enregistré ; en attente de synchronisation</string>
+    <string name="conflict_explanation">Les deux versions sont conservées jusqu’à application de votre choix. Une nouvelle modification nécessitera une autre vérification.</string>
+    <string name="conflict_refresh">Les versions ont peut-être changé. Rechargez-les avant de choisir.</string>
+    <string name="conflict_local">Version Contako</string>
+    <string name="conflict_proton">Version Proton</string>
+    <string name="conflict_keep_local">Garder la version Contako</string>
+    <string name="conflict_use_proton">Utiliser la version Proton</string>
+    <string name="conflict_deleted">Contact marqué pour suppression</string>
+    <string name="conflict_group_pending">La version Proton supprime un e-mail lié à des modifications de groupes en attente. Réglez ces affectations avant de l’utiliser.</string>
+    <string name="conflict_remote_deleted">Ce contact a été supprimé sur Proton. Le brouillon local est conservé ; la comparaison précédente ne peut pas résoudre une suppression.</string>
+    <string name="field_structured_name">Nom structuré</string>
 </resources>

@@ -32,6 +32,52 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ContactsViewModelTest {
+    @Test fun deniedGroupCreationDoesNotBlockContactSaveAndRefreshRestoresAction() = runTest(dispatcher) {
+        val original = contact("capability", "Original", "email", "fixture@example.test")
+        val repository = FakeRepository(listOf(original))
+        val denied = MutableStateFlow(setOf(com.patmanak.contako.domain.model.GroupOperation.CREATE))
+        val model = ContactsViewModel(repository, deniedGroupOperations = denied)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        advanceUntilIdle()
+        model.editGroup()
+        advanceUntilIdle()
+        assertNull(model.uiState.value.groupEditor)
+        model.editContact(original)
+        advanceUntilIdle()
+        model.saveContact()
+        advanceUntilIdle()
+        assertEquals(original.id, repository.savedContact?.id)
+        denied.value = emptySet()
+        advanceUntilIdle()
+        model.editGroup()
+        advanceUntilIdle()
+        assertTrue(model.uiState.value.groupEditor != null)
+    }
+    @Test fun contactSaveFreezesDraftAndRetainsItOnConcurrentEditRejection() = runTest(dispatcher) {
+        val original = contact("edit-freeze", "Original", "email", "fixture@example.test")
+        val repository = FakeRepository(listOf(original))
+        val result = CompletableDeferred<SaveResult<CanonicalContact>>()
+        repository.contactSave = { result.await() }
+        val model = ContactsViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        model.editContact(original)
+        advanceUntilIdle()
+        val draft = requireNotNull(model.uiState.value.contactEditor).copy(firstName = "Draft")
+        model.updateContactEditor(draft)
+        model.saveContact()
+        advanceUntilIdle()
+        model.updateContactEditor(draft.copy(firstName = "Must not be accepted"))
+        model.updateContactValue("email", "changed@example.test")
+        model.dismissContactEditor()
+        advanceUntilIdle()
+        assertEquals("Draft", model.uiState.value.contactEditor?.firstName)
+        assertTrue(model.uiState.value.contactEditor?.saving == true)
+        result.complete(SaveResult.Rejected(setOf(com.patmanak.contako.domain.repository.SaveValidationIssue.STALE_CONTACT_EDIT)))
+        advanceUntilIdle()
+        assertEquals("Draft", model.uiState.value.contactEditor?.firstName)
+        assertEquals(UiMessage.STALE_CONTACT_EDIT, model.uiState.value.contactEditor?.validationError)
+        assertEquals(original, repository.savedBaseline?.contact)
+    }
     @Test
     fun blankDisplayNameIsPersistedFromNamePartsOnCreateAndEdit() = runTest(dispatcher) {
         val cases = listOf(
@@ -1376,6 +1422,8 @@ class ContactsViewModelTest {
         val contacts = MutableStateFlow(contacts)
         var contactsObserveCount = 0
         var savedContact: CanonicalContact? = null
+        var contactSave: suspend (CanonicalContact) -> SaveResult<CanonicalContact> = { SaveResult.Saved(it) }
+        var savedBaseline: com.patmanak.contako.domain.repository.ContactEditBaseline? = null
         var savedGroup: ContactGroup? = null
         var groupSaveCount = 0
         var deleteCount = 0
@@ -1397,15 +1445,17 @@ class ContactsViewModelTest {
 
         override suspend fun saveContact(contact: CanonicalContact): SaveResult<CanonicalContact> {
             savedContact = contact
-            return SaveResult.Saved(contact)
+            return contactSave(contact)
         }
 
         override suspend fun saveContactWithGroupAssignments(
             contact: CanonicalContact,
             assignments: Set<ContactGroupAssignment>,
             managedGroupIds: Set<String>,
+            baseline: com.patmanak.contako.domain.repository.ContactEditBaseline?,
         ): SaveResult<CanonicalContact> {
             savedContactGroupAssignments = assignments
+            savedBaseline = baseline
             savedManagedGroupIds = managedGroupIds
             return saveContact(contact)
         }

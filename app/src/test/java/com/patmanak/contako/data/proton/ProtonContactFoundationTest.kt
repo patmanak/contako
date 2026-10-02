@@ -65,9 +65,11 @@ class ArchitectureFoundationTest {
         assertFalse(foundation.contains("ApiProvider("))
         assertFalse(foundation.contains("retrofit2."))
         assertFalse(foundation.contains("mail.proton.me"))
-        assertTrue(crypto.contains("decryptText"))
+        assertTrue(crypto.contains("decryptBoundedContactText"))
+        assertTrue(source("ProtonBoundedContactDecryptor.kt").contains("import me.proton.core.key.domain.decryptText"))
         assertTrue(crypto.contains("verifyText"))
-        assertTrue(crypto.contains("encryptAndSignContactCard"))
+        assertTrue(crypto.contains("import me.proton.core.key.domain.encryptText"))
+        assertTrue(crypto.contains("import me.proton.core.key.domain.signText"))
         assertTrue(crypto.contains("signContactCard"))
         assertFalse(crypto.contains("GOpenPGP"))
     }
@@ -101,11 +103,11 @@ class ContactIndexFoundationTest {
         // fingerprint, because the maintained public route returns the complete list in one call
         // and every page is served from that single snapshot. D-032 requires this to plan at all.
         assertEquals(
-            ContactInventorySnapshotAuthority.AUTHORITATIVE_REMOTE_REVISION,
+            ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY,
             first.snapshotAuthority,
         )
         assertEquals(
-            ContactInventorySnapshotAuthority.AUTHORITATIVE_REMOTE_REVISION,
+            ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY,
             second.snapshotAuthority,
         )
     }

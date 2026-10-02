@@ -70,4 +70,20 @@ class AndroidInterruptedPhotoProjectionTest {
             fail("An equal snapshot must not emit mismatch details")
         })
     }
+
+    @Test fun `matching name parts do not authorize replacing an explicit alias during initial photo recovery`() {
+        val contact = canonical.copy(firstName = "Mira", lastName = "Aster", displayName = "Aster Alias")
+        val expected = mapper.project(contact)
+        val observed = expected.copy(rows = expected.rows.map { row ->
+            if (row.kind == AndroidRowKind.STRUCTURED_NAME) row.copy(
+                value = "Mira Aster",
+                components = row.components + (AndroidComponent.DISPLAY_NAME to "Mira Aster"),
+            ) else row
+        })
+        var mismatch: AndroidInitialBaselineMismatch? = null
+
+        assertSame(expected, verifiedInitialProjectionBaseline(expected, expected, mapper))
+        assertNull(verifiedInitialProjectionBaseline(expected, observed, mapper) { mismatch = it })
+        assertEquals(AndroidProjectionRepairCategory.POST_WRITE_CONTACT_VALUE_NAME, mismatch?.category)
+    }
 }

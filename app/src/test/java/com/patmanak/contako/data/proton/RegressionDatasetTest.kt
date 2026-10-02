@@ -80,7 +80,6 @@ class RegressionDatasetTest {
         }
     }
 
-    @Ignore("Known codec name selection depends on card order; see QA.md. Cleanup does not change production.")
     @Test fun canonicalNamesMustNotDependOnPublicPrivateCardOrder() {
         profiles.filter { it.string("id") != "C02" }.forEach { profile ->
             val decoded = decode(profile)

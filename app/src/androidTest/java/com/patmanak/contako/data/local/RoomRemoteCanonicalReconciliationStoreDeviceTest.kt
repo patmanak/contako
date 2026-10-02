@@ -123,7 +123,7 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
     }
 
     @Test
-    fun localLaterUpdateWinsAndAbsorbsRemotePreservationWithoutLosingIntent() = runBlocking {
+    fun localLaterUpdateRetainsBothVersionsWithoutAdvancingUploadBaseline() = runBlocking {
         stage().run(ACCOUNT)
         save(requireNotNull(repository.getContact(ACCOUNT.value, "remote")).copy(displayName = "Local Later"))
         remote = listOf(remoteFixture("remote", "Remote Earlier", 2, 11_000, "stable-uid", "remote-unknown"))
@@ -132,15 +132,16 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
 
         val retained = requireNotNull(repository.getContact(ACCOUNT.value, "remote"))
         assertEquals("Local Later", retained.displayName)
-        assertEquals("version-2", retained.remoteVersion)
-        assertEquals("remote-unknown", retained.preservationEnvelope?.rawProperties?.get("proton-card-9"))
+        assertEquals("version-1", retained.remoteVersion)
+        val conflict = requireNotNull(RoomContactConflictStore(database).detail(ACCOUNT.value, retained.id))
+        assertEquals("remote-unknown", conflict.proton.preservationEnvelope?.rawProperties?.get("proton-card-9"))
         val outbox = database.outboxDao().getAll(ACCOUNT.value).single()
-        assertEquals("version-2", outbox.remoteVersion)
-        assertEquals(DurableMutationState.PENDING.name, outbox.state)
+        assertEquals("version-1", outbox.remoteVersion)
+        assertEquals(DurableMutationState.ACTION_REQUIRED.name, outbox.state)
     }
 
     @Test
-    fun remoteStrictlyLaterUpdateWinsAndSupersedesPendingLocalRevision() = runBlocking {
+    fun remoteStrictlyLaterUpdateStillRequiresUserChoice() = runBlocking {
         stage().run(ACCOUNT)
         wallClock = 10_500_000
         elapsedClock = 501_000
@@ -150,9 +151,9 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         stage().run(ACCOUNT)
 
         val adopted = requireNotNull(repository.getContact(ACCOUNT.value, "remote"))
-        assertEquals("Remote Later", adopted.displayName)
-        assertNull(adopted.pendingMutationRevision)
-        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+        assertEquals("Local Earlier", adopted.displayName)
+        assertTrue(adopted.pendingMutationRevision != null)
+        assertEquals("Remote Later", requireNotNull(RoomContactConflictStore(database).detail(ACCOUNT.value, adopted.id)).proton.displayName)
     }
 
     @Test
@@ -167,10 +168,10 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
 
         val blocked = requireNotNull(repository.getContact(ACCOUNT.value, "remote"))
         assertTrue(blocked.isDeleted)
-        assertEquals("EDIT_DELETE_RECOVERY_REQUIRED", blocked.conflictState)
+        assertEquals(RoomContactConflictStore.CONFLICT, blocked.conflictState)
         val outbox = database.outboxDao().getAll(ACCOUNT.value).single()
         assertEquals(DurableMutationState.ACTION_REQUIRED.name, outbox.state)
-        assertEquals("EDIT_DELETE_RECOVERY_REQUIRED", outbox.blockedReason)
+        assertEquals(RoomContactConflictStore.CONFLICT, outbox.blockedReason)
     }
 
     @Test
@@ -230,6 +231,22 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         assertTrue(requireNotNull(repository.getContact(ACCOUNT.value, "remote")).isDeleted)
     }
 
+    @Test fun remoteDeletionInvalidatesQueuedChoiceWithoutLosingDraft() = runBlocking {
+        stage().run(ACCOUNT)
+        save(requireNotNull(repository.getContact(ACCOUNT.value, "remote")).copy(displayName = "Local draft"))
+        remote = listOf(remoteFixture("remote", "Remote change", 2, 12_000, "stable-uid"))
+        stage().run(ACCOUNT)
+        val conflicts = RoomContactConflictStore(database)
+        val detail = requireNotNull(conflicts.detail(ACCOUNT.value, "remote"))
+        assertTrue(conflicts.choose(ACCOUNT.value, detail.summary, com.patmanak.contako.domain.sync.ContactConflictChoice.PROTON))
+        remote = emptyList()
+        stage().run(ACCOUNT)
+        val updated = requireNotNull(conflicts.detail(ACCOUNT.value, "remote"))
+        assertTrue(updated.summary.remoteDeleted)
+        assertNull(updated.summary.choice)
+        assertEquals("Local draft", repository.getContact(ACCOUNT.value, "remote")?.displayName)
+    }
+
     @Test
     fun lostCreateAcknowledgementMatchesStableVCardUidInsteadOfDuplicatingLocalContact() = runBlocking {
         remote = emptyList()
@@ -243,9 +260,10 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
 
         val reconciled = requireNotNull(repository.getContact(ACCOUNT.value, "local-uid"))
         assertEquals("remote-created", reconciled.remoteContactId)
-        assertNull(reconciled.pendingMutationRevision)
+        assertTrue(reconciled.pendingMutationRevision != null)
         assertNull(repository.getContact(ACCOUNT.value, "remote-created"))
-        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+        assertEquals("remote-created", database.outboxDao().getAll(ACCOUNT.value).single().remoteIdentity)
+        assertTrue(RoomContactConflictStore(database).detail(ACCOUNT.value, "local-uid") != null)
     }
 
     @Test

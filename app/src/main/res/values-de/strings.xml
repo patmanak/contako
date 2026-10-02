@@ -350,4 +350,22 @@
     <string name="about_privacy_summary">Keine Werbung, Nutzungsanalyse oder Fernübermittlung von Absturzberichten. Diagnosen werden nur auf Anfrage exportiert. Contako-Daten sind von Android-Sicherungen und Geräteübertragungen ausgeschlossen.</string>
     <string name="about_license_summary">© 2026 Patmanak · GPL-3.0-or-later.\nContako verwendet Proton Core, AndroidX und weitere Open-Source-Bibliotheken unter ihren jeweiligen Lizenzen. Proton-Namen und -Logos gehören ihren Eigentümern.</string>
     <string name="about_license_details">Lizenzen und Quellen</string>
+    <string name="error_stale_contact_edit">Dieser Kontakt wurde anderswo geändert. Ihr Entwurf bleibt erhalten. Öffnen Sie den Kontakt erneut, bevor Sie Ihre Änderungen übernehmen.</string>
+    <string name="error_group_operation_unavailable">Proton erlaubt derzeit einige Gruppenaktionen für dieses Konto nicht. Kontakte können weiterhin bearbeitet werden.</string>
+    <string name="sync_alert_title">Synchronisierungshinweise</string>
+    <string name="sync_alert_body">Öffne Contako, um ein Synchronisierungsproblem zu prüfen.</string>
+    <string name="sync_alert_configure">Synchronisierungshinweise einrichten</string>
+    <string name="conflict_title">Gleichzeitige Änderungen</string>
+    <string name="conflict_review">Versionen vergleichen</string>
+    <string name="conflict_queued">Auswahl gespeichert; Synchronisierung ausstehend</string>
+    <string name="conflict_explanation">Beide Versionen bleiben bis zur Anwendung deiner Auswahl erhalten. Neue Änderungen erfordern eine erneute Prüfung.</string>
+    <string name="conflict_refresh">Die Versionen könnten sich geändert haben. Lade sie vor der Auswahl erneut.</string>
+    <string name="conflict_local">Contako-Version</string>
+    <string name="conflict_proton">Proton-Version</string>
+    <string name="conflict_keep_local">Contako-Version behalten</string>
+    <string name="conflict_use_proton">Proton-Version verwenden</string>
+    <string name="conflict_deleted">Kontakt zum Löschen vorgemerkt</string>
+    <string name="conflict_group_pending">Die Proton-Version entfernt eine E-Mail mit ausstehenden Gruppenänderungen. Kläre diese Zuordnungen vor der Übernahme.</string>
+    <string name="conflict_remote_deleted">Dieser Kontakt wurde auf Proton gelöscht. Der lokale Entwurf bleibt erhalten; der vorherige Vergleich kann eine Löschung nicht auflösen.</string>
+    <string name="field_structured_name">Strukturierter Name</string>
 </resources>

@@ -52,6 +52,9 @@ enum class RepairStartResult { CONFIRMATION_REQUIRED, STARTED, RESUMED }
 
 /** Presentation-neutral recovery port implemented by the synchronization data adapter. */
 interface SyncRecoveryDataSource {
+    fun observeConflicts(accountId: String): Flow<List<ContactConflictSummary>> = flowOf(emptyList())
+    suspend fun loadConflict(accountId: String, contactId: String): ContactConflictDetail? = null
+    suspend fun chooseConflict(accountId: String, expected: ContactConflictSummary, choice: ContactConflictChoice): Boolean = false
     fun observeStatus(accountId: String): Flow<SyncDashboardSnapshot?>
     fun observeRepair(accountId: String): Flow<RepairProgress?>
     fun observeActivity(accountId: String): Flow<SyncActivity>

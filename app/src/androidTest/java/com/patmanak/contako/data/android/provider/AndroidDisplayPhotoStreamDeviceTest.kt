@@ -23,6 +23,18 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 internal class AndroidDisplayPhotoStreamDeviceTest {
+    @Test fun highlyCompressedLargePhotoStillGetsSampledForInlineProjection() {
+        val bitmap = Bitmap.createBitmap(2048, 2048, Bitmap.Config.ARGB_8888)
+        val input = ByteArrayOutputStream().use { stream ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            bitmap.recycle()
+            stream.toByteArray()
+        }
+        assertTrue(input.size <= AndroidProjectionPhotoScaler.MAX_INLINE_PHOTO_BYTES)
+        val output = requireNotNull(AndroidProjectionPhotoScaler.scaleForProvider(input))
+        val decoded = requireNotNull(BitmapFactory.decodeByteArray(output, 0, output.size))
+        try { assertTrue(maxOf(decoded.width, decoded.height) <= 512) } finally { decoded.recycle() }
+    }
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
     private lateinit var account: Account
     private var rawContactId: Long = 0

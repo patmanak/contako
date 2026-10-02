@@ -73,12 +73,11 @@ independent expected values, exact Unicode/newline preservation, compatible edit
 round trips, per-email groups and negative rejection. This qualifies the codec,
 not the behavior of Proton Web, encryption/signatures or an Android OEM.
 
-Known isolated finding: public FN before private N leaves canonical firstName/
-lastName empty although the structured-name value retains both. The executable
-canonicalNamesMustNotDependOnPublicPrivateCardOrder case is explicitly ignored
-until a separate production fix; it is NOT a pass. The active checks compare
-the independently authored structured components and their preservation.
-Actual phone/Web impact remains unverified; do not reorder inputs to hide it.
+The canonicalNamesMustNotDependOnPublicPrivateCardOrder regression verifies
+that public FN before private N retains canonical firstName/lastName as well as
+the independently authored structured components. Keep that order in fixtures;
+reordering inputs would hide the previously reported defect. Codec acceptance
+does not replace physical name-preservation checks.
 
 ## Install, observe and clean up
 

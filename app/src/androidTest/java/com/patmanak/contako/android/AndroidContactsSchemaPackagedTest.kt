@@ -3,11 +3,13 @@ package com.patmanak.contako.android
 import android.Manifest
 import android.content.ComponentName
 import android.content.Context
+import android.content.res.XmlResourceParser
 import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.patmanak.contako.R
 import com.patmanak.contako.android.account.ContakoAccountAuthenticatorService
+import com.patmanak.contako.android.account.ContakoAndroidAccountContract
 import com.patmanak.contako.android.sync.ContakoContactsSyncAdapterService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -60,13 +62,13 @@ class AndroidContactsSchemaPackagedTest {
     @Test
     fun packagedMetadataUsesThePermanentAccountIdentityAndContactsAuthority() {
         val authenticator = context.resources.getXml(R.xml.account_authenticator).rootAttributes()
-        assertEquals("com.patmanak.contako", authenticator.android("accountType"))
+        assertEquals(ContakoAndroidAccountContract.ACCOUNT_TYPE, authenticator.android("accountType"))
         assertTrue(authenticator.android("icon").isNotBlank())
         assertTrue(authenticator.android("smallIcon").isNotBlank())
         assertTrue(authenticator.android("label").isNotBlank())
 
         val syncAdapter = context.resources.getXml(R.xml.contacts_sync_adapter).rootAttributes()
-        assertEquals("com.patmanak.contako", syncAdapter.android("accountType"))
+        assertEquals(ContakoAndroidAccountContract.ACCOUNT_TYPE, syncAdapter.android("accountType"))
         assertEquals("com.android.contacts", syncAdapter.android("contentAuthority"))
         assertEquals("true", syncAdapter.android("supportsUploading"))
         assertEquals("true", syncAdapter.android("userVisible"))
@@ -125,12 +127,16 @@ class AndroidContactsSchemaPackagedTest {
         PackageManager.GET_META_DATA,
     )
 
-    private fun XmlPullParser.rootAttributes(): Attributes {
+    private fun XmlResourceParser.rootAttributes(): Attributes {
         while (eventType != XmlPullParser.START_TAG && eventType != XmlPullParser.END_DOCUMENT) next()
         check(eventType == XmlPullParser.START_TAG)
         return Attributes(
             (0 until attributeCount).associate {
-                AttributeKey(getAttributeNamespace(it), getAttributeName(it)) to getAttributeValue(it)
+                val value = if (getAttributeName(it) == "accountType") {
+                    val resource = getAttributeResourceValue(it, 0)
+                    if (resource != 0) context.getString(resource) else getAttributeValue(it)
+                } else getAttributeValue(it)
+                AttributeKey(getAttributeNamespace(it), getAttributeName(it)) to value
             },
         )
     }

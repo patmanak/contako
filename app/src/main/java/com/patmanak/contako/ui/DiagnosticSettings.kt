@@ -38,6 +38,7 @@ import kotlinx.coroutines.withContext
 internal fun DiagnosticSettings(state: ContactsUiState) {
     val context = LocalContext.current
     var report by remember { mutableStateOf<LocalDiagnosticReport?>(null) }
+    var generationFailed by remember { mutableStateOf(false) }
     var exportSucceeded by remember { mutableStateOf<Boolean?>(null) }
     val scope = rememberCoroutineScope()
     var exporting by remember { mutableStateOf(false) }
@@ -70,7 +71,7 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
         Button(
             enabled = !exporting,
             onClick = {
-                report = LocalDiagnosticReportGenerator.generate(
+                report = try { LocalDiagnosticReportGenerator.generate(
                     LocalDiagnosticInput(
                         appVersion = BuildConfig.VERSION_NAME,
                         apiLevel = Build.VERSION.SDK_INT,
@@ -83,9 +84,17 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
                         contactsPermissionGranted = state.contactsPermissionGranted,
                     ),
                 )
+                .also { generationFailed = false } } catch (_: IllegalStateException) {
+                    generationFailed = true
+                    null
+                } catch (_: IllegalArgumentException) {
+                    generationFailed = true
+                    null
+                }
                 exportSucceeded = null
             },
         ) { Text(stringResource(R.string.diagnostics_generate)) }
+        if (generationFailed) Text(stringResource(R.string.diagnostics_export_failed))
         report?.let { generated ->
             Column(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp),

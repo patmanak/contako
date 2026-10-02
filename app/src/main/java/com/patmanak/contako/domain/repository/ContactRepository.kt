@@ -15,6 +15,7 @@ interface ContactRepository {
         contact: CanonicalContact,
         assignments: Set<ContactGroupAssignment>,
         managedGroupIds: Set<String>,
+        baseline: ContactEditBaseline? = null,
     ): SaveResult<CanonicalContact>
     suspend fun deleteContact(accountId: String, contactId: String)
     suspend fun saveGroup(group: ContactGroup): SaveResult<ContactGroup>
@@ -26,12 +27,21 @@ data class ContactGroupAssignment(
     val emailValueId: String,
 )
 
+/** Opening state used only for optimistic editor concurrency, never as an upload payload. */
+data class ContactEditBaseline(
+    val contact: CanonicalContact,
+    val assignments: Set<ContactGroupAssignment>,
+) {
+    override fun toString(): String = "ContactEditBaseline(REDACTED)"
+}
+
 sealed interface SaveResult<out T> {
     data class Saved<T>(val value: T) : SaveResult<T>
     data class Rejected(val issues: Set<SaveValidationIssue>) : SaveResult<Nothing>
 }
 
 enum class SaveValidationIssue {
+    STALE_CONTACT_EDIT,
     BLANK_ACCOUNT_ID,
     ACCOUNT_SCOPE_MISMATCH,
     BLANK_CONTACT_ID,

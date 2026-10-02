@@ -75,6 +75,27 @@ Read only the skill relevant to the task:
 Selection rationale and upstream references: [Agent setup](docs/AGENT_SETUP.md).
 Skills do not grant device/account authority or require automatic delegation.
 
+## Agent routing
+
+Use [the working method](docs/WORKFLOW.md). Six project roles live in
+`.codex/agents/`, alongside the existing focused skills. Select roles by need;
+routine edits may remain with the primary. Use bounded delegation for substantial
+independent source research, planning or review when useful to the authorized task.
+There is no requirement to run every role or to create a sidebar chat.
+
+At most three children may run concurrently, with no nested delegation. Inherit
+the parent's model/settings unless the user requests otherwise. Assign each child
+a question, relevant inputs, deliverable, exclusive write scope (or read-only),
+expected evidence and side-effect limits. Research/review roles remain read-only.
+Settle shared contracts before parallel implementation; one active writer owns
+each file. Testers write assigned tests/fixtures, not production fixes.
+
+The primary integrates and verifies results, coordinates shared documentation and
+alone updates public implementation limits after checking the evidence. Keep
+temporary plans/handoffs under ignored `.agent-local/` and QA runs in the ignored
+paths from [QA](docs/QA.md). Sequential self-review MUST NOT be described as
+independent review. Reference projects grant no device/account authorization.
+
 ## Evidence and delivery
 
 Public files MUST describe reusable product contracts, contribution procedures

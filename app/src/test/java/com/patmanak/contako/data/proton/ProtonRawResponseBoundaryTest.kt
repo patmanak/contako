@@ -30,9 +30,11 @@ import retrofit2.Retrofit
 class ProtonRawResponseBoundaryTest {
     @Test
     fun realHttpChunkedGzipIsLimitedAfterDecompressionForSuccessAndError() = runBlocking {
-        for (status in listOf(200, 400)) {
+        for ((method, path) in listOf("POST" to "contacts/v4/contacts", "GET" to "contacts/v4/contacts/fixture",
+            "GET" to "contacts/v4/contacts", "GET" to "core/v4/labels")) for (status in listOf(200, 400)) {
+            val limit = requireNotNull(GateDRawResponseLimits.forRequest(method, path.split('/')))
             val compressed = ByteArrayOutputStream().also { output ->
-                GZIPOutputStream(output).use { it.write(ByteArray(262_144) { 'x'.code.toByte() }) }
+                GZIPOutputStream(output).use { it.write(ByteArray(limit + 1) { 'x'.code.toByte() }) }
             }.toByteArray()
             ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
                 server.soTimeout = 5_000
@@ -60,14 +62,14 @@ class ProtonRawResponseBoundaryTest {
                 }
                 val client = OkHttpClient.Builder().addInterceptor(GateDBoundedResponseInterceptor).build()
                 val host = requireNotNull(server.inetAddress.hostAddress).let { if (':' in it) "[$it]" else it }
-                val api = Retrofit.Builder().baseUrl("http://$host:${server.localPort}/")
-                    .client(client).build().create(ProtonGateDWireApi::class.java)
+                val request = okhttp3.Request.Builder().url("http://$host:${server.localPort}/$path")
+                    .method(method, if (method == "POST") "{}".toRequestBody() else null).build()
                 try {
-                    api.createContacts("{}".toRequestBody()).use { it.string() }
+                    client.newCall(request).execute().use { it.body!!.string() }
                     error("DECOMPRESSED_BODY_LIMIT_NOT_ENFORCED")
                 } catch (_: ProtonResponseSizeExceeded) {
                     // The compressed wire body is small, but the decoded body exceeds the cap.
-                    assertTrue(compressed.size < GateDRawResponseLimits.CREATE_BYTES)
+                    assertTrue(compressed.size < limit)
                 } finally {
                     responder.join(5_000)
                     assertTrue("LOCAL_HTTP_RESPONDER_STILL_RUNNING", !responder.isAlive)

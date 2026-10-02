@@ -350,4 +350,22 @@
     <string name="about_privacy_summary">No ads, analytics or remote crash reporting. Diagnostics are exported only on request. Android backup and device transfer are disabled for Contako data.</string>
     <string name="about_license_summary">© 2026 Patmanak · GPL-3.0-or-later.\nContako uses Proton Core, AndroidX and other open-source libraries under their respective licenses. Proton names and logos belong to their owners.</string>
     <string name="about_license_details">Licenses and credits</string>
+    <string name="error_stale_contact_edit">This contact changed elsewhere. Your draft is preserved. Reopen the contact before applying your changes again.</string>
+    <string name="error_group_operation_unavailable">Proton does not currently allow some group operations for this account. Contact editing remains available.</string>
+    <string name="sync_alert_title">Synchronization alerts</string>
+    <string name="sync_alert_body">Open Contako to review a synchronization problem.</string>
+    <string name="sync_alert_configure">Configure synchronization alerts</string>
+    <string name="conflict_title">Concurrent changes</string>
+    <string name="conflict_review">Compare versions</string>
+    <string name="conflict_queued">Choice saved; waiting for synchronization</string>
+    <string name="conflict_explanation">Both versions are kept until your choice is applied. New changes require another review.</string>
+    <string name="conflict_refresh">The versions may have changed. Reload them before choosing.</string>
+    <string name="conflict_local">Contako version</string>
+    <string name="conflict_proton">Proton version</string>
+    <string name="conflict_keep_local">Keep Contako version</string>
+    <string name="conflict_use_proton">Use Proton version</string>
+    <string name="conflict_deleted">Contact marked for deletion</string>
+    <string name="conflict_group_pending">The Proton version removes an email with pending group changes. Resolve those group assignments before using it.</string>
+    <string name="conflict_remote_deleted">This contact was deleted on Proton. The local draft is kept; the previous comparison cannot resolve a deletion.</string>
+    <string name="field_structured_name">Structured name</string>
 </resources>

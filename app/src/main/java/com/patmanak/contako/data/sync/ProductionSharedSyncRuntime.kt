@@ -82,6 +82,8 @@ internal data class ProductionSyncDependencies(
     val emailLabels: ProtonContactEmailLabelGateway,
     val membershipReader: ProtonEmailGroupMembershipReader,
     val localSessionCleanup: ProtonLocalSessionCleanupGateway,
+    val existence: com.patmanak.contako.data.gateway.ProtonContactExistenceGateway =
+        com.patmanak.contako.data.gateway.ProtonContactExistenceGateway { _, _ -> GatewayOutcome.Failure(GatewayFailureCategory.UNKNOWN) },
 )
 
 /** Production composition only wires dormant gateways; I/O starts when the shared runner executes. */
@@ -132,6 +134,7 @@ internal fun composeProductionSharedSyncRuntime(
             gateD.emailLabels,
             gateD.membershipReader,
             proton.session as ProtonLocalSessionCleanupGateway,
+            gateD.existence,
         ),
         runnerScope,
         stopScheduling,
@@ -257,8 +260,9 @@ internal fun composeProductionSharedSyncRuntime(
         replanObserver = androidIngestReplanObserver,
     )
     val mutationOrchestrator = DurableMutationOrchestrator(
-        RoomMutationExecutionStore(database),
-        RoomBackedMutationPreparationGateway(account, database, dependencies.membershipReader),
+        RoomMutationExecutionStore(database, dependencies.existence),
+        RoomBackedMutationPreparationGateway(account, database, dependencies.membershipReader,
+            dependencies.verifiedCards, dependencies.existence),
         RoomBackedMutationUploadGateway(
             account,
             database,
@@ -302,6 +306,7 @@ internal fun composeProductionSharedSyncRuntime(
             // Remote image references remain canonical references. Synchronization MUST NOT make
             // automatic requests to arbitrary contact-controlled hosts.
             RoomRemoteCanonicalReconciliationStore(database),
+            existenceGateway = dependencies.existence,
             actionRequiredObserver = RemoteContactActionRequiredObserver { boundary, category, hydration ->
                 remoteFailure.set(when (category) {
                     GatewayFailureCategory.AUTHENTICATION_REQUIRED -> SyncActionReason.AUTHENTICATION_REQUIRED
@@ -320,6 +325,9 @@ internal fun composeProductionSharedSyncRuntime(
         statusPublisher = RoomSyncPassStatusPublisher(
             account.value,
             database,
+            afterPublish = {
+                com.patmanak.contako.android.sync.AndroidSyncActionNotifier(applicationContext, RoomSyncStatusStore(database)).refresh(account.value)
+            },
             // Without this the publisher had no reason to report and fell back to
             // INTERNAL_FAILURE, which claimed pending changes needed attention even when
             // the outbox was empty and only Android interoperability was degraded.

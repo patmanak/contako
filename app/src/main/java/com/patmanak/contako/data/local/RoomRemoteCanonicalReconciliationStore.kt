@@ -15,13 +15,6 @@ import com.patmanak.contako.data.android.RoomAndroidProjectionLedger
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.GroupMembership
-import com.patmanak.contako.data.proton.mergePendingProtonPreservation
-import com.patmanak.contako.domain.sync.ConflictChange
-import com.patmanak.contako.domain.sync.ConflictResolution
-import com.patmanak.contako.domain.sync.ContactConflictPolicy
-import com.patmanak.contako.domain.sync.LocalWriteEvidence
-import com.patmanak.contako.domain.sync.LocalWriteEvidenceFactory
-import com.patmanak.contako.domain.sync.UtcTimeInterval
 
 /** Room transaction implementing remote adoption and the single D-024/D-006 conflict policy. */
 internal class RoomRemoteCanonicalReconciliationStore(
@@ -53,8 +46,8 @@ internal class RoomRemoteCanonicalReconciliationStore(
 
     /**
      * @param remoteModifiedAtEpochSeconds server modification time, or `null` for a
-     * public-directory inventory under `D-096`. A null value makes the remote side incomparable, so
-     * `D-024` deterministically favours the still-pending local edit rather than guessing an order.
+     * public-directory inventory under `D-096`. Concurrent changes require an explicit user choice;
+     * observation time MUST NOT be used to infer which version wins.
      */
     private suspend fun reconcileHydrated(
         account: AccountScope,
@@ -97,9 +90,21 @@ internal class RoomRemoteCanonicalReconciliationStore(
             return
         }
         check(outbox != null && outbox.revision == local.pendingMutationRevision)
+        if (local.remoteContactId == null) {
+            // Recover only the stable vCard UID of an ambiguous creation, never a name match.
+            check(remote.remoteVCardUid != null &&
+                (remote.remoteVCardUid == local.remoteVCardUid || remote.remoteVCardUid == local.id))
+            RoomContactConflictStore(database).capture(local.copy(remoteContactId = verified.id.value),
+                outbox.copy(remoteIdentity = verified.id.value), verified)
+            return
+        }
 
         // Hydration (including post-write invalidation) is not evidence of a remote edit.
         // Compare against the durable intent's baseline, never against its local edited values.
+        if (database.contactConflictDao().get(account.value, local.id) != null) {
+            RoomContactConflictStore(database).capture(local, outbox, verified)
+            return
+        }
         if (verified.matchesBaseline(outbox.remoteVersion)) {
             if (outbox.state == DurableMutationState.ACTION_REQUIRED.name &&
                 outbox.blockedReason == "EDIT_DELETE_RECOVERY_REQUIRED" &&
@@ -110,53 +115,7 @@ internal class RoomRemoteCanonicalReconciliationStore(
             return
         }
 
-        val localChange = if (outbox.operation == MutationOperation.DELETE.name) {
-            ConflictChange.DELETE
-        } else {
-            ConflictChange.UPDATE
-        }
-        when (
-            ContactConflictPolicy.resolve(
-                localChange,
-                outbox.toWriteEvidence(),
-                ConflictChange.UPDATE,
-                remoteModifiedAtEpochSeconds?.let(LocalWriteEvidenceFactory::remoteWholeSecond),
-            )
-        ) {
-            ConflictResolution.LOCAL_WINS -> {
-                val mergedEnvelope = mergePendingProtonPreservation(local.preservationEnvelope, remote.preservationEnvelope)
-                database.contactDao().upsert(
-                    local.copy(
-                        remoteContactId = verified.id.value,
-                        remoteVersion = verified.version?.value,
-                        preservationEnvelope = mergedEnvelope,
-                    ).toEntity(),
-                )
-                mergedEnvelope?.let { database.contactPayloadDao().upsert(it.toEntity(account.value, local.id)) }
-                check(
-                    database.outboxDao().updateCheckedRemoteBaseline(
-                        account.value,
-                        AggregateType.CONTACT.name,
-                        local.id,
-                        outbox.revision,
-                        verified.id.value,
-                        verified.version?.value,
-                    ) == 1,
-                )
-            }
-            ConflictResolution.REMOTE_WINS -> {
-                adoptRemote(local, remote, verified, remoteModifiedAtEpochSeconds)
-                check(
-                    database.outboxDao().deleteRevision(
-                        account.value,
-                        AggregateType.CONTACT.name,
-                        local.id,
-                        outbox.revision,
-                    ) == 1,
-                )
-            }
-            ConflictResolution.ACTION_REQUIRED -> blockConflict(local, outbox, "EDIT_DELETE_RECOVERY_REQUIRED")
-        }
+        RoomContactConflictStore(database).capture(local, outbox, verified)
     }
 
     private suspend fun reconcileRemoteDeletion(account: AccountScope, remoteId: RemoteContactId) {
@@ -167,6 +126,7 @@ internal class RoomRemoteCanonicalReconciliationStore(
         }
         if (outbox != null && outbox.revision == local.pendingMutationRevision) {
             if (outbox.operation == MutationOperation.DELETE.name) {
+                database.contactConflictDao().delete(account.value, local.id)
                 database.contactDao().upsert(
                     stored.contact.copy(
                         pendingMutationRevision = null,
@@ -184,6 +144,10 @@ internal class RoomRemoteCanonicalReconciliationStore(
                 )
                 return
             }
+            database.contactConflictDao().get(account.value, local.id)?.let {
+                database.contactConflictDao().upsert(it.copy(choice = null, remoteDeleted = true,
+                    generation = java.util.UUID.randomUUID().toString()))
+            }
             blockConflict(local, outbox, "REMOTE_DELETION_RECOVERY_REQUIRED")
             return
         }
@@ -199,7 +163,7 @@ internal class RoomRemoteCanonicalReconciliationStore(
     }
 
     /** @param modifiedAtEpochSeconds `null` for a public-directory inventory; see `D-096`. */
-    private suspend fun adoptRemote(
+    internal suspend fun adoptRemote(
         local: CanonicalContact,
         remote: CanonicalContact,
         verified: VerifiedContactCard,
@@ -221,23 +185,29 @@ internal class RoomRemoteCanonicalReconciliationStore(
         )
     }
 
+    internal suspend fun canAdoptRemote(contact: CanonicalContact): Boolean = pendingMembershipsFor(contact) != null
+
+    private suspend fun pendingMembershipsFor(contact: CanonicalContact): List<GroupMembershipEntity>? {
+        val oldEmails = database.contactDao().get(contact.accountId, contact.id)?.values.orEmpty()
+            .filter { it.kind == ContactValueKind.EMAIL.name }.associateBy { it.id }
+        val newEmails = contact.valuesOf(ContactValueKind.EMAIL)
+        return database.contactGroupDao().getAll(contact.accountId)
+            .filter { it.group.pendingMutationRevision != null }
+            .flatMap { stored -> stored.memberships.filter { it.contactId == contact.id } }
+            .map { membership ->
+                val old = oldEmails[membership.emailValueId] ?: return null
+                val replacement = newEmails.singleOrNull { it.id == old.id && it.value == old.value }
+                    ?: newEmails.singleOrNull { it.value.trim().equals(old.value.trim(), ignoreCase = true) }
+                if (replacement == null) return null
+                membership.copy(emailValueId = replacement.id)
+            }
+    }
+
     private suspend fun replaceContact(contact: CanonicalContact) {
         val dao = database.contactDao()
         // An acknowledged contact write may need a fresh card while independent group intent
         // is still pending. Preserve those assignments across value-ID replacement/FK cleanup.
-        val oldEmails = dao.get(contact.accountId, contact.id)?.values.orEmpty()
-            .filter { it.kind == ContactValueKind.EMAIL.name }.associateBy { it.id }
-        val newEmails = contact.valuesOf(ContactValueKind.EMAIL)
-        val pendingMemberships = database.contactGroupDao().getAll(contact.accountId)
-            .filter { it.group.pendingMutationRevision != null }
-            .flatMap { stored -> stored.memberships.filter { it.contactId == contact.id } }
-            .map { membership ->
-                val old = checkNotNull(oldEmails[membership.emailValueId]) { "PENDING_GROUP_EMAIL_MISSING" }
-                val replacement = newEmails.singleOrNull { it.id == old.id && it.value == old.value }
-                    ?: newEmails.singleOrNull { it.value.trim().equals(old.value.trim(), ignoreCase = true) }
-                checkNotNull(replacement) { "PENDING_GROUP_EMAIL_RECONCILIATION_REQUIRED" }
-                membership.copy(emailValueId = replacement.id)
-            }
+        val pendingMemberships = checkNotNull(pendingMembershipsFor(contact)) { "PENDING_GROUP_EMAIL_RECONCILIATION_REQUIRED" }
         dao.upsert(contact.toEntity())
         dao.upsertValues(contact.values.map { it.toEntity(contact) })
         val retained = contact.values.map { it.id }
@@ -361,35 +331,7 @@ internal class RoomRemoteCanonicalReconciliationStore(
         reason: String,
     ) {
         database.contactDao().upsert(local.copy(conflictState = reason).toEntity())
-        check(
-            database.outboxDao().blockConflict(
-                local.accountId,
-                AggregateType.CONTACT.name,
-                local.id,
-                outbox.revision,
-                reason,
-            ) == 1,
-        )
+        database.outboxDao().upsert(outbox.copy(state = DurableMutationState.ACTION_REQUIRED.name,
+            blockedReason = reason, errorCategory = "CONFLICT"))
     }
-}
-
-private fun OutboxMutationEntity.toWriteEvidence(): LocalWriteEvidence {
-    val interval = if (intervalEarliestEpochMillis != null && intervalLatestEpochMillis != null) {
-        UtcTimeInterval(intervalEarliestEpochMillis, intervalLatestEpochMillis)
-    } else {
-        null
-    }
-    return LocalWriteEvidence(
-        revision = revision,
-        deviceWallClockEpochMillis = updatedAtEpochMillis,
-        deviceElapsedRealtimeMillis = deviceElapsedRealtimeMillis,
-        serverOffsetMillis = serverOffsetMillis,
-        calibrationAgeMillis = calibrationAgeMillis,
-        roundTripMillis = roundTripMillis,
-        serverPrecisionMillis = serverPrecisionMillis,
-        uncertaintyMillis = uncertaintyMillis,
-        interval = interval,
-        clockJumpDetected = clockJumpDetected,
-        isComparable = interval != null && !clockJumpDetected,
-    )
 }

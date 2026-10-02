@@ -75,11 +75,11 @@ state observed at the start of the pass.
 | changed | unchanged | Local candidate; upload after current remote version check |
 | unchanged | changed | Remote winner; hydrate if required, commit, project |
 | changed | same compatible change | Converged duplicate; acknowledge without repeating mutation |
-| changed | different changed | Concurrent update/update; apply the total `D-024` interval order |
+| changed | different changed | Preserve both snapshots; queue and revalidate an explicit D-024 choice |
 | delete | unchanged/present | Local delete candidate after remote check |
 | unchanged | deleted | Remote delete winner; canonical tombstone and projection cleanup |
-| delete | changed | `D-006`: comparable LWW or explicit recovery |
-| changed | deleted | `D-006`: comparable LWW or explicit recovery |
+| delete | changed | `D-006`: retain intent and require explicit recovery |
+| changed | deleted | `D-006`: retain intent and require explicit recovery |
 | create without remote ID | no matching acknowledged identity | Serialized create with idempotency/reconciliation strategy |
 | create without remote ID | possible lost-ack match | Reconcile using request/stable card evidence; never create blindly twice |
 | any | missing/ambiguous version or reset checkpoint | Bounded hydration/full reconciliation or action-required; never assume unchanged |

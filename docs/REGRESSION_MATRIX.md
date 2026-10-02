@@ -16,7 +16,7 @@ a listed test is not a claim that its entire case already passes.
 | F-07 Artwork theme/insets/provenance | no contact; login/About/launcher | UT-12 | SW-11 | FT-19 |
 | F-08 Display-only projection stuck | C02; generated Android name parts | UT-01/07 | SW-06 | FT-03/24 |
 | F-09 Structured-name changes lost | C03/C04; all five N components | UT-03 | SW-04 | FT-04/24 |
-| Canonical names depend on card order (new isolated finding, live impact unverified) | C01/C03/C04; public FN before private N | UT-03 | SW-04 | FT-24 |
+| Canonical names depend on card order | C01/C03/C04; public FN before private N | UT-03 | SW-04 | FT-24 |
 | F-10 Native phone after deleted group | C03/G01; completed group-deletion receipt | UT-07 | SW-03 | FT-06/07 |
 | F-11 Zero-outbox incomplete pass | C01; retry without queued mutation | UT-08/11 | SW-09/11 | FT-17 |
 | F-12 Pending Android copies despite visible contact | C02/C09/C10; full/thumbnail, baseline and date variants | UT-05/07 | SW-06/07 | FT-08/17/26 |
@@ -35,16 +35,21 @@ a listed test is not a claim that its entire case already passes.
 | Legacy binary PHOTO/LOGO invisible | C10; explicit binary declaration, replacement MIME | UT-06 | SW-04/07 | FT-08 |
 | Repair final context stale / no resume action | C04; hydration advances account state | UT-08 | SW-09/11 | FT-20 |
 | A-01 Sign-out loses native edits/stale warning | C03; provider-only work, Cancel then convergence | UT-10 | SW-08/11 | FT-23 |
-| A-02 Missing remote timestamp / clock uncertainty | C01; both edit orders, expired/untrusted clock | UT-09 | SW-01/02 | FT-14 |
-| A-03/A-04/S-01 HTTP/plaintext/native bounds | N03 + generated bounded negatives; isolated runtime only | UT-04/12 | SW-05/12 | FT-26 |
-| A-05 Notification delivery not wired | C01; auth and prolonged block, permission denied | UT-11 | SW-09/11 | FT-17 |
+| A-02 Concurrent edits without reliable timestamps | C01/C03; both edit orders, private-only Web change, stale choice and restart | UT-09 | SW-01/02; RoomContactConflictDeviceTest | FT-14 |
+| Conflict comparison crashes on preserved fields | C01/C04; imported structured name and unknown vCard properties in both snapshots | ContactConflictPresentationTest | SW-13 | FT-14 |
+| Email restoration uploads stale identities or restores a removed group | C03/C04; offline added/removed secondary-email assignments, remote email deletion and local choice | DurableMutationOrchestratorTest; ContakoSyncPassExecutorTest | RoomBackedMutationGatewaysDeviceTest | FT-05/14; independently compare every retained and removed per-email assignment |
+| A-03/A-04/S-01 HTTP/plaintext/native bounds | N03 + generated compressed plaintext at/above budget, corrupted ciphertext and wrong-first-key fallback; isolated runtime only | UT-04/12 | SW-05/12; ProtonContactCardCryptoDeviceTest | FT-26 |
+| A-05 Notification delivery, permission and lifecycle | C01; auth and prolonged block, permission denied | UT-11 | SW-09/11/14 | FT-17 |
 | A-07 CAPTCHA WebView renderer recovery | no contact; isolated auth session | UT-12 | SW-12 | FT-01 |
 | Diagnostic build suffix rejected on export | no contact; ordinary/diagnostic version suffixes | UT-11 | SW-11 | FT-26 |
 | Email removal/replacement Save and lost ack | C03/C04; one email removed, another edited | UT-01/03 | SW-01/04 | FT-04/05 |
 | Blank display name, scroll return, search, single-image gallery | C01/C02/C03/C10; unchanged vs filtered list | UT-01/02/06 | SW-11 | FT-02/08/24 |
 | Unsigned import vs invalid signature | C06; actual maintained crypto card type | UT-03/04 | SW-05 | FT-09/26 |
+| Rich encrypted card signature loses folded spaces | C04/C12; long values folded after a significant space, then compatible email/note edit | UT-03 | SW-05; ProtonContactCardCryptoDeviceTest | FT-04/09; fresh Web reload MUST show no signature warning |
+| Targeted absence confirmation rejects Proton HTTP 422 | Disposable contact deleted remotely; targeted GET returns HTTP 422 with NOT_EXISTS, followed by an unrelated pending edit | UT-08; ProtonInventorySafetyTest | SW-02; IncrementalRemoteContactStageTest | FT-04/13; deletion confirmation MUST complete and the unrelated edit MUST resume |
 | Private-only remote changes | C04; keep public names/email/groups unchanged | UT-03/08 | SW-02/04 | FT-09/21 |
 | Minification/registry and repeated photos | C04/C10; minified installed artifact | UT-03/06/12 | SW-04/05/12 | FT-08/26 |
+| Corrupted canonical database silently recreated | Isolated synthetic database; repeated open and original-byte comparison, followed by valid migration/reopen controls | — | SW-10; ContakoMigrationDeviceTest | Isolated runtime only; never corrupt a connected account database |
 
 Cases are defined in [unit](UNIT_TEST_PLAN.md), [software](SOFTWARE_TEST_PLAN.md)
 and [target](FUNCTIONAL_TEST_PLAN.md) plans. Profiles and group membership oracles

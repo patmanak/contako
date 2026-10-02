@@ -29,6 +29,36 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IncrementalRemoteContactStageTest {
+    @Test fun publicDirectoryAbsenceNeedsTargetedConfirmationBeforeAnyCommit() = runTest {
+        val checkpoint = FakeCheckpointStore()
+        stage({ pages(listOf(metadata("one", 1)), 1) }, checkpoint, { id -> success(card(id, 1)) }).run(ACCOUNT)
+        val generation = checkpoint.current?.generation
+        var committed = 0
+        var answer: GatewayOutcome<com.patmanak.contako.data.gateway.RemoteContactPresence> =
+            success(com.patmanak.contako.data.gateway.RemoteContactPresence.PRESENT)
+        val candidate = IncrementalRemoteContactStage(
+            ProtonContactInventoryGateway { _, _ -> success(ContactInventoryPage(emptyList(), null, null, 0,
+                ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY)) },
+            ProtonVerifiedContactCardGateway { _, _ -> error("NO_HYDRATION") },
+            PersistentContactInventoryPlanner(checkpoint),
+            RemoteCanonicalReconciliationStore { _, _, cards, labels, deletions ->
+                committed++
+                CanonicalReconciliationReceipt(cards.map { it.id }.toSet(), labels, deletions)
+            },
+            existenceGateway = com.patmanak.contako.data.gateway.ProtonContactExistenceGateway { _, id ->
+                assertEquals(RemoteContactId("one"), id)
+                answer
+            },
+        )
+        assertEquals(RemoteContactStageResult.StalePlan, candidate.run(ACCOUNT))
+        answer = GatewayOutcome.Failure(GatewayFailureCategory.TIMEOUT)
+        assertTrue(candidate.run(ACCOUNT) is RemoteContactStageResult.RetryWaiting)
+        assertEquals(0, committed)
+        assertEquals(generation, checkpoint.current?.generation)
+        answer = success(com.patmanak.contako.data.gateway.RemoteContactPresence.CONFIRMED_ABSENT)
+        assertEquals(1, (candidate.run(ACCOUNT) as RemoteContactStageResult.Success).deletedCount)
+        assertEquals(1, committed)
+    }
     @Test
     fun `initial hydration bounds concurrent reads and preserves deterministic commit order`() = runTest {
         val inventory = (1..25).map { metadata("contact-$it", 1) }

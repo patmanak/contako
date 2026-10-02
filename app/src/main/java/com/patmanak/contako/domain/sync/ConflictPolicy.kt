@@ -15,11 +15,10 @@ data class UtcTimeInterval(
 }
 
 /**
- * Evidence captured with a durable local mutation under D-024.
+ * Timing evidence captured with a durable local mutation.
  *
- * A missing interval or a false [isComparable] value deliberately selects the local tie rule for
- * update/update and explicit recovery for edit/delete. The local revision is an ordering aid only;
- * it is never compared with a Proton timestamp.
+ * Missing or uncertain server time MUST NOT select a winning contact version. Conflict resolution
+ * uses verified content baselines and an explicit user choice; local revision is a CAS guard.
  */
 data class LocalWriteEvidence(
     val revision: Long,
@@ -128,35 +127,6 @@ object LocalWriteEvidenceFactory {
         clockJumpDetected = false,
         isComparable = false,
     )
-}
-
-enum class ConflictChange { UPDATE, DELETE }
-enum class ConflictResolution { LOCAL_WINS, REMOTE_WINS, ACTION_REQUIRED }
-
-/** The single production D-024/D-006 total-order policy. */
-object ContactConflictPolicy {
-    fun resolve(
-        localChange: ConflictChange,
-        localEvidence: LocalWriteEvidence,
-        remoteChange: ConflictChange,
-        remoteInterval: UtcTimeInterval?,
-    ): ConflictResolution {
-        val comparableLocal = localEvidence.interval.takeIf { localEvidence.isComparable }
-        val localAfter = comparableLocal != null && remoteInterval != null && comparableLocal.isStrictlyAfter(remoteInterval)
-        val remoteAfter = comparableLocal != null && remoteInterval != null && remoteInterval.isStrictlyAfter(comparableLocal)
-
-        if (localChange == ConflictChange.UPDATE && remoteChange == ConflictChange.UPDATE) {
-            return if (remoteAfter) ConflictResolution.REMOTE_WINS else ConflictResolution.LOCAL_WINS
-        }
-        if (localChange == ConflictChange.DELETE && remoteChange == ConflictChange.DELETE) {
-            return ConflictResolution.LOCAL_WINS
-        }
-        return when {
-            localAfter -> ConflictResolution.LOCAL_WINS
-            remoteAfter -> ConflictResolution.REMOTE_WINS
-            else -> ConflictResolution.ACTION_REQUIRED
-        }
-    }
 }
 
 private fun saturatingAdd(left: Long, right: Long): Long = when {

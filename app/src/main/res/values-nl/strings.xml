@@ -350,4 +350,22 @@
     <string name="about_privacy_summary">Geen reclame, gebruiksanalyse of externe crashrapportage. Diagnostiek wordt alleen op verzoek geëxporteerd. Contako-gegevens zijn uitgesloten van Android-back-ups en apparaatoverdrachten.</string>
     <string name="about_license_summary">© 2026 Patmanak · GPL-3.0-or-later.\nContako gebruikt Proton Core, AndroidX en andere opensourcebibliotheken onder hun eigen licenties. Proton-namen en -logo’s behoren toe aan hun eigenaren.</string>
     <string name="about_license_details">Licenties en bronvermeldingen</string>
+    <string name="error_stale_contact_edit">Dit contact is elders gewijzigd. Uw concept blijft behouden. Open het contact opnieuw voordat u uw wijzigingen toepast.</string>
+    <string name="error_group_operation_unavailable">Proton staat bepaalde groepsbewerkingen momenteel niet toe voor dit account. Contacten blijven bewerkbaar.</string>
+    <string name="sync_alert_title">Synchronisatiemeldingen</string>
+    <string name="sync_alert_body">Open Contako om een synchronisatieprobleem te bekijken.</string>
+    <string name="sync_alert_configure">Synchronisatiemeldingen instellen</string>
+    <string name="conflict_title">Gelijktijdige wijzigingen</string>
+    <string name="conflict_review">Versies vergelijken</string>
+    <string name="conflict_queued">Keuze opgeslagen; wacht op synchronisatie</string>
+    <string name="conflict_explanation">Beide versies blijven bewaard totdat je keuze is toegepast. Nieuwe wijzigingen vereisen een nieuwe controle.</string>
+    <string name="conflict_refresh">De versies kunnen gewijzigd zijn. Laad ze opnieuw voordat je kiest.</string>
+    <string name="conflict_local">Contako-versie</string>
+    <string name="conflict_proton">Proton-versie</string>
+    <string name="conflict_keep_local">Contako-versie behouden</string>
+    <string name="conflict_use_proton">Proton-versie gebruiken</string>
+    <string name="conflict_deleted">Contact gemarkeerd voor verwijdering</string>
+    <string name="conflict_group_pending">De Proton-versie verwijdert een e-mailadres met openstaande groepswijzigingen. Los die toewijzingen eerst op.</string>
+    <string name="conflict_remote_deleted">Dit contact is verwijderd op Proton. Het lokale concept blijft bewaard; de vorige vergelijking kan een verwijdering niet oplossen.</string>
+    <string name="field_structured_name">Gestructureerde naam</string>
 </resources>

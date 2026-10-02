@@ -69,6 +69,21 @@ class RoomSyncStatusStoreDeviceTest {
     }
 
     @Test
+    fun failedPublicationDoesNotConsumeClaimAndCurrentStateControlsCancellation() = runBlocking {
+        store.publish(ACCOUNT, 1_000, blocked(SyncActionReason.VALIDATION_REJECTED))
+        var cancels = 0
+        assertNull(store.deliverNotificationIfDue(ACCOUNT, 1_000 + DAY, { cancels++ }) { false })
+        assertEquals(0, cancels)
+        assertTrue(runCatching { store.deliverNotificationIfDue(ACCOUNT, 1_000 + DAY) { error("SYNTHETIC_FAILURE") } }.isFailure)
+        assertEquals(SyncNotificationReason.BLOCKED_FOR_24_HOURS,
+            store.deliverNotificationIfDue(ACCOUNT, 1_000 + DAY) { true })
+        assertNull(store.deliverNotificationIfDue(ACCOUNT, 1_000 + DAY) { error("ALREADY_DELIVERED") })
+        store.publish(ACCOUNT, 2_000 + DAY, update(SyncPassOutcome.SUCCESS))
+        store.deliverNotificationIfDue(ACCOUNT, 2_000 + DAY, { cancels++ }) { error("CURRENT_MUST_NOT_NOTIFY") }
+        assertEquals(1, cancels)
+    }
+
+    @Test
     fun ordinaryBlockedMutationNotifiesOnceAfter24HoursAcrossRestart() = runBlocking {
         store.publish(
             ACCOUNT,

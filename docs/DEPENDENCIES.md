@@ -38,10 +38,12 @@ changed keep rules or every future artifact. The exact APK and dependency graph
 MUST be assessed together. AndroidX native components require their own coverage.
 
 The contact path uses maintained Proton decrypt/verify/sign and SRP primitives.
-App plaintext validation currently occurs after full native decryption; a 50 MiB
-native decompression default is not a peak-memory guarantee. Earlier rejection
-and bounded maintained decryption remain security limitations, without authority
-to weaken integrity or invent a crypto fork. See [Security](SECURITY.md).
+The pinned golib streaming reader bounds accumulated decrypted contact bytes
+before normalization; it is a direct build input as well as Core's constrained
+runtime dependency. Complete native EOF/integrity and Core key fallback remain
+required. Neither the application budget nor the 50 MiB native decompression
+default guarantees peak process memory or covers every packet-parser allocation.
+Do not weaken integrity or invent a crypto fork. See [Security](SECURITY.md).
 
 ## Reproducible assessment
 

@@ -8,41 +8,6 @@ import org.junit.Test
 
 class ConflictPolicyTest {
     @Test
-    fun `03-ORDER update update implements every D-024 ordering cell`() {
-        assertEquals(ConflictResolution.LOCAL_WINS, resolve(UPDATE, interval(3_000, 3_100), UPDATE, interval(1_000, 1_999)))
-        assertEquals(ConflictResolution.REMOTE_WINS, resolve(UPDATE, interval(1_000, 1_999), UPDATE, interval(3_000, 3_100)))
-        assertEquals(ConflictResolution.LOCAL_WINS, resolve(UPDATE, interval(1_000, 2_000), UPDATE, interval(2_000, 3_000)))
-        assertEquals(ConflictResolution.LOCAL_WINS, resolve(UPDATE, interval(1_000, 2_000), UPDATE, interval(1_000, 2_000)))
-        assertEquals(ConflictResolution.LOCAL_WINS, resolve(UPDATE, null, UPDATE, interval(3_000, 4_000)))
-        assertEquals(ConflictResolution.LOCAL_WINS, resolve(UPDATE, interval(3_000, 4_000), UPDATE, null))
-    }
-
-    @Test
-    fun `03-ORDER edit delete uses time only when intervals are strictly comparable`() {
-        listOf(UPDATE to DELETE, DELETE to UPDATE).forEach { (localChange, remoteChange) ->
-            assertEquals(
-                ConflictResolution.LOCAL_WINS,
-                resolve(localChange, interval(4_000, 5_000), remoteChange, interval(1_000, 2_000)),
-            )
-            assertEquals(
-                ConflictResolution.REMOTE_WINS,
-                resolve(localChange, interval(1_000, 2_000), remoteChange, interval(4_000, 5_000)),
-            )
-            assertEquals(
-                ConflictResolution.ACTION_REQUIRED,
-                resolve(localChange, interval(1_000, 2_000), remoteChange, interval(2_000, 3_000)),
-            )
-            assertEquals(ConflictResolution.ACTION_REQUIRED, resolve(localChange, null, remoteChange, interval(2_000, 3_000)))
-            assertEquals(ConflictResolution.ACTION_REQUIRED, resolve(localChange, interval(2_000, 3_000), remoteChange, null))
-        }
-    }
-
-    @Test
-    fun `03-ORDER identical deletes converge deterministically`() {
-        assertEquals(ConflictResolution.LOCAL_WINS, resolve(DELETE, null, DELETE, null))
-    }
-
-    @Test
     fun `capture retains server aligned uncertainty inputs`() {
         val evidence = LocalWriteEvidenceFactory.capture(
             revision = 7,
@@ -98,36 +63,4 @@ class ConflictPolicyTest {
         assertEquals(UtcTimeInterval(12_000, 12_999), LocalWriteEvidenceFactory.remoteWholeSecond(12))
     }
 
-    private fun resolve(
-        localChange: ConflictChange,
-        localInterval: UtcTimeInterval?,
-        remoteChange: ConflictChange,
-        remoteInterval: UtcTimeInterval?,
-    ): ConflictResolution = ContactConflictPolicy.resolve(
-        localChange,
-        evidence(localInterval),
-        remoteChange,
-        remoteInterval,
-    )
-
-    private fun evidence(interval: UtcTimeInterval?) = LocalWriteEvidence(
-        revision = 1,
-        deviceWallClockEpochMillis = 1,
-        deviceElapsedRealtimeMillis = 1,
-        serverOffsetMillis = interval?.let { 0 },
-        calibrationAgeMillis = interval?.let { 0 },
-        roundTripMillis = interval?.let { 0 },
-        serverPrecisionMillis = interval?.let { 0 },
-        uncertaintyMillis = interval?.let { 0 },
-        interval = interval,
-        clockJumpDetected = false,
-        isComparable = interval != null,
-    )
-
-    private fun interval(start: Long, end: Long) = UtcTimeInterval(start, end)
-
-    private companion object {
-        val UPDATE = ConflictChange.UPDATE
-        val DELETE = ConflictChange.DELETE
-    }
 }

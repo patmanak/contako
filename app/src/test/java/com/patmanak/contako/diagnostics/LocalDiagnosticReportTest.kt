@@ -8,6 +8,16 @@ import org.junit.Test
 
 class LocalDiagnosticReportTest {
     @Test
+    fun supportedVariantVersionsAreAcceptedWithoutAllowingFreeFormSuffixes() {
+        val report = validReport()
+        listOf("", "-debug", "-preview", "-diagnostic", "-sync-diagnostic", "-benchmark").forEach { suffix ->
+            assertTrue(LocalDiagnosticSafetyScanner.isSafeReport(report.replace("app_version=0.8.0", "app_version=0.9.0$suffix")))
+        }
+        listOf("-arbitrary", "-sync-diagnostic-extra", "\nprivate=payload").forEach { suffix ->
+            assertFalse(LocalDiagnosticSafetyScanner.isSafeReport(report.replace("app_version=0.8.0", "app_version=0.9.0$suffix")))
+        }
+    }
+    @Test
     fun everyDashboardStateCanGenerateASafeReportIncludingAndroidFailures() {
         SyncDashboardState.entries.forEach { state ->
             val report = LocalDiagnosticReportGenerator.generate(

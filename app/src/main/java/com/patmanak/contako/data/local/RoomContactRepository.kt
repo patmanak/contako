@@ -12,6 +12,7 @@ import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import com.patmanak.contako.domain.policy.ContactValidation
 import com.patmanak.contako.domain.policy.PostalAddressPolicy
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
+import com.patmanak.contako.domain.repository.ContactEditBaseline
 import com.patmanak.contako.domain.repository.ContactRepository
 import com.patmanak.contako.domain.repository.SaveResult
 import com.patmanak.contako.domain.repository.SaveValidationIssue
@@ -122,6 +123,7 @@ internal class RoomContactRepository(
         contact: CanonicalContact,
         assignments: Set<ContactGroupAssignment>,
         managedGroupIds: Set<String>,
+        baseline: ContactEditBaseline?,
     ): SaveResult<CanonicalContact> = withContext(ioDispatcher) {
         var groupsChanged = false
         val result = database.withTransaction {
@@ -129,6 +131,20 @@ internal class RoomContactRepository(
                 .map(ContactGroupWithMemberships::toDomain)
                 .filterNot(ContactGroup::isDeleted)
             val activeGroupIds = activeGroups.map(ContactGroup::id).toSet()
+            if (baseline != null) {
+                val original = baseline.contact
+                val current = database.contactDao().get(contact.accountId, contact.id)?.contact
+                val currentAssignments = activeGroups.filter { it.id in managedGroupIds }.flatMap { group ->
+                    group.memberships.filter { it.contactId == contact.id }.map {
+                        ContactGroupAssignment(group.id, it.emailValueId)
+                    }
+                }.toSet()
+                if (original.accountId != contact.accountId || original.id != contact.id ||
+                    current == null || current.isDeleted || current.revision != original.revision ||
+                    current.remoteContactId != original.remoteContactId || current.remoteVersion != original.remoteVersion ||
+                    currentAssignments != baseline.assignments
+                ) return@withTransaction SaveResult.Rejected(setOf(SaveValidationIssue.STALE_CONTACT_EDIT))
+            }
             val editableEmailIds = contact.values
                 .filter { it.kind == ContactValueKind.EMAIL }
                 .map(ContactValue::id)
@@ -146,14 +162,15 @@ internal class RoomContactRepository(
             }
 
             val committed = when (val contactResult = applyContactDeltaInCurrentTransaction(
-                expectedCanonicalRevision = null,
+                expectedCanonicalRevision = baseline?.contact?.revision,
                 contact = contact,
             )) {
                 is RoomCanonicalContactMutationResult.Applied -> contactResult.contact
                 is RoomCanonicalContactMutationResult.Rejected -> {
                     return@withTransaction SaveResult.Rejected(contactResult.issues)
                 }
-                RoomCanonicalContactMutationResult.Stale -> error("Unconditional contact save was stale")
+                RoomCanonicalContactMutationResult.Stale ->
+                    return@withTransaction SaveResult.Rejected(setOf(SaveValidationIssue.STALE_CONTACT_EDIT))
             }
             val replacedContactIds = buildSet {
                 contact.id.takeIf(String::isNotBlank)?.let(::add)
@@ -341,8 +358,12 @@ internal class RoomContactRepository(
             updatedAtEpochMillis = now,
             pendingMutationRevision = existing.contact.revision + 1L,
             isDeleted = true,
+            conflictState = null,
         )
         dao.upsert(tombstone.toEntity())
+        // Explicit deletion supersedes the previous edit/choice, not its remote
+        // baseline. Keep the durable delete pending until fresh absence or ack.
+        database.contactConflictDao().delete(accountId, contactId)
         checkpoint(LocalMutationCheckpoint.CONTACT_DELETE_AFTER_AGGREGATE)
         dao.deleteValues(accountId, contactId)
         checkpoint(LocalMutationCheckpoint.CONTACT_DELETE_AFTER_VALUES)
@@ -606,6 +627,8 @@ internal class RoomContactRepository(
         val now = clock()
         val committed = requested.copy(
             revision = (existing?.group?.revision ?: 0L) + 1L,
+            remoteLabelId = existing?.group?.remoteLabelId ?: requested.remoteLabelId,
+            remoteVersion = existing?.group?.remoteVersion ?: requested.remoteVersion,
             updatedAtEpochMillis = now,
             pendingMutationRevision = (existing?.group?.revision ?: 0L) + 1L,
             isDeleted = false,
@@ -696,6 +719,10 @@ internal class RoomContactRepository(
     ) {
         val dao = database.outboxDao()
         val existing = dao.get(accountId, type.name, aggregateId)
+        val ambiguousCreation = type == AggregateType.GROUP && remoteIdentity == null && existing != null &&
+            (existing.requiresReconciliation ||
+                (existing.remoteIdentity == null && existing.operation == MutationOperation.UPSERT.name &&
+                    existing.state == DurableMutationState.IN_FLIGHT.name))
         val evidence = LocalWriteEvidenceFactory.capture(
             revision = revision,
             deviceWallClockEpochMillis = now,
@@ -714,6 +741,8 @@ internal class RoomContactRepository(
                 blockedReason = blockedReason,
                 remoteIdentity = remoteIdentity,
                 remoteVersion = remoteVersion,
+                requiresReconciliation = ambiguousCreation,
+                lastAttemptAtEpochMillis = existing?.lastAttemptAtEpochMillis.takeIf { ambiguousCreation },
                 idempotencyKey = "$accountId:${type.name}:$aggregateId:$revision:${operation.name}",
                 deviceElapsedRealtimeMillis = evidence.deviceElapsedRealtimeMillis,
                 serverOffsetMillis = evidence.serverOffsetMillis,

@@ -38,3 +38,4 @@ __pycache__/
 AGENTS.local.md
 AGENTS.override.md
 .agent-local/
+.device-coordination/

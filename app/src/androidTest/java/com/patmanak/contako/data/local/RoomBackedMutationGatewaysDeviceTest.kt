@@ -44,6 +44,91 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RoomBackedMutationGatewaysDeviceTest {
+    @Test fun deleteAfterRemoteDeletionRequiresFreshAbsenceProof() = runBlocking {
+        saveContact(CanonicalContact(ACCOUNT.value, "deleted-remote", displayName = "Disposable"))
+        cleanContact("deleted-remote", "absent-remote")
+        val conflicted = requireNotNull(database.contactDao().get(ACCOUNT.value, "deleted-remote")).contact
+        database.contactDao().upsert(conflicted.copy(conflictState = "REMOTE_DELETION_RECOVERY_REQUIRED"))
+        repository.deleteContact(ACCOUNT.value, "deleted-remote")
+        assertNull(database.contactDao().get(ACCOUNT.value, "deleted-remote")?.contact?.conflictState)
+        val store = RoomMutationExecutionStore(database)
+        val command = store.eligible(ACCOUNT.value, 1_000, 20).single()
+        var reads = 0
+        var presence: GatewayOutcome<com.patmanak.contako.data.gateway.RemoteContactPresence> =
+            GatewayOutcome.Failure(GatewayFailureCategory.NETWORK_UNAVAILABLE)
+        val preparation = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote, remote,
+            com.patmanak.contako.data.gateway.ProtonContactExistenceGateway { _, id ->
+                assertEquals("absent-remote", id.value)
+                reads++
+                presence
+            })
+        assertEquals(presence, preparation.prepare(command))
+        assertEquals(command.revision, database.outboxDao().getAll(ACCOUNT.value).single().revision)
+        presence = GatewayOutcome.Success(com.patmanak.contako.data.gateway.RemoteContactPresence.PRESENT)
+        // The full card is absent in this fake: presence alone MUST NOT acknowledge.
+        assertTrue(preparation.prepare(command) is GatewayOutcome.Failure)
+        presence = GatewayOutcome.Success(com.patmanak.contako.data.gateway.RemoteContactPresence.CONFIRMED_ABSENT)
+        val result = preparation.prepare(command) as GatewayOutcome.Success
+        val applied = result.value as com.patmanak.contako.data.sync.MutationPreparation.AlreadyApplied
+        assertEquals(3, reads)
+        assertTrue(store.claim(command, 1_000))
+        assertTrue(store.acknowledgeAndFinish(command, applied.acknowledgement))
+        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+        val tombstone = requireNotNull(database.contactDao().get(ACCOUNT.value, "deleted-remote")).contact
+        assertTrue(tombstone.isDeleted)
+        assertNull(tombstone.pendingMutationRevision)
+        assertNull(tombstone.conflictState)
+        assertEquals(0, remote.contactWrites)
+    }
+    @Test fun blockedDeleteResumesOnlyAfterFreshAbsenceProof() = runBlocking {
+        saveContact(CanonicalContact(ACCOUNT.value, "blocked-delete", displayName = "Disposable"))
+        cleanContact("blocked-delete", "absent-remote")
+        repository.deleteContact(ACCOUNT.value, "blocked-delete")
+        val intent = database.outboxDao().getAll(ACCOUNT.value).single()
+        database.outboxDao().upsert(intent.copy(state = DurableMutationState.ACTION_REQUIRED.name,
+            blockedReason = "REMOTE_ACTION_REQUIRED", errorCategory = "VALIDATION_REJECTED"))
+        var presence: GatewayOutcome<com.patmanak.contako.data.gateway.RemoteContactPresence> =
+            GatewayOutcome.Failure(GatewayFailureCategory.NETWORK_UNAVAILABLE)
+        val store = RoomMutationExecutionStore(database,
+            com.patmanak.contako.data.gateway.ProtonContactExistenceGateway { _, _ -> presence })
+        assertEquals(0, store.recoverInterrupted(ACCOUNT.value, 1_000))
+        assertTrue(store.eligible(ACCOUNT.value, 1_000, 20).isEmpty())
+        presence = GatewayOutcome.Success(com.patmanak.contako.data.gateway.RemoteContactPresence.PRESENT)
+        assertEquals(0, store.recoverInterrupted(ACCOUNT.value, 1_000))
+        presence = GatewayOutcome.Success(com.patmanak.contako.data.gateway.RemoteContactPresence.CONFIRMED_ABSENT)
+        assertEquals(1, store.recoverInterrupted(ACCOUNT.value, 1_000))
+        assertEquals(intent.revision, store.eligible(ACCOUNT.value, 1_000, 20).single().revision)
+        assertEquals(intent.remoteIdentity, database.outboxDao().getAll(ACCOUNT.value).single().remoteIdentity)
+    }
+    @Test fun groupCreationReceiptSurvivesConcurrentEditAndDelete() = runBlocking {
+        for (delete in listOf(false, true)) {
+            val id = if (delete) "receipt-delete" else "receipt-edit"
+            val draft = ContactGroup(ACCOUNT.value, id, "Original")
+            saveGroup(draft)
+            val store = RoomMutationExecutionStore(database)
+            val command = store.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateId == id }
+            assertTrue(store.claim(command, 1_000))
+            if (delete) repository.deleteGroup(ACCOUNT.value, id) else saveGroup(draft.copy(name = "Edited"))
+            assertTrue(requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", id)).requiresReconciliation)
+            val next = store.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateId == id }
+            val preparation = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote).prepare(next)
+            assertTrue((preparation as GatewayOutcome.Success).value is com.patmanak.contako.data.sync.MutationPreparation.ActionRequired)
+            assertTrue(store.continueAfterPartialProgress(command,
+                com.patmanak.contako.data.sync.RemoteMutationAcknowledgement("remote-$id", "created", false,
+                    com.patmanak.contako.data.sync.RemoteMutationOperation.ASSIGNMENTS), 1_000))
+            val current = requireNotNull(database.contactGroupDao().get(ACCOUNT.value, id)).group
+            assertEquals("remote-$id", current.remoteLabelId)
+            assertEquals(delete, current.isDeleted)
+            val pending = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", id))
+            assertEquals(if (delete) "DELETE" else "UPSERT", pending.operation)
+            assertEquals("remote-$id", pending.remoteIdentity)
+            assertTrue(!pending.requiresReconciliation)
+            if (!delete) {
+                saveGroup(draft.copy(name = "Older draft saved later"))
+                assertEquals("remote-$id", database.contactGroupDao().get(ACCOUNT.value, id)?.group?.remoteLabelId)
+            }
+        }
+    }
     private lateinit var context: Context
     private lateinit var database: ContakoDatabase
     private lateinit var repository: RoomContactRepository
@@ -199,9 +284,96 @@ class RoomBackedMutationGatewaysDeviceTest {
         assertEquals(DurableMutationState.ACTION_REQUIRED.name, database.outboxDao().getAll(ACCOUNT.value).single().state)
     }
 
+    @Test
+    fun assignmentsWaitForContactAndReplacementEmailIdentityRecoversOnlyDependentFailure() = runBlocking {
+        saveContact(CanonicalContact(ACCOUNT.value, "contact", displayName = "Fixture", values = listOf(
+            ContactValue("email-value", ContactValueKind.EMAIL, "fixture@example.test", order = 0,
+                metadata = mapOf("protonEmailId" to "removed-email")))))
+        cleanContact("contact", "remote-contact")
+        saveGroup(ContactGroup(ACCOUNT.value, "group", "Fixture group", remoteLabelId = "remote-group",
+            memberships = listOf(GroupMembership("contact", "email-value"))))
+        val groupIntent = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        database.outboxDao().upsert(groupIntent.copy(operation = MutationOperation.ASSIGNMENTS.name))
+        val local = requireNotNull(database.contactDao().get(ACCOUNT.value, "contact")).toDomain()
+        saveContact(local.copy(displayName = "Local choice"))
+        val store = RoomMutationExecutionStore(database)
+        val groupCommand = store.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "GROUP" }
+        val preparation = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote).prepare(groupCommand)
+        assertEquals(com.patmanak.contako.data.sync.MutationPreparation.WaitingForDependencies,
+            (preparation as GatewayOutcome.Success).value)
+        assertEquals(0, remote.assignmentWrites)
+
+        // A previous build already attempted an assignment against the deleted service identity.
+        assertTrue(store.claim(groupCommand, 1_000))
+        assertTrue(store.recordFailure(groupCommand, GatewayFailureCategory.MALFORMED_RESPONSE, RetryDecision.ActionRequired))
+        val contactCommand = store.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "CONTACT" }
+        assertTrue(store.claim(contactCommand, 1_000))
+        assertTrue(store.acknowledgeAndFinish(contactCommand, com.patmanak.contako.data.sync.RemoteMutationAcknowledgement(
+            "remote-contact", "restored", emailIdsByValueId = mapOf("email-value" to "restored-email"))))
+        val recovered = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertEquals(DurableMutationState.PENDING.name, recovered.state)
+        assertTrue(recovered.requiresReconciliation)
+        assertNull(recovered.errorCategory)
+        val next = store.eligible(ACCOUNT.value, 1_000, 20).single()
+        val allowed = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote).prepare(next)
+        assertEquals(com.patmanak.contako.data.sync.MutationPreparation.UploadAllowed,
+            (allowed as GatewayOutcome.Success).value)
+        assertEquals(listOf(RemoteEmailId("restored-email")),
+            RoomBackedMutationPreparationGateway(ACCOUNT, database, remote).desiredEmailIds(ACCOUNT.value, "group"))
+    }
+
+    @Test
+    fun removedAssignmentWaitsForRestoredEmailBeforeAcknowledgingEmptyMembership() = runBlocking {
+        saveContact(CanonicalContact(ACCOUNT.value, "contact", displayName = "Fixture", values = listOf(
+            ContactValue("email-value", ContactValueKind.EMAIL, "fixture@example.test", order = 0,
+                metadata = mapOf("protonEmailId" to "removed-email")))))
+        cleanContact("contact", "remote-contact")
+        saveGroup(ContactGroup(ACCOUNT.value, "group", "Fixture group", remoteLabelId = "remote-group"))
+        saveContact(requireNotNull(database.contactDao().get(ACCOUNT.value, "contact")).toDomain()
+            .copy(displayName = "Local choice"))
+        val pending = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        database.outboxDao().upsert(pending.copy(operation = MutationOperation.ASSIGNMENTS.name))
+        val store = RoomMutationExecutionStore(database)
+        val preparation = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote)
+        val groupCommand = store.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "GROUP" }
+        assertEquals(com.patmanak.contako.data.sync.MutationPreparation.WaitingForDependencies,
+            (preparation.prepare(groupCommand) as GatewayOutcome.Success).value)
+        assertEquals(0, remote.assignmentWrites)
+        val contactCommand = store.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "CONTACT" }
+        assertTrue(store.claim(contactCommand, 1_000))
+        assertTrue(store.acknowledgeAndFinish(contactCommand, com.patmanak.contako.data.sync.RemoteMutationAcknowledgement(
+            "remote-contact", "restored", emailIdsByValueId = mapOf("email-value" to "restored-email"))))
+        assertEquals(com.patmanak.contako.data.sync.MutationPreparation.UploadAllowed,
+            (preparation.prepare(groupCommand) as GatewayOutcome.Success).value)
+        assertEquals(emptyList<RemoteEmailId>(), preparation.desiredEmailIds(ACCOUNT.value, "group"))
+    }
+
+    @Test
+    fun replacementEmailIdentityDoesNotClearUnrelatedAssignmentRejection() = runBlocking {
+        saveContact(CanonicalContact(ACCOUNT.value, "contact", displayName = "Fixture", values = listOf(
+            ContactValue("email-value", ContactValueKind.EMAIL, "fixture@example.test", order = 0,
+                metadata = mapOf("protonEmailId" to "old-email")))))
+        cleanContact("contact", "remote-contact")
+        saveGroup(ContactGroup(ACCOUNT.value, "group", "Fixture group", remoteLabelId = "remote-group",
+            memberships = listOf(GroupMembership("contact", "email-value"))))
+        saveContact(requireNotNull(database.contactDao().get(ACCOUNT.value, "contact")).toDomain().copy(displayName = "Edited"))
+        val intent = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        database.outboxDao().upsert(intent.copy(operation = MutationOperation.ASSIGNMENTS.name,
+            state = DurableMutationState.ACTION_REQUIRED.name,
+            errorCategory = GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED.name, blockedReason = "GROUP_CAPABILITY_REQUIRED"))
+        val store = RoomMutationExecutionStore(database)
+        val command = store.eligible(ACCOUNT.value, 1_000, 20).single()
+        assertTrue(store.claim(command, 1_000))
+        assertTrue(store.acknowledgeAndFinish(command, com.patmanak.contako.data.sync.RemoteMutationAcknowledgement(
+            "remote-contact", "updated", emailIdsByValueId = mapOf("email-value" to "new-email"))))
+        assertEquals(DurableMutationState.ACTION_REQUIRED.name, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")?.state)
+        assertEquals(GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED.name,
+            database.outboxDao().get(ACCOUNT.value, "GROUP", "group")?.errorCategory)
+    }
+
     private fun orchestrator() = DurableMutationOrchestrator(
         RoomMutationExecutionStore(database),
-        RoomBackedMutationPreparationGateway(ACCOUNT, database, remote),
+        RoomBackedMutationPreparationGateway(ACCOUNT, database, remote, remote),
         RoomBackedMutationUploadGateway(ACCOUNT, database, remote, remote, remote, remote),
     )
 
@@ -228,6 +400,7 @@ class RoomBackedMutationGatewaysDeviceTest {
 }
 
 private class FakeRemoteMutations :
+    com.patmanak.contako.data.gateway.ProtonVerifiedContactCardGateway,
     ProtonContactMutationGateway,
     ProtonContactGroupGateway,
     ProtonEmailGroupMembershipReader,
@@ -238,6 +411,10 @@ private class FakeRemoteMutations :
     var assignmentWrites = 0
     var memberships = linkedSetOf<RemoteEmailId>()
     private val groups = linkedMapOf<RemoteGroupId, RemoteContactGroup>()
+    private val contacts = linkedMapOf<RemoteContactId, com.patmanak.contako.data.gateway.VerifiedContactCard>()
+
+    override suspend fun fetch(account: AccountScope, contactId: RemoteContactId) = contacts[contactId]?.let { GatewayOutcome.Success(it) }
+        ?: GatewayOutcome.Failure(com.patmanak.contako.data.gateway.GatewayFailureCategory.NOT_FOUND)
 
     override suspend fun apply(account: AccountScope, mutation: ContactMutation): GatewayOutcome<ContactMutationReceipt> {
         contactWrites++
@@ -247,7 +424,13 @@ private class FakeRemoteMutations :
             is ContactMutation.Update -> mutation.id
             is ContactMutation.Delete -> mutation.id
         }
-        return GatewayOutcome.Success(ContactMutationReceipt(id, RemoteVersion("version-$contactWrites")))
+        val version = RemoteVersion("version-$contactWrites")
+        when (mutation) {
+            is ContactMutation.Create -> contacts[id] = com.patmanak.contako.data.gateway.VerifiedContactCard(id, version, mutation.contact.copy(remoteContactId = id.value))
+            is ContactMutation.Update -> contacts[id] = com.patmanak.contako.data.gateway.VerifiedContactCard(id, version, mutation.contact)
+            is ContactMutation.Delete -> contacts.remove(id)
+        }
+        return GatewayOutcome.Success(ContactMutationReceipt(id, version))
     }
 
     override fun capabilities() = ContactGroupCapabilities.PROTON_CORE_36_6_2_SURFACE

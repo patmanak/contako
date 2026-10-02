@@ -15,6 +15,7 @@ import com.patmanak.contako.domain.policy.ContactSearch
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import com.patmanak.contako.domain.policy.PostalAddressPolicy
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
+import com.patmanak.contako.domain.model.GroupOperation
 import com.patmanak.contako.domain.repository.ContactRepository
 import com.patmanak.contako.domain.repository.SaveResult
 import com.patmanak.contako.data.proton.ProtonContactFieldValidator
@@ -45,6 +46,7 @@ import kotlinx.coroutines.CancellationException
 internal const val LOCAL_ACCOUNT_ID = "local-v0.1"
 
 data class ContactEditorState(
+    val assignmentsEnabled: Boolean = true,
     val draftGeneration: Long = 0,
     val original: CanonicalContact? = null,
     val firstName: String = "",
@@ -67,6 +69,8 @@ data class ContactGroupOption(
 )
 
 data class GroupEditorState(
+    val detailsEnabled: Boolean = true,
+    val membershipsEnabled: Boolean = true,
     val draftGeneration: Long = 0,
     val saving: Boolean = false,
     val original: ContactGroup? = null,
@@ -83,6 +87,8 @@ enum class UiMessage {
     ENTER_GROUP_NAME,
     SAVE_REJECTED,
     SAVE_FAILED,
+    STALE_CONTACT_EDIT,
+    GROUP_OPERATION_UNAVAILABLE,
     INVALID_PUBLIC_KEY,
     INVALID_LANGUAGE,
     INVALID_TIME_ZONE,
@@ -105,7 +111,17 @@ data class EmailMembershipOption(
 
 data class DeletionStatus(val inProgress: Boolean = false, val failed: Boolean = false)
 
+data class ConflictPanelState(
+    val contactId: String? = null,
+    val detail: com.patmanak.contako.domain.sync.ContactConflictDetail? = null,
+    val busy: Boolean = false,
+    val failed: Boolean = false,
+) {
+    override fun toString() = "ConflictPanelState(REDACTED)"
+}
+
 data class ContactsUiState(
+    val deniedGroupOperations: Set<GroupOperation> = emptySet(),
     val navigation: NavigationState = NavigationState(),
     val query: String = "",
     val contacts: List<CanonicalContact> = emptyList(),
@@ -141,7 +157,45 @@ class ContactsViewModel(
     savedStateHandle: SavedStateHandle = SavedStateHandle(),
     /** MUST match the scope the synchronization engine runs on. See [LOCAL_ACCOUNT_ID]. */
     private val accountId: String = LOCAL_ACCOUNT_ID,
+    deniedGroupOperations: kotlinx.coroutines.flow.Flow<Set<GroupOperation>> = kotlinx.coroutines.flow.flowOf(emptySet()),
 ) : ViewModel() {
+    private val deniedGroups = deniedGroupOperations.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val conflicts = syncRecoveryDataSource.observeConflicts(accountId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val mutableConflictPanel = MutableStateFlow(ConflictPanelState())
+    val conflictPanel: StateFlow<ConflictPanelState> = mutableConflictPanel
+    private var conflictPanelGeneration = 0L
+
+    fun dismissConflict() {
+        if (mutableConflictPanel.value.busy) return
+        conflictPanelGeneration++
+        mutableConflictPanel.value = ConflictPanelState()
+    }
+
+    fun openConflict(contactId: String) {
+        val generation = ++conflictPanelGeneration
+        mutableConflictPanel.value = ConflictPanelState(contactId = contactId, busy = true)
+        viewModelScope.launch {
+            val detail = try { syncRecoveryDataSource.loadConflict(accountId, contactId) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            if (generation == conflictPanelGeneration) {
+                mutableConflictPanel.value = ConflictPanelState(contactId, detail, failed = detail == null)
+            }
+        }
+    }
+
+    fun chooseConflict(choice: com.patmanak.contako.domain.sync.ContactConflictChoice) {
+        val panel = mutableConflictPanel.value.takeUnless { it.busy } ?: return
+        val detail = panel.detail ?: return
+        mutableConflictPanel.value = panel.copy(busy = true, failed = false)
+        viewModelScope.launch {
+            val queued = try { syncRecoveryDataSource.chooseConflict(accountId, detail.summary, choice) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { false }
+            mutableConflictPanel.value = if (queued) ConflictPanelState() else panel.copy(failed = true)
+        }
+    }
     private val navigationStore = NavigationStateStore(savedStateHandle)
     private val navigation = MutableStateFlow(navigationStore.snapshot())
     private val contactEditor = MutableStateFlow<ContactEditorState?>(null)
@@ -188,6 +242,7 @@ class ContactsViewModel(
         contactsPermissionBoundary.action,
         contactDeletionStatus,
         groupDeletionStatus,
+        deniedGroups,
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val contacts = values[0] as List<CanonicalContact>
@@ -221,6 +276,7 @@ class ContactsViewModel(
         val actionContacts = contacts.filter { it.actionRequiredReasons.isNotEmpty() || it.conflictState != null ||
             it.id in failedAndroidContactIds || it.id in dashboard.blockedMutationContactIds }
         ContactsUiState(
+            deniedGroupOperations = values[18] as Set<GroupOperation>,
             navigation = activeNavigation,
             query = activeQuery,
             contacts = if (detailOpen) contacts else contacts.filter {
@@ -231,8 +287,11 @@ class ContactsViewModel(
             androidPendingContacts = contacts.filter { it.id in dashboard.androidPendingContactIds },
             groups = if (detailOpen) groups else groups.filter { ContactSearch.matchesGroupName(it.name, activeQuery) },
             pendingMutationCount = values[2] as Int,
-            contactEditor = values[4] as ContactEditorState?,
-            groupEditor = values[5] as GroupEditorState?,
+            contactEditor = (values[4] as ContactEditorState?)?.copy(assignmentsEnabled = GroupOperation.ASSIGN_EMAILS !in deniedGroups.value),
+            groupEditor = (values[5] as GroupEditorState?)?.let { editor -> editor.copy(
+                detailsEnabled = (if (editor.original == null) GroupOperation.CREATE else GroupOperation.UPDATE) !in deniedGroups.value,
+                membershipsEnabled = GroupOperation.ASSIGN_EMAILS !in deniedGroups.value,
+            ) },
             pendingContactDeletion = values[6] as CanonicalContact?,
             pendingGroupDeletion = values[7] as ContactGroup?,
             showAccountMenu = values[8] as Boolean,
@@ -352,6 +411,8 @@ class ContactsViewModel(
     }
 
     fun updateContactEditor(value: ContactEditorState) {
+        val current = contactEditor.value ?: return
+        if (current.saving || current.draftGeneration != value.draftGeneration) return
         contactEditor.value = value.copy(validationError = null, fieldErrors = emptyMap())
     }
 
@@ -360,6 +421,7 @@ class ContactsViewModel(
     }
 
     fun requestEditorDismiss() {
+        if (contactEditor.value?.saving == true || groupEditor.value?.saving == true) return
         when {
             contactEditor.value?.isDirty() == true || groupEditor.value?.isDirty() == true ->
                 showUnsavedConfirmation.value = true
@@ -385,7 +447,7 @@ class ContactsViewModel(
     }
 
     fun saveContact() {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         if (editor.saving) return
         val original = editor.original
         val editedValues = normalizeEditorValues(editor.values)
@@ -440,6 +502,10 @@ class ContactsViewModel(
         val assignments = editor.selectedGroupAssignments.filterTo(mutableSetOf()) {
             it.emailValueId in retainedEmailIds
         }
+        if (GroupOperation.ASSIGN_EMAILS in deniedGroups.value && assignments != editor.initialGroupAssignments) {
+            contactEditor.value = editor.copy(validationError = UiMessage.GROUP_OPERATION_UNAVAILABLE)
+            return
+        }
         contactEditor.value = editor.copy(saving = true, validationError = null)
         viewModelScope.launch {
             val result = try {
@@ -447,6 +513,9 @@ class ContactsViewModel(
                     contact = contact,
                     assignments = assignments,
                     managedGroupIds = editor.groupOptions.map(ContactGroupOption::id).toSet(),
+                    baseline = original?.let {
+                        com.patmanak.contako.domain.repository.ContactEditBaseline(it, editor.initialGroupAssignments)
+                    },
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -470,7 +539,9 @@ class ContactsViewModel(
                     onMutationCommitted()
                 }
                 is SaveResult.Rejected -> if (contactEditor.value?.draftGeneration == editor.draftGeneration) {
-                    contactEditor.value = editor.copy(validationError = UiMessage.SAVE_REJECTED)
+                    contactEditor.value = editor.copy(validationError =
+                        if (com.patmanak.contako.domain.repository.SaveValidationIssue.STALE_CONTACT_EDIT in result.issues)
+                            UiMessage.STALE_CONTACT_EDIT else UiMessage.SAVE_REJECTED)
                 }
             }
         }
@@ -496,7 +567,8 @@ class ContactsViewModel(
     }
 
     fun toggleContactGroupAssignment(groupId: String, emailValueId: String) {
-        val editor = contactEditor.value ?: return
+        if (GroupOperation.ASSIGN_EMAILS in deniedGroups.value) return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         if (editor.groupOptions.none { it.id == groupId }) return
         val editableEmailExists = editor.values.any {
             it.kind == ContactValueKind.EMAIL && it.id == emailValueId && it.value.isNotBlank()
@@ -520,7 +592,7 @@ class ContactsViewModel(
 
     fun addContactValue(kind: ContactValueKind) {
         require(kind in EDITABLE_VALUE_KINDS)
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         if (kind in SINGLETON_VALUE_KINDS && editor.values.any { it.kind == kind }) return
         contactEditor.value = editor.copy(
             values = editor.values + ContactValue(
@@ -545,7 +617,7 @@ class ContactsViewModel(
     }
 
     fun updateContactValue(id: String, value: String) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         contactEditor.value = editor.copy(
             values = editor.values.map {
                 if (it.id != id) it else if (it.kind == ContactValueKind.POSTAL_ADDRESS) {
@@ -565,7 +637,7 @@ class ContactsViewModel(
     }
 
     fun updatePostalAddressComponent(id: String, component: String, value: String) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         require(component in PostalAddressPolicy.componentKeys)
         contactEditor.value = editor.copy(
             values = editor.values.map {
@@ -581,7 +653,7 @@ class ContactsViewModel(
     }
 
     fun updateContactValueLabel(id: String, label: String) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         contactEditor.value = editor.copy(
             values = editor.values.map {
                 if (it.id == id) it.copy(label = label.trim().ifEmpty { null }) else it
@@ -591,7 +663,7 @@ class ContactsViewModel(
     }
 
     fun moveContactValue(id: String, offset: Int) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         val selected = editor.values.singleOrNull { it.id == id } ?: return
         val family = editor.values.filter { it.kind == selected.kind }
             .sortedBy(ContactValue::order).toMutableList()
@@ -605,7 +677,7 @@ class ContactsViewModel(
     }
 
     fun preferContactValue(id: String) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         val selected = editor.values.singleOrNull { it.id == id } ?: return
         val family = editor.values.filter { it.kind == selected.kind }.sortedBy(ContactValue::order)
         if (family.size < 2) return
@@ -621,7 +693,7 @@ class ContactsViewModel(
     }
 
     fun deleteContactValue(id: String) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         contactEditor.value = editor.copy(
             values = normalizeEditorValues(editor.values.filterNot { it.id == id }),
             validationError = null,
@@ -631,7 +703,7 @@ class ContactsViewModel(
 
     fun addImage(kind: ContactValueKind, value: String = "") {
         require(kind in IMAGE_KINDS)
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         val family = editor.images.filter { it.kind == kind }
         contactEditor.value = editor.copy(
             images = editor.images + ContactValue(
@@ -647,7 +719,7 @@ class ContactsViewModel(
     }
 
     fun reportImageSelectionFailure(draftGeneration: Long? = null) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         if (draftGeneration != null && editor.draftGeneration != draftGeneration) return
         contactEditor.value = editor.copy(validationError = UiMessage.INVALID_IMAGE)
     }
@@ -659,7 +731,7 @@ class ContactsViewModel(
         value: String,
     ) {
         require(kind in IMAGE_KINDS)
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         if (editor.draftGeneration != draftGeneration) return
         if (imageId == null) {
             addImage(kind, value)
@@ -677,7 +749,7 @@ class ContactsViewModel(
     }
 
     fun deleteImage(id: String) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         contactEditor.value = editor.copy(
             images = normalizeImages(editor.images.filterNot { it.id == id }),
             validationError = null,
@@ -686,7 +758,7 @@ class ContactsViewModel(
     }
 
     fun moveImage(id: String, offset: Int) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         val selected = editor.images.singleOrNull { it.id == id } ?: return
         val family = editor.images.filter { it.kind == selected.kind }.sortedBy(ContactValue::order).toMutableList()
         val from = family.indexOfFirst { it.id == id }
@@ -699,7 +771,7 @@ class ContactsViewModel(
     }
 
     fun preferImage(id: String) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         val selected = editor.images.singleOrNull { it.id == id } ?: return
         val family = editor.images.filter { it.kind == selected.kind }.sortedBy(ContactValue::order)
         val preference = (listOf(selected) + family.filterNot { it.id == id })
@@ -724,6 +796,7 @@ class ContactsViewModel(
     )
 
     fun editGroup(group: ContactGroup? = null) {
+        if (group == null && GroupOperation.CREATE in deniedGroups.value) return
         val options = allContacts.value.flatMap { contact ->
             contact.valuesOf(ContactValueKind.EMAIL).map { email ->
                 EmailMembershipOption(
@@ -750,6 +823,8 @@ class ContactsViewModel(
     fun updateGroupEditor(value: GroupEditorState) {
         val current = groupEditor.value ?: return
         if (current.saving || current.draftGeneration != value.draftGeneration) return
+        if ((value.name != current.name || value.color != current.color) &&
+            (if (current.original == null) GroupOperation.CREATE else GroupOperation.UPDATE) in deniedGroups.value) return
         groupEditor.value = value.copy(validationError = null)
     }
 
@@ -758,6 +833,7 @@ class ContactsViewModel(
     }
 
     fun toggleGroupMembership(option: EmailMembershipOption) {
+        if (GroupOperation.ASSIGN_EMAILS in deniedGroups.value) return
         val editor = groupEditor.value ?: return
         if (editor.saving) return
         val membership = option.membership
@@ -770,6 +846,15 @@ class ContactsViewModel(
     fun saveGroup() {
         val editor = groupEditor.value ?: return
         if (editor.saving) return
+        val required = buildSet {
+            if (editor.original == null) add(GroupOperation.CREATE)
+            else if (editor.name != editor.original.name || editor.color != editor.original.color) add(GroupOperation.UPDATE)
+            if (editor.selectedMemberships != editor.original?.memberships.orEmpty().toSet()) add(GroupOperation.ASSIGN_EMAILS)
+        }
+        if (required.any { it in deniedGroups.value }) {
+            groupEditor.value = editor.copy(validationError = UiMessage.GROUP_OPERATION_UNAVAILABLE)
+            return
+        }
         if (editor.name.isBlank()) {
             groupEditor.value = editor.copy(validationError = UiMessage.ENTER_GROUP_NAME)
             return
@@ -813,6 +898,7 @@ class ContactsViewModel(
     }
 
     fun requestGroupDeletion(group: ContactGroup) {
+        if (GroupOperation.DELETE in deniedGroups.value) return
         if (groupDeletionStatus.value.inProgress) return
         groupDeletionStatus.value = DeletionStatus()
         pendingGroupDeletion.value = group
@@ -824,7 +910,7 @@ class ContactsViewModel(
         groupDeletionStatus.value = DeletionStatus()
     }
 
-    fun confirmGroupDeletion() = confirmDeletion(
+    fun confirmGroupDeletion() = if (GroupOperation.DELETE in deniedGroups.value) Unit else confirmDeletion(
         pendingGroupDeletion, groupDeletionStatus, RootDestination.GROUPS,
         id = { it.id }, delete = { repository.deleteGroup(it.accountId, it.id) },
     )
@@ -866,7 +952,7 @@ class ContactsViewModel(
     }
 
     private fun updateImages(transform: (ContactValue) -> ContactValue) {
-        val editor = contactEditor.value ?: return
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         val images = editor.images.map(transform)
         val changedIds = editor.images.zip(images).filter { (before, after) -> before != after }.map { it.first.id }
         contactEditor.value = editor.copy(
@@ -909,12 +995,14 @@ class ContactsViewModel(
             contactsPermissionBoundary: ContactsPermissionBoundary = GrantedContactsPermissionBoundary,
             onMutationCommitted: () -> Unit = {},
             accountId: String = LOCAL_ACCOUNT_ID,
+            deniedGroupOperations: kotlinx.coroutines.flow.Flow<Set<GroupOperation>> = kotlinx.coroutines.flow.flowOf(emptySet()),
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T =
                     ContactsViewModel(
                         repository = repository,
+                        deniedGroupOperations = deniedGroupOperations,
                         syncRecoveryDataSource = syncRecoveryDataSource,
                         contactsPermissionBoundary = contactsPermissionBoundary,
                         onMutationCommitted = onMutationCommitted,

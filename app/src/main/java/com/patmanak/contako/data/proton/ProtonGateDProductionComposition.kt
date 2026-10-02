@@ -53,12 +53,13 @@ import retrofit2.http.Streaming
  * Network operations remain dormant until a caller explicitly invokes one of these gateways.
  */
 internal data class ProtonGateDComposition(
+    val existence: com.patmanak.contako.data.gateway.ProtonContactExistenceGateway,
     val inventory: ProtonContactInventoryGateway,
     val verifiedCards: ProtonVerifiedContactCardGateway,
     val contactMutations: ProtonContactMutationGateway,
     val contactCreateStages: ProtonContactCreateStageMonitor,
     val emailGroupAssignmentStages: ProtonEmailGroupAssignmentStageMonitor,
-    val groups: ProtonContactGroupGateway,
+    val groups: AccountScopedContactGroupCapabilityCoordinator,
     val emailLabels: ProtonContactEmailLabelGateway,
     val membershipReader: ProtonEmailGroupMembershipReader,
     val vCardCodec: ProtonContactVCardCodec,

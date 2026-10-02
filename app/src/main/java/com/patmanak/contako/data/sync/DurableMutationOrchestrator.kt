@@ -41,12 +41,16 @@ class RemoteMutationAcknowledgement(
 
 sealed interface MutationPreparation {
     data object UploadAllowed : MutationPreparation
+    /** Account contact writes must finish before dependent assignments can run. */
+    data object WaitingForDependencies : MutationPreparation
     class AlreadyApplied(val acknowledgement: RemoteMutationAcknowledgement) : MutationPreparation {
         override fun toString(): String = "MutationPreparation.AlreadyApplied(REDACTED)"
     }
 
     /** The boundary has already made the remote winner durable in canonical storage. */
     data object RemoteWinnerCommitted : MutationPreparation
+    /** Canonical adoption and outbox removal were committed atomically by preparation. */
+    data object ResolvedWithoutUpload : MutationPreparation
     class ActionRequired(val reason: MutationPreparationActionRequiredReason) : MutationPreparation {
         override fun toString(): String = "MutationPreparation.ActionRequired(reason=$reason)"
     }
@@ -60,6 +64,7 @@ enum class MutationPreparationActionRequiredReason {
     GROUP_REMOTE_IDENTITY_MISSING,
     GROUP_MEMBER_REMOTE_EMAIL_IDENTITY_MISSING,
     UNSPECIFIED,
+    REMOTE_UPDATE_CONFLICT,
 }
 
 enum class MutationActionRequiredSource { PREPARATION_FAILURE, PREPARATION_DECISION, UPLOAD_FAILURE }
@@ -247,6 +252,13 @@ class DurableMutationOrchestrator(
                     }
                     MutationPreparation.RemoteWinnerCommitted -> {
                         if (store.supersedeAfterRemoteWinner(command)) reconciled++
+                    }
+                    MutationPreparation.ResolvedWithoutUpload -> reconciled++
+                    MutationPreparation.WaitingForDependencies -> {
+                        // Release the claim without spending the failure/retry budget. The next
+                        // bounded drain rechecks the dependency; no remote write was attempted.
+                        store.recordFailure(command, GatewayFailureCategory.CANCELLED, RetryDecision.Cancelled)
+                        progressPending++
                     }
                     is MutationPreparation.ActionRequired -> {
                         store.recordFailure(

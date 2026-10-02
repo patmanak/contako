@@ -32,11 +32,12 @@ class ContakoMigrationDeviceTest {
             val old = migrations.createDatabase(name, startVersion)
             MigrationFixture.seed(old)
             val before = MigrationFixture.snapshot(old)
+            val originalColumns = before.keys.associateWith(old::columns)
             old.close()
 
             val upgraded = migrations.runMigrationsAndValidate(name, CURRENT_VERSION, true, *ALL_MIGRATIONS)
             try {
-                assertEquals(before, MigrationFixture.snapshot(upgraded, before.keys))
+                assertEquals(before, MigrationFixture.snapshot(upgraded, before.keys, originalColumns))
                 assertEquals(CURRENT_VERSION, upgraded.version)
                 upgraded.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
             } finally {
@@ -109,11 +110,20 @@ class ContakoMigrationDeviceTest {
         val corrupt = "not-a-sqlite-database-synthetic".toByteArray()
         file.writeBytes(corrupt)
 
-        val failure = runCatching { ContakoDatabase.create(context, name).openHelper.writableDatabase }.exceptionOrNull()
-
-        assertTrue(generateSequence(failure) { it.cause }.any { it is android.database.sqlite.SQLiteException })
-        assertTrue(file.exists())
-        assertTrue(file.readBytes().contentEquals(corrupt))
+        repeat(2) {
+            val database = ContakoDatabase.create(context, name)
+            val failure = try {
+                runCatching { database.openHelper.writableDatabase }.exceptionOrNull()
+            } finally {
+                database.close()
+            }
+            assertTrue(
+                "CORRUPT_OPEN_RESULT: exception=${failure?.javaClass?.simpleName ?: "NONE"}, filePresent=${file.exists()}, originalBytes=${file.exists() && file.readBytes().contentEquals(corrupt)}",
+                generateSequence(failure) { it.cause }.any { it is android.database.sqlite.SQLiteException },
+            )
+            assertTrue(file.exists())
+            assertTrue(file.readBytes().contentEquals(corrupt))
+        }
         context.deleteDatabase(name)
     }
 
@@ -161,7 +171,7 @@ class ContakoMigrationDeviceTest {
     private class SimulatedMigrationProcessDeath : RuntimeException()
 
     private companion object {
-        const val CURRENT_VERSION = 15
+        const val CURRENT_VERSION = 17
         val ALL_MIGRATIONS = arrayOf(
             ContakoDatabase.MIGRATION_1_2,
             ContakoDatabase.MIGRATION_2_3,
@@ -177,6 +187,8 @@ class ContakoMigrationDeviceTest {
             ContakoDatabase.MIGRATION_12_13,
             ContakoDatabase.MIGRATION_13_14,
             ContakoDatabase.MIGRATION_14_15,
+            ContakoDatabase.MIGRATION_15_16,
+            ContakoDatabase.MIGRATION_16_17,
         )
     }
 }
@@ -286,9 +298,10 @@ private object MigrationFixture {
     fun snapshot(
         db: SupportSQLiteDatabase,
         tables: Collection<String> = preservedTables,
+        originalColumns: Map<String, List<String>>? = null,
     ): Map<String, List<List<String?>>> =
         tables.filter(db::tableExists).associateWith { table ->
-            val columns = db.columns(table)
+            val columns = originalColumns?.get(table) ?: db.columns(table)
             db.query("SELECT ${columns.joinToString()} FROM `$table` ORDER BY ${columns.joinToString()}").use { cursor ->
                 buildList {
                     while (cursor.moveToNext()) {

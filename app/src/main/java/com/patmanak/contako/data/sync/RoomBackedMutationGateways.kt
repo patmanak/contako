@@ -27,6 +27,8 @@ internal class RoomBackedMutationPreparationGateway(
     private val expectedAccount: AccountScope,
     private val database: ContakoDatabase,
     private val membershipReader: ProtonEmailGroupMembershipReader,
+    private val verifiedCards: com.patmanak.contako.data.gateway.ProtonVerifiedContactCardGateway? = null,
+    private val existence: com.patmanak.contako.data.gateway.ProtonContactExistenceGateway? = null,
 ) : MutationPreparationGateway {
     override suspend fun prepare(command: DurableMutationCommand): GatewayOutcome<MutationPreparation> {
         if (command.accountId != expectedAccount.value) {
@@ -60,6 +62,35 @@ internal class RoomBackedMutationPreparationGateway(
                 ),
             )
         }
+        val remoteId = contact.remoteContactId
+        if (remoteId != null) {
+            // A deletion can follow an already reconciled remote deletion. The directory
+            // checkpoint no longer carries that ID; obtain fresh targeted absence proof.
+            // Never infer convergence from a failed card read or an old conflict snapshot.
+            if (command.operation == RemoteMutationOperation.DELETE && existence != null) {
+                when (val presence = existence.check(expectedAccount, RemoteContactId(remoteId))) {
+                    is GatewayOutcome.Failure -> return presence
+                    is GatewayOutcome.Success -> if (presence.value ==
+                        com.patmanak.contako.data.gateway.RemoteContactPresence.CONFIRMED_ABSENT) {
+                        return GatewayOutcome.Success(MutationPreparation.AlreadyApplied(
+                            RemoteMutationAcknowledgement(remoteId, contact.remoteVersion),
+                        ))
+                    }
+                }
+            }
+            val reader = verifiedCards ?: return GatewayOutcome.Failure(GatewayFailureCategory.UNKNOWN)
+            return when (val fresh = reader.fetch(expectedAccount, RemoteContactId(remoteId))) {
+                // A generic full-card 404 is not the targeted structured absence proof.
+                // Let the directory/existence stage establish deletion on a later pass.
+                is GatewayOutcome.Failure -> if (fresh.category == GatewayFailureCategory.NOT_FOUND)
+                    GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT) else fresh
+                is GatewayOutcome.Success -> {
+                    if (fresh.value.id.value != remoteId) GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE)
+                    else GatewayOutcome.Success(com.patmanak.contako.data.local.RoomContactConflictStore(database)
+                        .prepare(expectedAccount.value, contact.id, command.revision, fresh.value))
+                }
+            }
+        }
         return GatewayOutcome.Success(MutationPreparation.UploadAllowed)
     }
 
@@ -73,11 +104,6 @@ internal class RoomBackedMutationPreparationGateway(
                 MutationPreparation.ActionRequired(MutationPreparationActionRequiredReason.REVISION_MISMATCH),
             )
         }
-        if (command.operation == RemoteMutationOperation.DELETE && group.remoteLabelId == null) {
-            return GatewayOutcome.Success(
-                MutationPreparation.AlreadyApplied(RemoteMutationAcknowledgement(null, null)),
-            )
-        }
         if (command.requiresReconciliation && group.remoteLabelId == null) {
             return GatewayOutcome.Success(
                 MutationPreparation.ActionRequired(
@@ -86,6 +112,9 @@ internal class RoomBackedMutationPreparationGateway(
             )
         }
         if (command.operation != RemoteMutationOperation.ASSIGNMENTS) {
+            if (command.operation == RemoteMutationOperation.DELETE && group.remoteLabelId == null) {
+                return GatewayOutcome.Success(MutationPreparation.AlreadyApplied(RemoteMutationAcknowledgement(null, null)))
+            }
             if (
                 command.operation == RemoteMutationOperation.UPDATE &&
                 group.remoteLabelId != null &&
@@ -112,6 +141,14 @@ internal class RoomBackedMutationPreparationGateway(
                     MutationPreparationActionRequiredReason.GROUP_REMOTE_IDENTITY_MISSING,
                 ),
             )
+        // Contact PUTs can replace email identities and restore labels from their vCard.
+        // Removed edges are absent from desired memberships, and email-label metadata may
+        // predate independent group edits. Without a durable negative-edge baseline, wait
+        // for all account contact writes before reconciling assignments (including empty
+        // groups). A blocked contact retains group intent instead of acknowledging it early.
+        if (database.outboxDao().hasPendingContactWrite(group.accountId)) {
+            return GatewayOutcome.Success(MutationPreparation.WaitingForDependencies)
+        }
         val desired = desiredEmailIds(group.accountId, group.id)
             ?: return GatewayOutcome.Success(
                 MutationPreparation.ActionRequired(
@@ -177,6 +214,9 @@ internal class RoomBackedMutationUploadGateway(
     private suspend fun uploadContact(command: DurableMutationCommand): GatewayOutcome<RemoteMutationAcknowledgement> {
         val stored = database.contactDao().get(expectedAccount.value, command.aggregateId)
             ?: return GatewayOutcome.Failure(GatewayFailureCategory.VALIDATION_REJECTED)
+        if (stored.contact.revision != command.revision || stored.contact.pendingMutationRevision != command.revision) {
+            return GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT)
+        }
         val payload = database.contactPayloadDao().get(stored.contact.ownerKey)?.toDomain()
         val contact = stored.toDomain().copy(preservationEnvelope = payload)
         val mutation = when (command.operation) {

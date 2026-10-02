@@ -142,6 +142,7 @@ import com.patmanak.contako.BuildConfig
 import com.patmanak.contako.R
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactGroup
+import com.patmanak.contako.domain.model.GroupOperation
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
@@ -168,9 +169,12 @@ fun ContakoApp(
     onThemeModeChange: (ThemeMode) -> Unit = {},
     language: AppLanguage = AppLanguage.SYSTEM,
     onLanguageChange: (AppLanguage) -> Unit = {},
+    onConfigureSyncNotifications: () -> Unit = {},
     onSignOut: suspend (SignOutChoice) -> SignOutResult = { SignOutResult.CleanupFailed },
 ) {
     val state by viewModel.uiState.collectAsState()
+    val conflictPanel by viewModel.conflictPanel.collectAsState()
+    if (conflictPanel.contactId != null) ContactConflictDialog(conflictPanel, viewModel)
     var requestSearchFocus by remember(state.navigation.destination) { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -258,7 +262,7 @@ fun ContakoApp(
                                 ?.let { id -> state.groups.firstOrNull { it.id == id } }
                             when {
                                 selectedContact != null -> ContactDetailAppBarActions(selectedContact, viewModel)
-                                selectedGroup != null -> GroupDetailAppBarActions(selectedGroup, viewModel)
+                                selectedGroup != null -> GroupDetailAppBarActions(selectedGroup, viewModel, state.deniedGroupOperations)
                                 else -> {
                                     IconButton(onClick = viewModel::showAccountMenu) {
                                         Icon(
@@ -304,7 +308,9 @@ fun ContakoApp(
                     if (state.navigation.secondary == null && state.navigation.current.selectedId == null) {
                         when (state.navigation.destination) {
                             RootDestination.CONTACTS -> CreationButton(stringResource(R.string.contacts_new)) { viewModel.editContact() }
-                            RootDestination.GROUPS -> CreationButton(stringResource(R.string.groups_new)) { viewModel.editGroup() }
+                            RootDestination.GROUPS -> if (GroupOperation.CREATE !in state.deniedGroupOperations) {
+                                CreationButton(stringResource(R.string.groups_new)) { viewModel.editGroup() }
+                            }
                             RootDestination.SYNC -> Unit
                         }
                     }
@@ -358,7 +364,7 @@ fun ContakoApp(
                         } ?: when (state.navigation.destination) {
                             RootDestination.CONTACTS -> ContactsDestination(state, viewModel, expanded)
                             RootDestination.GROUPS -> GroupsDestination(state, viewModel, expanded)
-                            RootDestination.SYNC -> SyncDashboard(state, viewModel)
+                            RootDestination.SYNC -> SyncDashboard(state, viewModel, onConfigureSyncNotifications)
                         }
                     }
                 }
@@ -544,9 +550,9 @@ private fun ContactDetailAppBarActions(contact: CanonicalContact, viewModel: Con
 }
 
 @Composable
-private fun GroupDetailAppBarActions(group: ContactGroup, viewModel: ContactsViewModel) {
+private fun GroupDetailAppBarActions(group: ContactGroup, viewModel: ContactsViewModel, denied: Set<GroupOperation>) {
     var expanded by remember(group.id) { mutableStateOf(false) }
-    IconButton(onClick = { viewModel.editGroup(group) }) {
+    IconButton(enabled = GroupOperation.UPDATE !in denied || GroupOperation.ASSIGN_EMAILS !in denied, onClick = { viewModel.editGroup(group) }) {
         Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.groups_edit))
     }
     IconButton(onClick = { expanded = true }) {
@@ -555,6 +561,7 @@ private fun GroupDetailAppBarActions(group: ContactGroup, viewModel: ContactsVie
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
         DropdownMenuItem(
             text = { Text(stringResource(R.string.action_delete_group)) },
+            enabled = GroupOperation.DELETE !in denied,
             leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
             onClick = {
                 expanded = false
@@ -655,6 +662,7 @@ private fun GroupsDestination(state: ContactsUiState, viewModel: ContactsViewMod
 @Composable
 private fun GroupsDirectory(state: ContactsUiState, viewModel: ContactsViewModel) {
     Column(Modifier.fillMaxSize()) {
+        if (state.deniedGroupOperations.isNotEmpty()) Text(stringResource(R.string.error_group_operation_unavailable), Modifier.padding(16.dp))
         if (state.groups.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f)) {
                 EmptyDirectory(
@@ -775,7 +783,7 @@ private fun ContactRow(
 }
 
 @Composable
-private fun ContactImageBadge(
+internal fun ContactImageBadge(
     contact: CanonicalContact,
     modifier: Modifier = Modifier,
     badgeSize: Dp = 52.dp,
@@ -898,7 +906,8 @@ private fun EmptyDirectory(title: String, body: String) {
 }
 
 @Composable
-private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel) {
+private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, onConfigureNotifications: () -> Unit) {
+    val conflicts by viewModel.conflicts.collectAsState()
     val semanticColors = LocalContakoColors.current
     val syncing = state.syncActivity != SyncActivity.IDLE
     val statusColor = when (state.syncDashboard.state) {
@@ -968,7 +977,20 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel) 
             }
         }
 
-        val blockedContacts = state.actionContacts.filter { it.id in state.syncDashboard.blockedMutationContactIds }
+        if (conflicts.isNotEmpty()) {
+            item { Text(stringResource(R.string.conflict_title), style = MaterialTheme.typography.titleMedium) }
+            items(conflicts, key = { "conflict:${it.contactId}" }) { conflict ->
+                Card(Modifier.fillMaxWidth().clickable { viewModel.openConflict(conflict.contactId) }) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(state.actionContacts.firstOrNull { it.id == conflict.contactId }?.resolvedDisplayName
+                            ?: stringResource(R.string.contact_detail_title), fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(if (conflict.choice == null) R.string.conflict_review else R.string.conflict_queued))
+                    }
+                }
+            }
+        }
+        val blockedContacts = state.actionContacts.filter { it.id in state.syncDashboard.blockedMutationContactIds &&
+            conflicts.none { conflict -> conflict.contactId == it.id } }
         if (blockedContacts.isNotEmpty()) {
             item { Text(stringResource(R.string.sync_state_blocked), style = MaterialTheme.typography.titleMedium) }
             items(blockedContacts, key = { "blocked:${it.id}" }) { contact ->
@@ -1059,6 +1081,9 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel) 
                 }
             }
         }
+        item {
+            TextButton(onClick = onConfigureNotifications) { Text(stringResource(R.string.sync_alert_configure)) }
+        }
         item(key = "local-diagnostics") { DiagnosticSettings(state) }
         item { Spacer(Modifier.height(12.dp)) }
     }
@@ -1110,6 +1135,19 @@ private fun repairPhaseTitle(phase: RepairPhase): Int = when (phase) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsViewModel) {
+    if (editor.saving) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = {},
+            properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        ) {
+            Surface(shape = MaterialTheme.shapes.medium) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(stringResource(R.string.action_save))
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }
+        }
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val editorListState = rememberLazyListState()
@@ -1148,6 +1186,7 @@ private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsV
     var imageSelectionDraftGeneration by remember { mutableStateOf(-1L) }
     var imageReadGeneration by remember { mutableStateOf(0L) }
     var imageReadJob by remember { mutableStateOf<Job?>(null) }
+    var readingImage by remember { mutableStateOf(false) }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val targetKind = imageSelectionKind?.let { encodedKind ->
             runCatching { ContactValueKind.valueOf(encodedKind) }.getOrNull()
@@ -1160,20 +1199,25 @@ private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsV
         if (uri != null && targetKind != null) {
             val generation = imageReadGeneration
             imageReadJob?.cancel()
+            readingImage = true
             imageReadJob = scope.launch {
-                val dataUri = withContext(Dispatchers.IO) {
-                    runCatching { readSelectedContactImage(context.contentResolver, uri) }.getOrNull()
-                }
-                if (generation != imageReadGeneration) return@launch
-                if (dataUri == null) {
-                    viewModel.reportImageSelectionFailure(targetDraftGeneration)
-                } else {
-                    viewModel.applySelectedImage(
-                        draftGeneration = targetDraftGeneration,
-                        kind = targetKind,
-                        imageId = targetImageId,
-                        value = dataUri,
-                    )
+                try {
+                    val dataUri = withContext(Dispatchers.IO) {
+                        runCatching { readSelectedContactImage(context.contentResolver, uri) }.getOrNull()
+                    }
+                    if (generation != imageReadGeneration) return@launch
+                    if (dataUri == null) {
+                        viewModel.reportImageSelectionFailure(targetDraftGeneration)
+                    } else {
+                        viewModel.applySelectedImage(
+                            draftGeneration = targetDraftGeneration,
+                            kind = targetKind,
+                            imageId = targetImageId,
+                            value = dataUri,
+                        )
+                    }
+                } finally {
+                    if (generation == imageReadGeneration) readingImage = false
                 }
             }
         }
@@ -1181,6 +1225,7 @@ private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsV
     fun selectImage(kind: ContactValueKind, imageId: String? = null) {
         imageReadGeneration += 1
         imageReadJob?.cancel()
+        readingImage = false
         imageSelectionKind = kind.name
         imageSelectionDraftGeneration = editor.draftGeneration
         imageSelectionId = imageId
@@ -1195,7 +1240,7 @@ private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsV
                         onCancel = viewModel::dismissContactEditor,
                         onSave = viewModel::saveContact,
                         saveTag = CONTACT_EDITOR_TOP_SAVE_TAG,
-                        saveEnabled = !editor.saving,
+                        saveEnabled = !editor.saving && !readingImage,
                     )
                     if (editor.saving) LinearProgressIndicator(Modifier.fillMaxWidth())
                     editor.validationError?.let { error ->
@@ -1328,7 +1373,7 @@ private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsV
                     Button(
                         onClick = viewModel::saveContact,
                         modifier = Modifier.fillMaxWidth().testTag(CONTACT_EDITOR_BOTTOM_SAVE_TAG),
-                        enabled = !editor.saving,
+                        enabled = !editor.saving && !readingImage,
                     ) {
                         Text(stringResource(R.string.action_save))
                     }
@@ -1486,6 +1531,7 @@ private val editorSections = listOf(
 
 @Composable
 private fun ContactGroupAssignmentEditor(editor: ContactEditorState, viewModel: ContactsViewModel) {
+    if (!editor.assignmentsEnabled) Text(stringResource(R.string.error_group_operation_unavailable))
     Text(
         stringResource(R.string.help_group_mapping),
         style = MaterialTheme.typography.bodySmall,
@@ -1526,6 +1572,7 @@ private fun ContactGroupAssignmentEditor(editor: ContactEditorState, viewModel: 
                             FilterChip(
                                 selected = selected,
                                 onClick = { viewModel.toggleContactGroupAssignment(group.id, email.id) },
+                                enabled = editor.assignmentsEnabled && !editor.saving,
                                 label = { Text(group.name) },
                                 leadingIcon = {
                                     Surface(
@@ -1747,7 +1794,7 @@ private fun ContactValueTypeEditor(value: ContactValue, onLabelChange: (String) 
     }
 }
 
-private fun contactValueLabel(kind: ContactValueKind): Int = when (kind) {
+internal fun contactValueLabel(kind: ContactValueKind): Int = when (kind) {
     ContactValueKind.EMAIL -> R.string.field_email
     ContactValueKind.PHONE -> R.string.field_phone
     ContactValueKind.URL -> R.string.field_website
@@ -1897,7 +1944,7 @@ private fun GroupEditorScreen(editor: GroupEditorState, viewModel: ContactsViewM
                             ) {}
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                EditorField(stringResource(R.string.groups_name), editor.name) {
+                                EditorField(stringResource(R.string.groups_name), editor.name, enabled = editor.detailsEnabled && !editor.saving) {
                                     viewModel.updateGroupEditor(editor.copy(name = it))
                                 }
                                 editor.validationError?.let {
@@ -1930,6 +1977,7 @@ private fun GroupEditorScreen(editor: GroupEditorState, viewModel: ContactsViewM
                                             selected = selected,
                                             role = Role.RadioButton,
                                             onClick = { viewModel.updateGroupEditor(editor.copy(color = color)) },
+                                            enabled = editor.detailsEnabled && !editor.saving,
                                         )
                                         .semantics {
                                             contentDescription = colorDescription
@@ -1971,13 +2019,14 @@ private fun GroupEditorScreen(editor: GroupEditorState, viewModel: ContactsViewM
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { viewModel.toggleGroupMembership(option) },
+                            .clickable(enabled = editor.membershipsEnabled && !editor.saving) { viewModel.toggleGroupMembership(option) },
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Checkbox(
+                                enabled = editor.membershipsEnabled && !editor.saving,
                                 checked = option.membership in editor.selectedMemberships,
                                 onCheckedChange = { viewModel.toggleGroupMembership(option) },
                             )
@@ -2017,8 +2066,9 @@ private fun GroupEditorScreen(editor: GroupEditorState, viewModel: ContactsViewM
     }
 
 @Composable
-private fun EditorField(label: String, value: String, onValueChange: (String) -> Unit) {
+private fun EditorField(label: String, value: String, enabled: Boolean = true, onValueChange: (String) -> Unit) {
     OutlinedTextField(
+        enabled = enabled,
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
@@ -3082,6 +3132,8 @@ private fun uiMessage(message: UiMessage): String = stringResource(when (message
     UiMessage.ENTER_GROUP_NAME -> R.string.error_enter_group_name
     UiMessage.SAVE_REJECTED -> R.string.error_save_rejected
     UiMessage.SAVE_FAILED -> R.string.error_save_failed
+    UiMessage.STALE_CONTACT_EDIT -> R.string.error_stale_contact_edit
+    UiMessage.GROUP_OPERATION_UNAVAILABLE -> R.string.error_group_operation_unavailable
     UiMessage.INVALID_PUBLIC_KEY -> R.string.error_public_key
     UiMessage.INVALID_LANGUAGE -> R.string.error_language
     UiMessage.INVALID_TIME_ZONE -> R.string.error_time_zone

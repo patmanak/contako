@@ -10,6 +10,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         ContactEntity::class,
+        ContactConflictEntity::class,
+        ContactConflictChunk::class,
         ContactValueEntity::class,
         ContactPayloadEntity::class,
         ContactGroupEntity::class,
@@ -37,11 +39,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AndroidGroupProviderWriteJournalEntity::class,
         AndroidPhotoProviderWriteJournalEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = true,
 )
 internal abstract class ContakoDatabase : RoomDatabase() {
     abstract fun contactDao(): ContactDao
+    abstract fun contactConflictDao(): ContactConflictDao
     abstract fun contactGroupDao(): ContactGroupDao
     abstract fun contactPayloadDao(): ContactPayloadDao
     abstract fun accountRemovalDao(): AccountRemovalDao
@@ -58,6 +61,7 @@ internal abstract class ContakoDatabase : RoomDatabase() {
 
         fun create(context: Context, name: String = DATABASE_NAME): ContakoDatabase =
             Room.databaseBuilder(context.applicationContext, ContakoDatabase::class.java, name)
+                .openHelperFactory(PreservingSQLiteOpenHelperFactory())
                 .addMigrations(
                     MIGRATION_1_2,
                     MIGRATION_2_3,
@@ -73,9 +77,32 @@ internal abstract class ContakoDatabase : RoomDatabase() {
                     MIGRATION_12_13,
                     MIGRATION_13_14,
                     MIGRATION_14_15,
-                MIGRATION_15_16,
+                    MIGRATION_15_16,
+                    MIGRATION_16_17,
                 )
                 .build()
+
+        val MIGRATION_16_17: Migration = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `contact_conflicts` (
+                        `owner_key` TEXT NOT NULL, `account_id` TEXT NOT NULL, `contact_id` TEXT NOT NULL,
+                        `generation` TEXT NOT NULL, `local_revision` INTEGER NOT NULL, `remote_id` TEXT NOT NULL,
+                        `remote_version` TEXT NOT NULL, `choice` TEXT, `remote_deleted` INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY(`owner_key`), FOREIGN KEY(`owner_key`) REFERENCES `contacts`(`owner_key`)
+                        ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `contact_conflict_chunks` (
+                        `owner_key` TEXT NOT NULL, `side` TEXT NOT NULL, `position` INTEGER NOT NULL, `bytes` BLOB NOT NULL,
+                        PRIMARY KEY(`owner_key`, `side`, `position`),
+                        FOREIGN KEY(`owner_key`) REFERENCES `contact_conflicts`(`owner_key`)
+                        ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+            }
+        }
 
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {

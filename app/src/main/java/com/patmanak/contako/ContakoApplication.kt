@@ -62,6 +62,13 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val database: ContakoDatabase by lazy { ContakoDatabase.create(this) }
 
+    internal fun refreshSyncNotification() {
+        applicationScope.launch {
+            com.patmanak.contako.android.sync.AndroidSyncActionNotifier(this@ContakoApplication, RoomSyncStatusStore(database))
+                .refresh(protonGateCRuntime.accountScope.value)
+        }
+    }
+
     internal val contactRepository: ContactRepository by lazy {
         RoomContactRepository(database)
     }

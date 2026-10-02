@@ -1,8 +1,5 @@
 package com.patmanak.contako.data.sync
 
-import com.patmanak.contako.domain.sync.ConflictChange
-import com.patmanak.contako.domain.sync.ConflictResolution
-import com.patmanak.contako.domain.sync.ContactConflictPolicy
 import com.patmanak.contako.domain.sync.LocalWriteEvidenceFactory
 import org.junit.Assert.*
 import org.junit.Test
@@ -15,22 +12,16 @@ class VerifiedServerClockTest {
         header: String? = date, age: String? = null, elapsedEnd: Long = 1_200, wallEnd: Long = 10_200,
     ) = clock.observe(https, host, header, age, 10_000, 1_000, wallEnd, elapsedEnd)
 
-    @Test fun calibratedWritesResolveBothOrdersAndPreserveUncertainConflictRules() {
+    @Test fun calibratedWritesRetainServerAlignedEvidenceWithoutChoosingAWinner() {
         val clock = VerifiedServerClock()
         sample(clock)
         val calibration = requireNotNull(clock.current())
         assertEquals(200L, calibration.roundTripMillis)
         assertEquals(1_000L, calibration.serverPrecisionMillis)
-        fun resolve(wall: Long, elapsed: Long, remote: Long?, remoteChange: ConflictChange = ConflictChange.UPDATE): ConflictResolution {
-            val evidence = LocalWriteEvidenceFactory.capture(1, wall, elapsed, calibration)
-            assertTrue(evidence.isComparable)
-            return ContactConflictPolicy.resolve(ConflictChange.UPDATE, evidence, remoteChange,
-                remote?.let(LocalWriteEvidenceFactory::remoteWholeSecond))
-        }
-        assertEquals(ConflictResolution.REMOTE_WINS, resolve(11_200, 2_200, serverMillis / 1_000 + 10))
-        assertEquals(ConflictResolution.LOCAL_WINS, resolve(30_200, 21_200, serverMillis / 1_000 + 10))
-        assertEquals(ConflictResolution.LOCAL_WINS, resolve(11_200, 2_200, null))
-        assertEquals(ConflictResolution.ACTION_REQUIRED, resolve(11_200, 2_200, null, ConflictChange.DELETE))
+        val evidence = LocalWriteEvidenceFactory.capture(1, 11_200, 2_200, calibration)
+        assertTrue(evidence.isComparable)
+        assertTrue(requireNotNull(evidence.interval).earliestEpochMillis <= serverMillis + 1_200)
+        assertTrue(requireNotNull(evidence.interval).latestEpochMillis >= serverMillis + 1_200)
     }
 
     @Test fun untrustedMissingMalformedAndCachedTimeNeverCalibrates() {

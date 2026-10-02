@@ -16,6 +16,11 @@ Local and Android-originated mutations MUST be committed to canonical state and
 outbox before network writes. Lost acknowledgements, retries and process restarts
 MUST NOT create duplicate intent or discard pending edits.
 
+Group assignment reconciliation MUST wait for pending contact writes in the same
+account, including blocked conflicts. Contact writes can restore email identities
+and labels; desired memberships alone cannot identify removed-edge dependencies.
+This conservative ordering retains group intent without consuming retry attempts.
+
 ## Triggers and cost
 
 Durable mutations and connectivity return schedule best-effort foreground work
@@ -36,7 +41,9 @@ subject to Android scheduling and requires separate physical evidence.
 Ordinary no-change sync MUST use a lightweight complete paged inventory and
 MUST NOT request full cards once per unchanged contact. Hydrate new, changed or
 ambiguous items only. A page or inventory failure cannot establish remote deletion,
-including when a response appears empty.
+including when a response appears empty. Public pagination is not a server
+snapshot: confirm each absent ID with a targeted structured Proton absence before
+committing canonical deletion; a generic HTTP 404 is insufficient.
 
 Read-only hydration uses at most ten concurrent requests and durable canonical
 commits of at most 25 contacts. Independent Android projections use at most
@@ -46,28 +53,39 @@ Writes to Proton remain serialized.
 
 ## Conflicts and deletion
 
-Use the approved deterministic last-writer evidence for comparable update/update
-conflicts. If clock uncertainty overlaps, pending local intent wins. Comparable
-edit/delete timestamps may resolve automatically; an incomparable edit/delete
-conflict requires a user choice. Do not infer a remote deletion timestamp.
+Before each existing-contact update or delete of a present remote contact, the serialized engine MUST read
+one verified full card and compare its complete fingerprint with the durable
+intent baseline. A divergence MUST preserve the local draft and the verified
+Proton version in account-scoped Room storage and block the upload. Full repair
+MUST NOT advance a conflicting upload baseline or choose a winner silently.
 
-Current production limitation (D-096): the public contact directory supplies a
-local index fingerprint, not a remote modification timestamp or full-card size.
-`modifiedAtEpochSeconds` and `sizeBytes` are null. Pending local updates therefore
-win incomparable update/update conflicts even if the Web edit actually occurred
-later. Server-clock calibration alone cannot provide latest-edit-wins behavior.
-The public-field fingerprint also MUST NOT be described as a full-card revision;
-private-only change detection needs its own verification. Full repair hydrates
-all cards, but MUST NOT be used to declare ordinary incremental sync qualified.
+The Sync panel compares Contako and Proton and queues a whole-contact choice.
+The choice is bound to the conflict generation, local revision and remote version.
+It cannot be changed while engaged. The engine reads Proton again before applying
+it; a new local or remote change invalidates the choice. Offline/cancellation
+retains snapshots and intent. A local winner keeps its snapshots until confirmed
+acknowledgement; a Proton winner adopts values, preservation data and projection
+intent atomically with removal of only the selected local mutation.
 
-Local write evidence uses the process's verified primary-host HTTPS Date sample,
-with measured request round-trip uncertainty and Android elapsed realtime for both
-calibration and writes. Samples expire after 15 minutes; clock jumps, absent or
-invalid Date, cached responses and excessive request duration MUST NOT establish
-ordering. Small wall-clock adjustments MUST widen the uncertainty interval.
-Unknown remote modification times and already queued incomparable writes retain
-the defined fallback; ingestion time MUST NOT be described as the original time
-of a native edit.
+Proton adoption MUST NOT silently drop independent group assignments to an email
+absent from the selected version. Such assignments require resolution first.
+A confirmed remote deletion invalidates an earlier update choice and retains the
+local draft for deletion recovery; the old remote snapshot cannot authorize a
+write. A pending delete converges only on confirmed absence. A delete queued after
+an earlier remote deletion was reconciled MUST obtain fresh targeted absence
+proof even when that ID no longer appears in the inventory checkpoint. A failed
+full-card read or a retained conflict snapshot MUST NOT substitute for that proof.
+Explicit local deletion MUST replace the previous edit/choice transactionally
+with a new durable delete intent. It MUST NOT inherit that edit's conflict state
+or acknowledge the deletion before fresh remote proof. Already blocked deletes
+MAY resume after confirmed absence and revalidation of their exact local revision.
+
+The API has no effective atomic version precondition. A remote change between
+the final GET and PUT remains possible. Ordinary public-directory fingerprints
+also do not reliably expose private-only Web changes when no local write occurs.
+Full repair refreshes all cards; it MUST NOT be presented as proof of ordinary
+private-change detection. Server-clock calibration remains diagnostic write
+evidence, not a substitute for a remote version or proof of a winning edit.
 
 Non-discard sign-out MUST include unconsumed dirty Android contacts/groups and
 tombstones, not only Room outbox rows. Unavailable observation blocks cleanup.
@@ -76,6 +94,8 @@ intent is rechecked with local writes excluded. No session clearance precedes a
 failed clean guard. Partial cleanup is checkpointed, and a retry MUST NOT imply
 consent to discard newly created native intent. Explicit discard and Android
 Settings account removal retain scoped local cleanup without remote deletion.
+App sign-out attempts bounded best-effort session revocation before mandatory
+local session cleanup; an unavailable network MUST NOT strand the local session.
 
 Named deletion confirmation precedes a durable delete. A sync failure MUST retain
 recoverable intent; cancellation is not success. Provider deletion/acknowledgement
@@ -138,8 +158,18 @@ cancellable at safe boundaries; it keeps cached browsing available. Starting
 repair off Wi-Fi requires the existing per-pass confirmation.
 
 Group capability is unknown/available/unavailable based on maintained signals or
-classified API outcomes. Unsupported groups MUST NOT stop contacts. A repaired
+classified API outcomes, independently for creation, update, deletion and email
+assignment. Disable only the affected operations with an explanation; unknown
+or transient failure MUST NOT imply a plan restriction. Unsupported groups MUST NOT stop contacts. A repaired
 session or permission grant should make recoverable work eligible again.
+
+Notification publication is generic and contains no contact/account payload.
+The Sync screen offers Android notification permission/settings. Denial MUST NOT
+block synchronization or consume a notification claim. Record delivery only after
+successful publication, use a stable notification ID, and cancel obsolete alerts
+under the same status transaction. Authentication alerts are immediately eligible;
+other sustained blocks become eligible after 24 hours and are rechecked on sync
+or foreground return. Android scheduling does not guarantee an exact deadline.
 
 Performance targets remain 5 seconds for an ordinary no-change pass, 15 seconds
 for a ten-contact delta and 90 seconds for a 300-contact initial import.

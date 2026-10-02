@@ -163,30 +163,9 @@ internal class ContactInventoryPlan private constructor(
 internal class StaleContactInventoryPlan : IllegalStateException()
 
 /**
- * Deterministic D-032 planner. Only an authoritative, complete remote revision inventory is
- * accepted; public short-directory fingerprints cannot prove no-change or deletion.
- *
- * KNOWN BLOCKER — ordinary contact synchronization cannot currently complete.
- *
- * [requireAuthoritative] demands `AUTHORITATIVE_REMOTE_REVISION` coverage, `REMOTE_SERVER` version
- * provenance, and non-null `sizeBytes`/`modifiedAtEpochSeconds`. The production inventory gateway is
- * `ProtonPublicContactGateway`, which is built on Proton Core's maintained `contacts/v4/contacts`
- * short model and therefore emits `LOCAL_INDEX_FINGERPRINT` / `PUBLIC_DIRECTORY_FIELDS_ONLY` with
- * both of those fields null. Every ordinary pass consequently fails this precondition, returns
- * `ActionRequired`, and the dashboard reports action-required with an empty outbox.
- *
- * Observed on the physical API 35 device: session `READY`, group stage `Success(groupCount=4)`,
- * then `planner rejected` immediately followed by `remoteContactStage=ActionRequired`. Group
- * synchronization works, so authentication, crypto and transport are not implicated.
- *
- * `D-093` ordinal 10 already recorded this same mismatch on the Gate D side and resolved it there by
- * accepting the maintained public product identity. The production planner was never given the
- * equivalent treatment, so the contradiction persists here.
- *
- * Resolving it is a product decision for the owner, not an inference: either the planner accepts a
- * public-directory inventory (which weakens the D-032 deletion proof, since absence from a
- * fingerprint-only snapshot is weaker evidence), or the gateway obtains genuine server revision
- * metadata. Do not silently relax [requireAuthoritative] without recording that decision.
+ * Plans bounded incremental reconciliation. Public-directory fingerprints detect public changes,
+ * not all private edits. The execution stage MUST confirm absent IDs before applying deletion;
+ * completion of SDK pagination alone is not an authoritative server snapshot (D-032/D-096).
  */
 internal class PersistentContactInventoryPlanner(
     private val checkpointStore: ContactInventoryCheckpointStore,
@@ -237,8 +216,10 @@ internal class PersistentContactInventoryPlanner(
      */
     private fun requireAuthoritative(inventory: ValidatedCompleteInventory) {
         require(
-            inventory.snapshotAuthority ==
+            inventory.snapshotAuthority in setOf(
                 ContactInventorySnapshotAuthority.AUTHORITATIVE_REMOTE_REVISION,
+                ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY,
+            ),
         )
         // Coverage and provenance MUST be uniform across the snapshot. Mixing an authoritative
         // entry with a fingerprint-only one would make change detection silently inconsistent.

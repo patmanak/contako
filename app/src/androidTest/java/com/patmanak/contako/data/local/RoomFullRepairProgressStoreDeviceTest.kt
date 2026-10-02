@@ -129,6 +129,21 @@ class RoomFullRepairProgressStoreDeviceTest {
     }
 
     @Test
+    fun lateCheckpointsSurviveDatabaseReopenWithExactRevisionAndScope() = runBlocking {
+        var progress = startOnWifi()
+        listOf(FullRepairPhase.CANONICAL_RECONCILIATION,
+            FullRepairPhase.ANDROID_PROJECTION, FullRepairPhase.PUBLISHING).forEachIndexed { index, phase ->
+            assertTrue(store.checkpoint(ACCOUNT, progress.revision, phase, 0, 325, 2_000L + index))
+            val committed = requireNotNull(store.load(ACCOUNT))
+            reopenDatabase()
+            assertEquals(committed, store.load(ACCOUNT))
+            assertNull(store.load(AccountScope("other-account")))
+            assertFalse(store.clearAfterSuccessfulPublish(ACCOUNT, committed.revision))
+            progress = committed
+        }
+    }
+
+    @Test
     fun scopeClearsOnlyAfterCompletedPublish() = runBlocking {
         var progress = startOnWifi()
         assertFalse(store.clearAfterSuccessfulPublish(ACCOUNT, progress.revision))

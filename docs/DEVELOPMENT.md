@@ -5,6 +5,8 @@ Start with [Specification](SPECIFICATION.md), [Product](PRODUCT.md) and the affe
 Check Git status and preserve unrelated work. Source and public documentation are
 English. Private operator preferences are loaded through the root AGENTS.md;
 see [Agent setup](AGENT_SETUP.md). Do not duplicate them in public instructions.
+Use [the agent working method](WORKFLOW.md) when splitting a substantial task
+between specialized roles; ordinary edits can stay with the primary agent.
 
 ## Make one reviewable change
 

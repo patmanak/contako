@@ -213,8 +213,10 @@ internal class AndroidContactsProviderWriter(
         validateMembershipPlanIdentity(accountName, plan, membershipPlan)
         val assertedGroupBindingChunks = membershipPlan?.assertedGroupBindings.orEmpty()
             .chunked(MAX_GROUP_BINDINGS_PER_ASSERTION)
+        val primaryUpdates = plan.operations.filterIsInstance<AndroidRowOperation.Update>()
+            .filter { it.desired.isPrimary || it.desired.isSuperPrimary }
         val providerOperationCount = 2 + plan.operations.size + membershipOperations.size +
-            assertedGroupBindingChunks.size
+            assertedGroupBindingChunks.size + primaryUpdates.size
         if (plan.operations.size + membershipOperations.size > MAX_DATA_OPERATIONS ||
             providerOperationCount > MAX_BATCH_OPERATIONS
         ) {
@@ -315,7 +317,12 @@ internal class AndroidContactsProviderWriter(
                         dataRowSelection(allowUnclaimedRows),
                         dataRowSelectionArgs(operation.currentIdentity, rawContactId),
                     )
-                    .withValues(operation.desired.toContentValues(rawContactId, validatedPayload.binaryFor(operation.desired)))
+                    .withValues(operation.desired.toContentValues(rawContactId, validatedPayload.binaryFor(operation.desired)).apply {
+                        if (operation.desired.isPrimary || operation.desired.isSuperPrimary) {
+                            put(ContactsContract.Data.IS_PRIMARY, 0)
+                            put(ContactsContract.Data.IS_SUPER_PRIMARY, 0)
+                        }
+                    })
                     // No expected count, for the same reason as the acknowledgement below: the
                     // provider reports rows it changed, so an update whose values already match
                     // returns 0 and would abort the whole batch. A projection replays the desired
@@ -331,6 +338,24 @@ internal class AndroidContactsProviderWriter(
                     .withExpectedCount(1)
                     .build()
             }
+        }
+        // ContactsProvider treats a zero super-primary flag as a clearing request and ignores
+        // a simultaneous primary promotion. Clear first, then promote after all row mutations,
+        // so neither that clearing branch nor a later demotion erases the desired preference.
+        // Both phases remain inside the same ownership/version-guarded transaction.
+        primaryUpdates.forEach { operation ->
+            operations += ContentProviderOperation.newUpdate(dataUri)
+                .withSelection(
+                    dataRowSelection(allowUnclaimedRows),
+                    dataRowSelectionArgs(operation.currentIdentity, rawContactId),
+                )
+                .withValue(ContactsContract.Data.IS_PRIMARY, 1)
+                .apply {
+                    if (operation.desired.isSuperPrimary) {
+                        withValue(ContactsContract.Data.IS_SUPER_PRIMARY, 1)
+                    }
+                }
+                .build()
         }
         membershipOperations.forEach { operation ->
             if (operation is AndroidGroupMembershipRowOperation.Insert) insertOperationIndexes += operations.size

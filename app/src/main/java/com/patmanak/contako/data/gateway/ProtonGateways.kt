@@ -265,6 +265,9 @@ interface ProtonSessionGateway {
 }
 
 fun interface ProtonLocalSessionCleanupGateway {
+    /** Production session adapters MUST override this to attempt revocation before local cleanup.
+     * The fallback supports local-only implementations that have no remote session to revoke. */
+    suspend fun clearAfterBestEffortRevocation(account: AccountScope): GatewayOutcome<Unit> = clearLocal(account)
     suspend fun clearLocal(account: AccountScope): GatewayOutcome<Unit>
 }
 
@@ -364,7 +367,14 @@ class ContactInventoryPage(
 /** Collection-level proof. It is explicit so an empty inventory cannot pass by vacuous truth. */
 enum class ContactInventorySnapshotAuthority {
     UNATTESTED,
+    COMPLETE_PUBLIC_DIRECTORY,
     AUTHORITATIVE_REMOTE_REVISION,
+}
+
+enum class RemoteContactPresence { PRESENT, CONFIRMED_ABSENT }
+
+fun interface ProtonContactExistenceGateway {
+    suspend fun check(account: AccountScope, id: RemoteContactId): GatewayOutcome<RemoteContactPresence>
 }
 
 /** A complete inventory exists only after every page passes continuity and global uniqueness. */

@@ -32,6 +32,21 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RoomContactRepositoryTest {
+    @Test fun staleEditorCannotReplaceNewContentOrAReceivedRemoteIdentity() = runBlocking {
+        val original = repository.saveContact(contact("editor-cas", "Original")).requireSavedForTest()
+        val baseline = com.patmanak.contako.domain.repository.ContactEditBaseline(original, emptySet())
+        val changed = repository.saveContact(original.copy(firstName = "Remote change")).requireSavedForTest()
+        val before = database.outboxDao().getAll(ACCOUNT)
+        val rejected = repository.saveContactWithGroupAssignments(original.copy(firstName = "Draft"), emptySet(), emptySet(), baseline)
+        assertEquals(setOf(SaveValidationIssue.STALE_CONTACT_EDIT), (rejected as SaveResult.Rejected).issues)
+        assertEquals(changed.firstName, repository.getContact(ACCOUNT, original.id)?.firstName)
+        assertEquals(before, database.outboxDao().getAll(ACCOUNT))
+        val nextBaseline = com.patmanak.contako.domain.repository.ContactEditBaseline(changed, emptySet())
+        val row = requireNotNull(database.contactDao().get(ACCOUNT, original.id)).contact
+        database.contactDao().upsert(row.copy(remoteContactId = "new-remote-id"))
+        assertTrue(repository.saveContactWithGroupAssignments(changed, emptySet(), emptySet(), nextBaseline) is SaveResult.Rejected)
+        assertEquals("new-remote-id", repository.getContact(ACCOUNT, original.id)?.remoteContactId)
+    }
     private lateinit var context: Context
     private lateinit var database: ContakoDatabase
     private lateinit var repository: RoomContactRepository

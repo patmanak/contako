@@ -86,6 +86,9 @@ internal class RoomOutboxStore(private val database: ContakoDatabase) {
             AggregateType.GROUP -> reconcileGroup(current)
         }
         if (!canonicalReconciled) return@withTransaction false
+        if (current.aggregateType == AggregateType.CONTACT.name) {
+            database.contactConflictDao().delete(current.accountId, current.aggregateId)
+        }
         database.outboxDao().deleteAcknowledged(
             current.accountId,
             current.aggregateType,

@@ -202,6 +202,17 @@ internal interface OutboxDao {
     @Query("SELECT * FROM outbox_mutations WHERE account_id = :accountId ORDER BY created_at_epoch_millis")
     suspend fun getAll(accountId: String): List<OutboxMutationEntity>
 
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1 FROM outbox_mutations AS intent
+            JOIN contacts AS contact ON contact.account_id = intent.account_id
+                AND contact.id = intent.aggregate_id
+            WHERE intent.account_id = :accountId AND intent.aggregate_type = 'CONTACT'
+                AND contact.pending_mutation_revision = intent.revision
+        )
+    """)
+    suspend fun hasPendingContactWrite(accountId: String): Boolean
+
     @Query(
         """
         SELECT * FROM outbox_mutations
