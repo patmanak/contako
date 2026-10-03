@@ -255,6 +255,8 @@ internal object GateDRawResponseLimits {
     const val CREATE_BYTES = 64 * 1_024
 
     fun forRequest(method: String, path: List<String>): Int? = when {
+        method == "GET" && path.size == 4 && path.take(3) == listOf("contacts", "v6", "events") ->
+            ProtonContactEventReader.MAX_BYTES
         method == "POST" && path == listOf("contacts", "v4", "contacts") -> CREATE_BYTES
         method == "GET" && (path == listOf("contacts", "v4") ||
             path == listOf("contacts", "v4", "contacts", "emails")) -> CONTACT_BYTES

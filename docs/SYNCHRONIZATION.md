@@ -40,7 +40,17 @@ subject to Android scheduling and requires separate physical evidence.
 
 Ordinary no-change sync MUST use a lightweight complete paged inventory and
 MUST NOT request full cards once per unchanged contact. Hydrate new, changed or
-ambiguous items only. A page or inventory failure cannot establish remote deletion,
+ambiguous items only. The authenticated contacts-only Proton v6 event feed MUST
+supplement public-directory fingerprints, including for private-only edits.
+Capture the latest event position before the first complete hydration; persist
+the account-scoped cursor with the inventory checkpoint only after all planned
+canonical reconciliations are durable. Drain all event pages before advancing it.
+A failed read, cancellation or failed checkpoint transaction MUST retain the old
+position for replay. Resolve email events through current/previous opaque email
+identities in the directory checkpoint. A server-requested refresh or an unresolved
+email event requires complete hydration; an ordinary empty event delta does
+not. Event positions MUST NOT be treated as contact revisions or logged.
+A page or inventory failure cannot establish remote deletion,
 including when a response appears empty. Public pagination is not a server
 snapshot: confirm each absent ID with a targeted structured Proton absence before
 committing canonical deletion; a generic HTTP 404 is insufficient.
@@ -81,8 +91,9 @@ or acknowledge the deletion before fresh remote proof. Already blocked deletes
 MAY resume after confirmed absence and revalidation of their exact local revision.
 
 The API has no effective atomic version precondition. A remote change between
-the final GET and PUT remains possible. Ordinary public-directory fingerprints
-also do not reliably expose private-only Web changes when no local write occurs.
+the final GET and PUT remains possible. Public-directory fingerprints alone
+cannot expose private-only Web changes; ordinary reconciliation uses the contacts
+event feed to identify cards requiring a fresh read.
 Full repair refreshes all cards; it MUST NOT be presented as proof of ordinary
 private-change detection. Server-clock calibration remains diagnostic write
 evidence, not a substitute for a remote version or proof of a winning edit.

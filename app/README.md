@@ -31,6 +31,11 @@ A candidate suffix isolates the package/account type from a main-phone installat
 
 ## Development checks
 
+Before the first Gradle build, generate the checksum-locked native dependency
+using [the Proton source-rebuild instructions](native/golib/README.md).
+This requires Go 1.27.1 and NDK r27c in addition to the Android/JDK toolchain.
+Gradle MUST fail if this local artifact is absent or its checksum differs.
+
 ```powershell
 .\gradlew.bat --no-daemon --max-workers=2 -PcontakoTestBuildType=debug -PcontakoCandidatePackageSuffix=candidate testDebugUnitTest
 .\gradlew.bat --no-daemon --max-workers=2 -PcontakoTestBuildType=debug -PcontakoCandidatePackageSuffix=candidate assembleDebug assembleDebugAndroidTest
@@ -58,8 +63,9 @@ output and MUST NOT be treated as publicly signed merely because its filename
 contains `release`. Record installed artifact identity and tested scope in the ignored
 [result template](../docs/testing/RESULT_TEMPLATE.md).
 
-Proton Core is pinned to 36.8.0. A separate strict constraint selects
-android-golib 2.10.0-2 because that Core train still requests 2.9.0-2 transitively.
+Proton Core is pinned to 36.8.0. A separate strict constraint selects the
+Contako source rebuild of android-golib with Go 1.27.1; Core's transitive
+upstream binary request is substituted with that same local artifact.
 See [Dependencies](../docs/DEPENDENCIES.md) for checksum, license and validation
 evidence; a version update alone does not close security findings.
 

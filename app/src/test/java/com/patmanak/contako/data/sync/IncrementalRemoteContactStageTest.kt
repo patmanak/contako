@@ -29,6 +29,46 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IncrementalRemoteContactStageTest {
+    @Test fun privateChangeEventHydratesUnchangedIndexAndFailedReadKeepsCursorForReplay() = runTest {
+        val checkpoint = FakeCheckpointStore()
+        var failRead = false
+        val fetched = mutableListOf<RemoteContactId>()
+        val seenCursors = mutableListOf<String?>()
+        var delta = com.patmanak.contako.data.proton.ContactEventsDelta("start", emptySet(), true)
+        val candidate = IncrementalRemoteContactStage(
+            pagedGateway { pages(listOf(metadata("one", 1), metadata("two", 1)), 2) },
+            ProtonVerifiedContactCardGateway { _, id ->
+                fetched += id
+                if (failRead) GatewayOutcome.Failure(GatewayFailureCategory.TIMEOUT) else success(card(id, 2))
+            },
+            PersistentContactInventoryPlanner(checkpoint),
+            RemoteCanonicalReconciliationStore { _, _, cards, labels, deletions ->
+                CanonicalReconciliationReceipt(cards.map { it.id }.toSet(), labels, deletions)
+            },
+            eventsGateway = com.patmanak.contako.data.proton.ProtonContactEventsGateway { _, cursor ->
+                seenCursors += cursor
+                success(delta)
+            },
+        )
+        assertTrue(candidate.run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertEquals("start", checkpoint.current?.checkpoint?.eventCursor)
+        delta = com.patmanak.contako.data.proton.ContactEventsDelta("changed", setOf(RemoteContactId("one")), false)
+        fetched.clear()
+        failRead = true
+        assertTrue(candidate.run(ACCOUNT) is RemoteContactStageResult.RetryWaiting)
+        assertEquals("start", checkpoint.current?.checkpoint?.eventCursor)
+        failRead = false
+        fetched.clear()
+        assertTrue(candidate.run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertEquals(listOf(RemoteContactId("one")), fetched)
+        assertEquals("changed", checkpoint.current?.checkpoint?.eventCursor)
+        assertEquals(listOf(null, "start", "start"), seenCursors)
+        delta = com.patmanak.contako.data.proton.ContactEventsDelta("changed", emptySet(), false)
+        fetched.clear()
+        assertTrue(candidate.run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertTrue(fetched.isEmpty())
+    }
+
     @Test fun publicDirectoryAbsenceNeedsTargetedConfirmationBeforeAnyCommit() = runTest {
         val checkpoint = FakeCheckpointStore()
         stage({ pages(listOf(metadata("one", 1)), 1) }, checkpoint, { id -> success(card(id, 1)) }).run(ACCOUNT)

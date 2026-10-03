@@ -22,6 +22,10 @@ current scope take precedence over obsolete campaign procedure.
 
 ## Verify the behavior that changed
 
+Before a first Gradle build, follow the [Android build prerequisites](../app/README.md#development-checks)
+and generate the [source-built Proton cryptography bundle](../app/native/golib/README.md).
+Gradle rejects missing, stale or checksum-mismatched native artifacts.
+
 Use [QA](QA.md) to select unit, software-integration and physical target cases.
 Shared synthetic data and the regression matrix replace historical campaign
 selection. Record each run locally with the result template, not in the plan.

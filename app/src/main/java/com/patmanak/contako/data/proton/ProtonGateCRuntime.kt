@@ -830,6 +830,7 @@ internal class ProtonGateCRuntime private constructor(
                 delegate = ProtonPublicContactGroupGateway(accountScope, readyUserProvider, LabelRemoteDataSourceImpl(network.apiProvider)),
             )
             val gateD = ProtonGateDComposition(
+                events = ProtonContactEventReader(rawGateDWire),
                 existence = publicContactGateway,
                 inventory = publicContactGateway,
                 verifiedCards = publicContactGateway,

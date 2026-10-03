@@ -108,7 +108,9 @@ class ProjectInvariantTest {
         assertTrue(catalog.contains("protonCore = \"36.8.0\""))
         assertEquals(23, Regex("module = \"me\\.proton\\.core:").findAll(catalog).count())
         assertEquals(23, Regex("implementation\\(libs\\.proton\\.(?!golib\\))").findAll(build).count())
-        assertTrue(catalog.contains("protonGolib = \"2.10.0-2\""))
+        assertTrue(catalog.contains("protonGolib = \"2.10.0-2-go1.27.1\""))
+        assertTrue(catalog.contains("module = \"com.patmanak.contako.crypto:android-golib\""))
+        assertTrue(build.contains("requested.group == \"me.proton.crypto\" && requested.name == \"android-golib\""))
         assertTrue(build.contains("strictly(libs.versions.protonGolib.get())"))
         assertEquals(23, Regex("version\\.ref = \"protonCore\"").findAll(catalog).count())
         assertTrue(build.contains("requested.group == \"me.proton.core\""))
@@ -341,7 +343,7 @@ class ProjectInvariantTest {
         assertTrue(extractionRules.contains("<cloud-backup"))
         assertTrue(extractionRules.contains("<device-transfer>"))
 
-        assertTrue(databaseSource.contains("version = 17"))
+        assertTrue(databaseSource.contains("version = 18"))
         assertTrue(databaseSource.contains("exportSchema = true"))
         assertFalse(databaseSource.contains("fallbackToDestructiveMigration"))
         listOf(
@@ -361,6 +363,7 @@ class ProjectInvariantTest {
             "MIGRATION_14_15",
             "MIGRATION_15_16",
             "MIGRATION_16_17",
+            "MIGRATION_17_18",
         )
             .forEach { migration -> assertTrue(databaseSource.contains(migration)) }
         assertTrue(schema.contains("\"version\": 16"))

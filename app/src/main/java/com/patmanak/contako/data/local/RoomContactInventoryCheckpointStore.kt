@@ -62,7 +62,7 @@ internal class RoomContactInventoryCheckpointStore(
             }
             VersionedContactInventoryCheckpoint(
                 generation = header.generation,
-                checkpoint = ContactInventoryCheckpoint(baselines),
+                checkpoint = ContactInventoryCheckpoint(baselines, header.eventCursor),
             )
         }
 
@@ -76,9 +76,9 @@ internal class RoomContactInventoryCheckpointStore(
         val nextGeneration = expectedGeneration?.let { Math.addExact(it, 1L) } ?: 0L
         val committed = database.withTransaction {
             val generationAdvanced = if (expectedGeneration == null) {
-                dao.insertInitialCheckpoint(ContactInventoryCheckpointEntity(accountId, nextGeneration)) != -1L
+                dao.insertInitialCheckpoint(ContactInventoryCheckpointEntity(accountId, nextGeneration, checkpoint.eventCursor)) != -1L
             } else {
-                dao.compareAndSetGeneration(accountId, expectedGeneration, nextGeneration) == 1
+                dao.compareAndSetGeneration(accountId, expectedGeneration, nextGeneration, checkpoint.eventCursor) == 1
             }
             if (!generationAdvanced) return@withTransaction false
 

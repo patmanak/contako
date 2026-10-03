@@ -1,4 +1,9 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import groovy.json.JsonSlurper
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+import javax.xml.parsers.DocumentBuilderFactory
+import org.w3c.dom.Element
 
 val contakoReleaseVersion = "0.9.0"
 val contakoBaseApplicationId = "com.patmanak.contako"
@@ -37,7 +42,7 @@ android {
         minSdk = 31
         targetSdk = 36
         contakoTargetAbi?.let { targetAbi -> ndk { abiFilters += targetAbi } }
-        versionCode = 9
+        versionCode = 10
         versionName = contakoReleaseVersion
         buildConfigField("String", "PROTON_RELEASE_VERSION", "\"$contakoReleaseVersion\"")
         buildConfigField("boolean", "SANITIZED_DIAGNOSTICS", "false")
@@ -130,8 +135,77 @@ ksp {
 }
 
 val protonCoreVersion = libs.versions.protonCore.get()
+val sourceBuiltGolibVersion = libs.versions.protonGolib.get()
+val sourceBuiltGolib = layout.projectDirectory.file(
+    "native/build/maven/com/patmanak/contako/crypto/android-golib/$sourceBuiltGolibVersion/" +
+        "android-golib-$sourceBuiltGolibVersion.aar",
+)
+val nativeSourceNames = listOf("go.mod", "go.sum", "dependencies.go", "build.ps1", "package-aar.py", "golib.pom")
+val verifySourceBuiltCrypto = tasks.register("verifySourceBuiltCrypto") {
+    group = "verification"
+    description = "Reject missing or stale source-built Proton crypto artifacts."
+    inputs.file(sourceBuiltGolib)
+    inputs.file(layout.projectDirectory.file("gradle/verification-metadata.xml"))
+    inputs.file(sourceBuiltGolib.asFile.resolveSibling(sourceBuiltGolib.asFile.name.replace(".aar", ".pom")))
+    inputs.files(nativeSourceNames.map { layout.projectDirectory.file("native/golib/$it") })
+    doLast {
+        val artifact = sourceBuiltGolib.asFile
+        check(artifact.isFile) { "Build native/golib first; see native/golib/README.md" }
+        // Gradle trusts local Maven repositories; enforce their reviewed pins explicitly.
+        val factory = DocumentBuilderFactory.newInstance().apply {
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            setFeature("http://xml.org/sax/features/external-general-entities", false)
+            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            isXIncludeAware = false
+            isExpandEntityReferences = false
+        }
+        val components = factory.newDocumentBuilder().parse(file("gradle/verification-metadata.xml"))
+            .getElementsByTagName("component")
+        val component = (0 until components.length).map { components.item(it) as Element }.single {
+            it.getAttribute("group") == "com.patmanak.contako.crypto" &&
+                it.getAttribute("name") == "android-golib" && it.getAttribute("version") == sourceBuiltGolibVersion
+        }
+        val pinnedArtifacts = component.getElementsByTagName("artifact")
+        for (candidate in listOf(artifact, artifact.resolveSibling(artifact.name.replace(".aar", ".pom")))) {
+            val pin = (0 until pinnedArtifacts.length).map { pinnedArtifacts.item(it) as Element }
+                .single { it.getAttribute("name") == candidate.name }.getElementsByTagName("sha256")
+            check(pin.length == 1) { "Native crypto requires one reviewed SHA-256 pin per artifact" }
+            val digest = MessageDigest.getInstance("SHA-256")
+            candidate.inputStream().use { input ->
+                val buffer = ByteArray(65536)
+                var count = input.read(buffer)
+                while (count >= 0) {
+                    if (count > 0) digest.update(buffer, 0, count)
+                    count = input.read(buffer)
+                }
+            }
+            val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            check(actual.equals((pin.item(0) as Element).getAttribute("value"), ignoreCase = true)) {
+                "Native crypto checksum mismatch: ${candidate.name}"
+            }
+        }
+        ZipFile(artifact).use { archive ->
+            val entry = checkNotNull(archive.getEntry("META-INF/contako-native-provenance.json"))
+            val provenance = archive.getInputStream(entry).use { JsonSlurper().parse(it) } as Map<*, *>
+            check(provenance["coordinate"] == "com.patmanak.contako.crypto:android-golib:$sourceBuiltGolibVersion")
+            val hashes = provenance["source_descriptors"] as Map<*, *>
+            for (name in nativeSourceNames) {
+                val bytes = file("native/golib/$name").readText(Charsets.UTF_8).replace("\r\n", "\n")
+                    .toByteArray(Charsets.UTF_8)
+                val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+                    .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+                check(hashes[name] == digest) { "Native crypto source changed: rebuild and review $name" }
+            }
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(verifySourceBuiltCrypto) }
 configurations.configureEach {
     resolutionStrategy.eachDependency {
+        if (requested.group == "me.proton.crypto" && requested.name == "android-golib") {
+            useTarget("com.patmanak.contako.crypto:android-golib:${libs.versions.protonGolib.get()}")
+            because("Use the API-checked Proton source rebuild with a supported Go runtime")
+        }
         if (requested.group == "me.proton.core" && requested.version != protonCoreVersion) {
             throw GradleException(
                 "Mixed Proton Core release trains are forbidden: ${requested.name}:${requested.version}",
@@ -144,7 +218,7 @@ dependencies {
     constraints {
         implementation(libs.proton.golib) {
             version { strictly(libs.versions.protonGolib.get()) }
-            because("Qualify the maintained native crypto release separately from the Proton Core train")
+            because("Pin the qualified Proton source rebuild independently of the Core train")
         }
     }
     implementation(libs.androidx.core.ktx)
@@ -186,7 +260,7 @@ dependencies {
     implementation(libs.proton.key.data)
     implementation(libs.proton.crypto.android)
     // Contact decryption uses the maintained bounded streaming reader from the
-    // same strictly constrained native artifact already selected by Proton Core.
+    // same strictly constrained source-built native artifact used by Proton Core.
     implementation(libs.proton.golib)
     implementation(libs.proton.contact.domain)
     implementation(libs.proton.contact.data)

@@ -224,9 +224,13 @@ function Get-VerificationSummary {
 
 function Get-ResolvedCoordinates([string[]]$Lines) {
     $coordinates = foreach ($line in $Lines) {
-        $match = [regex]::Match($line, '([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([A-Za-z0-9_.+\-]+)(?:\s+->\s+([A-Za-z0-9_.+\-]+))?')
+        $match = [regex]::Match($line, '([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([A-Za-z0-9_.+\-]+)(?:\s+->\s+(?:([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):)?([A-Za-z0-9_.+\-]+))?')
         if (-not $match.Success) { continue }
-        $version = if ($match.Groups[4].Success) { $match.Groups[4].Value } else { $match.Groups[3].Value }
+        if ($match.Groups[4].Success) {
+            "$($match.Groups[4].Value):$($match.Groups[5].Value):$($match.Groups[6].Value)"
+            continue
+        }
+        $version = if ($match.Groups[6].Success) { $match.Groups[6].Value } else { $match.Groups[3].Value }
         "$($match.Groups[1].Value):$($match.Groups[2].Value):$version"
     }
     return @($coordinates | Sort-Object -Unique)
@@ -235,7 +239,9 @@ function Get-ResolvedCoordinates([string[]]$Lines) {
 function Assert-LegalAndWriteSbom([string[]]$Resolved) {
     $legal = Get-Content -LiteralPath $LegalInventoryPath -Raw | ConvertFrom-Json
     $descriptorPaths = @('app/build.gradle.kts', 'app/settings.gradle.kts', 'app/gradle.properties',
-        'app/gradle/libs.versions.toml', 'app/gradle/wrapper/gradle-wrapper.properties', 'app/gradle/verification-metadata.xml')
+        'app/gradle/libs.versions.toml', 'app/gradle/wrapper/gradle-wrapper.properties', 'app/gradle/verification-metadata.xml',
+        'app/native/golib/go.mod', 'app/native/golib/go.sum', 'app/native/golib/dependencies.go',
+        'app/native/golib/build.ps1', 'app/native/golib/package-aar.py', 'app/native/golib/golib.pom')
     if (@($legal.dependencyDescriptors).Count -ne $descriptorPaths.Count) { throw 'LEGAL_DESCRIPTOR_SET_INVALID' }
     foreach ($relative in $descriptorPaths) {
         $entries = @($legal.dependencyDescriptors | Where-Object { $_.file -ceq $relative })

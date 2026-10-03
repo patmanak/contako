@@ -455,13 +455,14 @@ internal interface ContactInventoryCheckpointDao {
     suspend fun insertInitialCheckpoint(checkpoint: ContactInventoryCheckpointEntity): Long
 
     @Query(
-        "UPDATE contact_inventory_checkpoints SET generation = :nextGeneration " +
+        "UPDATE contact_inventory_checkpoints SET generation = :nextGeneration, event_cursor = :eventCursor " +
             "WHERE account_id = :accountId AND generation = :expectedGeneration",
     )
     suspend fun compareAndSetGeneration(
         accountId: String,
         expectedGeneration: Long,
         nextGeneration: Long,
+        eventCursor: String? = null,
     ): Int
 
     @Query("DELETE FROM contact_inventory_entries WHERE account_id = :accountId")

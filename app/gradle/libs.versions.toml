@@ -15,7 +15,7 @@ espresso = "3.7.0"
 testServices = "1.6.0"
 coroutines = "1.10.2"
 protonCore = "36.8.0"
-protonGolib = "2.10.0-2"
+protonGolib = "2.10.0-2-go1.27.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -62,7 +62,7 @@ proton-user-data = { module = "me.proton.core:user-data", version.ref = "protonC
 proton-key-domain = { module = "me.proton.core:key-domain", version.ref = "protonCore" }
 proton-key-data = { module = "me.proton.core:key-data", version.ref = "protonCore" }
 proton-crypto-android = { module = "me.proton.core:crypto-android", version.ref = "protonCore" }
-proton-golib = { module = "me.proton.crypto:android-golib", version.ref = "protonGolib" }
+proton-golib = { module = "com.patmanak.contako.crypto:android-golib", version.ref = "protonGolib" }
 proton-contact-domain = { module = "me.proton.core:contact-domain", version.ref = "protonCore" }
 proton-contact-data = { module = "me.proton.core:contact-data", version.ref = "protonCore" }
 proton-label-domain = { module = "me.proton.core:label-domain", version.ref = "protonCore" }

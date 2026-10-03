@@ -7,6 +7,8 @@ import com.patmanak.contako.data.gateway.ContactInventoryPage
 import com.patmanak.contako.data.gateway.ContactInventorySnapshotAuthority
 import com.patmanak.contako.data.gateway.ContactInventoryVersionProvenance
 import com.patmanak.contako.data.gateway.RemoteContactId
+import com.patmanak.contako.data.gateway.RemoteEmailId
+import com.patmanak.contako.data.gateway.RemoteEmailGroupMembership
 import com.patmanak.contako.data.gateway.RemoteVersion
 import com.patmanak.contako.data.gateway.ValidatedCompleteInventory
 import kotlinx.coroutines.test.runTest
@@ -17,6 +19,48 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ContactInventoryPlannerCasTest {
+    @Test fun emailEventsResolveCurrentAndRemovedIdentitiesWithoutHydratingUnrelatedContacts() = runTest {
+        val store = RecordingCheckpointStore()
+        val oldEmail = RemoteEmailId("old-email")
+        val newEmail = RemoteEmailId("new-email")
+        store.compareAndSet(ACCOUNT, null, ContactInventoryCheckpoint(listOf(
+            ContactInventoryBaseline(RemoteContactId("one"), "Fixture", RemoteVersion("v1"),
+                1, 1, emptyList(), listOf(RemoteEmailGroupMembership(oldEmail, emptyList()))),
+            baseline("two", "v1"),
+        ), "start"))
+        fun current(email: RemoteEmailId) = ValidatedCompleteInventory.fromPages(listOf(
+            ContactInventoryPage(listOf("one", "two").map { id ->
+                val emails = if (id == "one") listOf(email) else emptyList()
+                ContactInventoryMetadata(RemoteContactId(id), "Fixture", RemoteVersion("v1"), 1, 1,
+                    emails, emptyList(),
+                    versionProvenance = ContactInventoryVersionProvenance.REMOTE_SERVER,
+                    coverage = ContactInventoryCoverage.AUTHORITATIVE_REMOTE_REVISION,
+                    emailGroupMemberships = emails.map { RemoteEmailGroupMembership(it, emptyList()) })
+            }, null, null, 2, ContactInventorySnapshotAuthority.AUTHORITATIVE_REMOTE_REVISION)))
+        val planner = PersistentContactInventoryPlanner(store)
+        val event = ContactEventsDelta("next", emptySet(), false, setOf(oldEmail))
+        assertEquals(setOf(RemoteContactId("one")), planner.plan(ACCOUNT, current(oldEmail), events = event).hydrate)
+        assertEquals(setOf(RemoteContactId("one")), planner.plan(ACCOUNT, current(newEmail), events = event).hydrate)
+        val unknown = ContactEventsDelta("next", emptySet(), false, setOf(RemoteEmailId("unknown")))
+        assertEquals(setOf(RemoteContactId("one"), RemoteContactId("two")),
+            planner.plan(ACCOUNT, current(newEmail), events = unknown).hydrate)
+    }
+
+    @Test fun eventCursorSharesCheckpointCasAndRequiresCompletedReconciliation() = runTest {
+        val store = RecordingCheckpointStore()
+        val planner = PersistentContactInventoryPlanner(store)
+        val first = planner.plan(ACCOUNT, inventory("contact", "v1"), events = ContactEventsDelta("start", emptySet(), true))
+        assertNull(planner.eventCursor(ACCOUNT))
+        planner.commit(ACCOUNT, first.fullyCompleted())
+        val changed = planner.plan(ACCOUNT, inventory("contact", "v1"), events = ContactEventsDelta("next", setOf(RemoteContactId("contact")), false))
+        assertEquals(setOf(RemoteContactId("contact")), changed.hydrate)
+        assertTrue(runCatching { planner.commit(ACCOUNT, changed) }.isFailure)
+        assertEquals("start", planner.eventCursor(ACCOUNT))
+        assertNull(planner.eventCursor(FOREIGN_ACCOUNT))
+        planner.commit(ACCOUNT, changed.fullyCompleted())
+        assertEquals("next", planner.eventCursor(ACCOUNT))
+    }
+
     @Test
     fun `checkpoint completion requires exact durable reconciliation proof before store access`() = runTest {
         val store = RecordingCheckpointStore()

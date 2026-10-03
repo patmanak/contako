@@ -84,6 +84,7 @@ internal data class ProductionSyncDependencies(
     val localSessionCleanup: ProtonLocalSessionCleanupGateway,
     val existence: com.patmanak.contako.data.gateway.ProtonContactExistenceGateway =
         com.patmanak.contako.data.gateway.ProtonContactExistenceGateway { _, _ -> GatewayOutcome.Failure(GatewayFailureCategory.UNKNOWN) },
+    val events: com.patmanak.contako.data.proton.ProtonContactEventsGateway? = null,
 )
 
 /** Production composition only wires dormant gateways; I/O starts when the shared runner executes. */
@@ -134,7 +135,8 @@ internal fun composeProductionSharedSyncRuntime(
             gateD.emailLabels,
             gateD.membershipReader,
             proton.session as ProtonLocalSessionCleanupGateway,
-            gateD.existence,
+            events = gateD.events,
+            existence = gateD.existence,
         ),
         runnerScope,
         stopScheduling,
@@ -307,6 +309,7 @@ internal fun composeProductionSharedSyncRuntime(
             // automatic requests to arbitrary contact-controlled hosts.
             RoomRemoteCanonicalReconciliationStore(database),
             existenceGateway = dependencies.existence,
+            eventsGateway = dependencies.events,
             actionRequiredObserver = RemoteContactActionRequiredObserver { boundary, category, hydration ->
                 remoteFailure.set(when (category) {
                     GatewayFailureCategory.AUTHENTICATION_REQUIRED -> SyncActionReason.AUTHENTICATION_REQUIRED

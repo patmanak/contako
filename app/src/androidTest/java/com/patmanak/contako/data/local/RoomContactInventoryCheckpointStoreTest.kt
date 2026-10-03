@@ -32,6 +32,36 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RoomContactInventoryCheckpointStoreTest {
+    @Test
+    fun contactEventCursorSurvivesRestartAndFailedCheckpointTransaction() = runBlocking {
+        val name = "inventory-events-restart.db"
+        context.deleteDatabase(name)
+        var database = ContakoDatabase.create(context, name)
+        try {
+            val snapshot = inventory(metadata("contact", "v1"))
+            val first = planner(database).plan(ACCOUNT, snapshot, events =
+                com.patmanak.contako.data.proton.ContactEventsDelta("start", emptySet(), true))
+            planner(database).commit(ACCOUNT, first.fullyCompleted())
+            database.close()
+            database = ContakoDatabase.create(context, name)
+            assertEquals("start", planner(database).eventCursor(ACCOUNT))
+            assertNull(planner(database).eventCursor(FOREIGN_ACCOUNT))
+            val faulting = PersistentContactInventoryPlanner(RoomContactInventoryCheckpointStore(database,
+                InventoryCheckpointWriteHook { if (it == InventoryCheckpointWriteCheckpoint.AFTER_GENERATION_CAS) error("SYNTHETIC_FAILURE") }))
+            val changed = faulting.plan(ACCOUNT, snapshot, events =
+                com.patmanak.contako.data.proton.ContactEventsDelta("next", setOf(RemoteContactId("contact")), false))
+            assertTrue(runCatching { faulting.commit(ACCOUNT, changed.fullyCompleted()) }.isFailure)
+            assertEquals("start", planner(database).eventCursor(ACCOUNT))
+            val replay = planner(database).plan(ACCOUNT, snapshot, events =
+                com.patmanak.contako.data.proton.ContactEventsDelta("next", setOf(RemoteContactId("contact")), false))
+            planner(database).commit(ACCOUNT, replay.fullyCompleted())
+            assertEquals("next", planner(database).eventCursor(ACCOUNT))
+        } finally {
+            database.close()
+            context.deleteDatabase(name)
+        }
+    }
+
     private val context: Context = ApplicationProvider.getApplicationContext()
 
     @Test

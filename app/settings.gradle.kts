@@ -15,6 +15,15 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = "ContakoSourceBuiltCrypto"
+                    url = uri("native/build/maven")
+                }
+            }
+            filter { includeGroup("com.patmanak.contako.crypto") }
+        }
         google()
         mavenCentral()
     }

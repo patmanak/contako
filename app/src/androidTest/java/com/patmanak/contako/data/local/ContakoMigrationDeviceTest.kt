@@ -171,7 +171,7 @@ class ContakoMigrationDeviceTest {
     private class SimulatedMigrationProcessDeath : RuntimeException()
 
     private companion object {
-        const val CURRENT_VERSION = 17
+        const val CURRENT_VERSION = 18
         val ALL_MIGRATIONS = arrayOf(
             ContakoDatabase.MIGRATION_1_2,
             ContakoDatabase.MIGRATION_2_3,
@@ -189,6 +189,7 @@ class ContakoMigrationDeviceTest {
             ContakoDatabase.MIGRATION_14_15,
             ContakoDatabase.MIGRATION_15_16,
             ContakoDatabase.MIGRATION_16_17,
+            ContakoDatabase.MIGRATION_17_18,
         )
     }
 }
@@ -258,7 +259,7 @@ private object MigrationFixture {
         db.insertValues("outbox_mutations", outboxValues.filterKeys(outboxColumns::contains))
 
         if (db.tableExists("contact_inventory_checkpoints")) {
-            db.execSQL("INSERT INTO contact_inventory_checkpoints VALUES ('synthetic-account',11)")
+            db.execSQL("INSERT INTO contact_inventory_checkpoints (account_id, generation) VALUES ('synthetic-account',11)")
             db.execSQL(
                 "INSERT INTO contact_inventory_entries VALUES " +
                     "('synthetic-account','synthetic-contact','Synthetic Person','remote-version',321,1700000000)",

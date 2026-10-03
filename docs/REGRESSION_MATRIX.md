@@ -21,6 +21,7 @@ a listed test is not a claim that its entire case already passes.
 | F-11 Zero-outbox incomplete pass | C01; retry without queued mutation | UT-08/11 | SW-09/11 | FT-17 |
 | F-12 Pending Android copies despite visible contact | C02/C09/C10; full/thumbnail, baseline and date variants | UT-05/07 | SW-06/07 | FT-08/17/26 |
 | F-13 Note upload rejects imported public provenance | C05/C06; clear EMAIL and encrypted note | UT-03/04 | SW-04/05 | FT-04/09 |
+| Private-only Web change missed by public index | C04; unchanged name/emails, note-only edit, restart and failed-read replay | ProtonContactEventReaderTest; ContactInventoryPlannerCasTest | IncrementalRemoteContactStageTest; RoomContactInventoryCheckpointStoreTest | FT-09/21 |
 | F-14 Attention count/list mismatch, empty list or ordinary initial copies shown as errors | C03; pending initial copies, blocked outbox/projection, excluding search filter and recovery | UT-11 | SW-11 | FT-17/26 |
 | F-15 Web equivalent PREF/VALUE rejected | C07/N01/N02; valid repeats vs conflicting parameters | UT-04 | SW-04/05 | FT-09 |
 | F-16 Photo then combined Web edit/name/date relocation | C04/C10; A/B/C, unchanged birthday, pending batch | UT-03/07 | SW-07 | FT-08/09/20 |
@@ -45,6 +46,7 @@ a listed test is not a claim that its entire case already passes.
 | Email removal/replacement Save and lost ack | C03/C04; one email removed, another edited | UT-01/03 | SW-01/04 | FT-04/05 |
 | Blank display name, scroll return, search, single-image gallery | C01/C02/C03/C10; unchanged vs filtered list | UT-01/02/06 | SW-11 | FT-02/08/24 |
 | Unsigned import vs invalid signature | C06; actual maintained crypto card type | UT-03/04 | SW-05 | FT-09/26 |
+| Unsupported embedded Go runtime / stale native rebuild | Locked Proton OpenPGP/SRP sources, all four native ABIs, retained Java API and source/artefact mismatch controls; isolated runtime vectors, no Android account creation | UT-03/04 | SW-05; native/golib; strict Gradle verification | FT-04/09/26 on the actual minified APK |
 | Rich encrypted card signature loses folded spaces | C04/C12; long values folded after a significant space, then compatible email/note edit | UT-03 | SW-05; ProtonContactCardCryptoDeviceTest | FT-04/09; fresh Web reload MUST show no signature warning |
 | Targeted absence confirmation rejects Proton HTTP 422 | Disposable contact deleted remotely; targeted GET returns HTTP 422 with NOT_EXISTS, followed by an unrelated pending edit | UT-08; ProtonInventorySafetyTest | SW-02; IncrementalRemoteContactStageTest | FT-04/13; deletion confirmation MUST complete and the unrelated edit MUST resume |
 | Private-only remote changes | C04; keep public names/email/groups unchanged | UT-03/08 | SW-02/04 | FT-09/21 |

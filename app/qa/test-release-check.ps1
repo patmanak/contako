@@ -2,6 +2,24 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $gate = Join-Path $PSScriptRoot 'check-release.ps1'
+# Load only the trusted parser definition; invoking the whole gate would inspect artifacts.
+$tokens = $null
+$parseErrors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile($gate, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw 'RELEASE_GATE_PARSE_ERROR' }
+$definition = $ast.Find({ param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-ResolvedCoordinates'
+}, $true)
+. ([scriptblock]::Create($definition.Extent.Text))
+$coordinates = @(Get-ResolvedCoordinates @(
+    '+--- example.group:plain:1.0',
+    '+--- example.group:version:1.0 -> 2.0 (*)',
+    '+--- me.proton.crypto:android-golib:2.9.0-2 -> com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1',
+    '+--- example.group:plain:1.0 (*)'
+))
+$expectedCoordinates = @('com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1',
+    'example.group:plain:1.0', 'example.group:version:2.0')
+if (($coordinates -join '|') -cne ($expectedCoordinates -join '|')) { throw 'RESOLVED_COORDINATES_REGRESSION' }
 $outputs = Join-Path $repositoryRoot 'app\build\outputs'
 $merged = Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'app\build\intermediates\merged_manifests\release') -Recurse -Filter AndroidManifest.xml -File | Select-Object -Last 1
 if ($null -eq $merged) { throw 'RELEASE_FIXTURE_NOT_BUILT' }
@@ -29,7 +47,15 @@ function Assert-Failure([string]$Name, [scriptblock]$Mutate, [string]$Expected) 
         } catch {
             if ($_.Exception.Message -notlike "*$Expected*") { throw "WRONG_FAILURE:${Name}:$($_.Exception.Message)" }
         }
-    } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    } finally {
+        $resolvedRoot = [IO.Path]::GetFullPath($root)
+        $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if (-not $resolvedRoot.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            [IO.Path]::GetFileName($resolvedRoot) -notmatch '^contako-release-check-[a-f0-9]{32}$') {
+            throw 'UNSAFE_FIXTURE_CLEANUP_PATH'
+        }
+        Remove-Item -LiteralPath $resolvedRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Assert-Failure 'manifest-cleartext' {
@@ -55,4 +81,4 @@ Assert-Failure 'legal-inventory' {
     [IO.File]::WriteAllText($legal, ($json | ConvertTo-Json -Depth 20))
 } 'LEGAL_COMPONENT_UNCOVERED:'
 
-[pscustomobject]@{ Result = 'PASS'; NegativeContracts = 3; ExternalNetwork = 'NONE' }
+[pscustomobject]@{ Result = 'PASS'; NegativeContracts = 3; CoordinateParser = 'PASS'; ExternalNetwork = 'NONE' }

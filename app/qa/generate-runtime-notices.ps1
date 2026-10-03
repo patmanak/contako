@@ -66,6 +66,14 @@ function Get-XmlChildText($Node, [string]$Name) {
 }
 
 function Get-CachedPom([string]$Group, [string]$Module, [string]$Version) {
+    if ($Group -eq 'com.patmanak.contako.crypto' -and $Module -eq 'android-golib') {
+        # Source-built coordinates are available only in the exclusive local
+        # repository; Gradle still verifies the pinned POM and AAR checksums.
+        $relative = "native/build/maven/com/patmanak/contako/crypto/android-golib/$Version/android-golib-$Version.pom"
+        $nativePom = Join-Path $appDirectory $relative
+        if (Test-Path -LiteralPath $nativePom) { return Get-Item -LiteralPath $nativePom }
+        return $null
+    }
     $versionDirectory = Join-Path $moduleCache (Join-Path $Group (Join-Path $Module $Version))
     if (-not (Test-Path -LiteralPath $versionDirectory)) { return $null }
     $poms = @(Get-ChildItem -LiteralPath $versionDirectory -Directory | ForEach-Object {
@@ -358,7 +366,13 @@ try {
         'app/gradle.properties',
         'app/gradle/libs.versions.toml',
         'app/gradle/wrapper/gradle-wrapper.properties',
-        'app/gradle/verification-metadata.xml'
+        'app/gradle/verification-metadata.xml',
+        'app/native/golib/go.mod',
+        'app/native/golib/go.sum',
+        'app/native/golib/dependencies.go',
+        'app/native/golib/build.ps1',
+        'app/native/golib/package-aar.py',
+        'app/native/golib/golib.pom'
     )
     $descriptorHashes = @($descriptorPaths | ForEach-Object {
         $absolute = Join-Path $repositoryDirectory $_

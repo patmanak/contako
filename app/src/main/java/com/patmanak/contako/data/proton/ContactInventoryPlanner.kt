@@ -33,10 +33,11 @@ internal class VersionedContactInventoryCheckpoint(
     }
 }
 
-internal class ContactInventoryCheckpoint(entries: List<ContactInventoryBaseline>) {
+internal class ContactInventoryCheckpoint(entries: List<ContactInventoryBaseline>, val eventCursor: String? = null) {
     val entries: List<ContactInventoryBaseline> = entries.sortedBy { it.id.value }
 
     init {
+        eventCursor?.let(::validateContactEventCursor)
         require(this.entries.size <= com.patmanak.contako.data.gateway.ContactInventoryPage.MAX_INVENTORY_TOTAL)
         require(this.entries.map(ContactInventoryBaseline::id).distinct().size == this.entries.size)
     }
@@ -170,26 +171,52 @@ internal class StaleContactInventoryPlan : IllegalStateException()
 internal class PersistentContactInventoryPlanner(
     private val checkpointStore: ContactInventoryCheckpointStore,
 ) {
+    suspend fun eventCursor(account: AccountScope): String? = checkpointStore.load(account)?.checkpoint?.eventCursor
+
     suspend fun plan(
         account: AccountScope,
         inventory: ValidatedCompleteInventory,
         forceHydration: Boolean = false,
+        events: ContactEventsDelta? = null,
     ): ContactInventoryPlan {
         requireAuthoritative(inventory)
         val loadedCheckpoint = checkpointStore.load(account)
         val previous = loadedCheckpoint?.checkpoint?.entries.orEmpty().associateBy(ContactInventoryBaseline::id)
         val current = inventory.contacts.associate { metadata -> metadata.id to metadata.toBaseline() }
 
+        // An event newer than the directory MUST NOT be consumed before its card can be read.
+        if (events != null && !events.refreshAll && !current.keys.containsAll(events.changedContacts)) {
+            throw StaleContactInventoryPlan()
+        }
+
+        val eventEmails = events?.changedEmails.orEmpty()
+        val emailContacts = mutableSetOf<RemoteContactId>()
+        val unresolvedEmails = eventEmails.toMutableSet()
+        if (eventEmails.isNotEmpty()) {
+            (previous.values.asSequence() + current.values.asSequence()).forEach { baseline ->
+                baseline.emailGroupMemberships.forEach { membership ->
+                    if (membership.emailId in eventEmails) {
+                        unresolvedEmails -= membership.emailId
+                        emailContacts += baseline.id
+                    }
+                }
+            }
+        }
+        // A removed/replaced email can be located in the previous checkpoint. Unknown IDs
+        // require a full refresh, rather than consuming a potentially private change silently.
+        val refreshAll = events?.refreshAll == true || unresolvedEmails.isNotEmpty()
+
         val hydrate = current.filter { (id, now) ->
             val before = previous[id]
-            forceHydration || before == null || now.contentChangedFrom(before)
+            forceHydration || refreshAll || id in events?.changedContacts.orEmpty() || id in emailContacts ||
+                before == null || now.contentChangedFrom(before)
         }.keys
         val labelOnly = current.filter { (id, now) ->
             val before = previous[id]
             before != null && id !in hydrate && now.membershipsChangedFrom(before)
         }.keys
         val deleted = previous.keys - current.keys
-        val checkpoint = ContactInventoryCheckpoint(current.values.toList())
+        val checkpoint = ContactInventoryCheckpoint(current.values.toList(), events?.nextCursor ?: loadedCheckpoint?.checkpoint?.eventCursor)
         return ContactInventoryPlan.pending(
             account,
             loadedCheckpoint?.generation,

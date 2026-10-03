@@ -39,7 +39,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AndroidGroupProviderWriteJournalEntity::class,
         AndroidPhotoProviderWriteJournalEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = true,
 )
 internal abstract class ContakoDatabase : RoomDatabase() {
@@ -79,8 +79,15 @@ internal abstract class ContakoDatabase : RoomDatabase() {
                     MIGRATION_14_15,
                     MIGRATION_15_16,
                     MIGRATION_16_17,
+                    MIGRATION_17_18,
                 )
                 .build()
+
+        val MIGRATION_17_18: Migration = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE contact_inventory_checkpoints ADD COLUMN event_cursor TEXT")
+            }
+        }
 
         val MIGRATION_16_17: Migration = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {

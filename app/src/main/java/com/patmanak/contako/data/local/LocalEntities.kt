@@ -179,6 +179,7 @@ internal data class OutboxMutationEntity(
 internal data class ContactInventoryCheckpointEntity(
     @PrimaryKey @ColumnInfo(name = "account_id") val accountId: String,
     val generation: Long,
+    @ColumnInfo(name = "event_cursor") val eventCursor: String? = null,
 ) {
     override fun toString(): String = "ContactInventoryCheckpointEntity(REDACTED, generation=$generation)"
 }

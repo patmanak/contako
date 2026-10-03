@@ -21,6 +21,7 @@ static String encoded(Map value) {
 gradle.afterProject { project ->
     if (project != project.rootProject) return
     project.tasks.register('contakoRuntimeArtifactInventory') {
+        dependsOn('verifySourceBuiltCrypto')
         group = 'verification'
         description = 'Emits exact release runtime artifacts for the offline QA notice audit.'
         doLast {

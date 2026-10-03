@@ -85,12 +85,12 @@ Photos and preserved raw card payloads SHOULD be stored or loaded separately
 from list-view summaries.
 
 The inventory checkpoint model is normalized and keyed by account.
-Its header generation, contact entries, contact-group memberships, and
+Its header generation and event cursor, contact entries, contact-group memberships, and
 email-group memberships MUST be replaced in one transaction guarded by an exact
 generation compare-and-set. The schema MUST retain an email membership even
 when its group set is empty, because absence of the membership row is not an
 equivalent state. Entity diagnostics MUST redact account, contact, email, group,
-display-name, and remote-version values.
+display-name, remote-version and event-cursor values.
 
 ## Mutation model
 

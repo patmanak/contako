@@ -121,6 +121,7 @@ internal class IncrementalRemoteContactStage(
     private val existenceGateway: ProtonContactExistenceGateway = ProtonContactExistenceGateway { _, _ ->
         GatewayOutcome.Failure(GatewayFailureCategory.UNKNOWN)
     },
+    private val eventsGateway: com.patmanak.contako.data.proton.ProtonContactEventsGateway? = null,
 ) {
     private val inventoryReader = BoundedContactInventoryReader(inventoryGateway)
 
@@ -129,13 +130,26 @@ internal class IncrementalRemoteContactStage(
         forceHydration: Boolean = false,
         isCancellationRequested: () -> Boolean = { false },
     ): RemoteContactStageResult {
+        val cursor = try { planner.eventCursor(account) } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return RemoteContactStageResult.LocalPersistenceFailure
+        }
+        if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
+        val events = when (val result = eventsGateway?.read(account, cursor)) {
+            null -> null
+            is GatewayOutcome.Success -> result.value
+            is GatewayOutcome.Failure -> return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result)
+        }
         val inventory = when (val result = inventoryReader.read(account, isCancellationRequested)) {
             is GatewayOutcome.Success -> result.value
             is GatewayOutcome.Failure -> return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result)
         }
         if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
         val plan = try {
-            planner.plan(account, inventory, forceHydration)
+            planner.plan(account, inventory, forceHydration, events)
+        } catch (_: StaleContactInventoryPlan) {
+            return RemoteContactStageResult.StalePlan
         } catch (_: IllegalArgumentException) {
             return actionRequired(RemoteContactActionRequiredBoundary.PLANNING)
         }

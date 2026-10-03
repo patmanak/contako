@@ -2,6 +2,15 @@
 
 Features and improvements by version.
 
+## 0.9.0-RC2
+
+- Detect private-only Proton Web edits through the contacts event feed, with a
+  durable account-scoped cursor and replay-safe checkpointing.
+- Rebuild pinned Proton OpenPGP/SRP sources with Go 1.27.1, replacing the
+  unsupported native runtime while preserving the retained public APIs.
+- Add native source/provenance and checksum checks, retain embedded dependency
+  notices, and expand private-change and native-build regression coverage.
+
 ## 0.9.0-RC1
 
 - Hardened synchronization, concurrent-edit conflict handling and recovery.

@@ -44,6 +44,7 @@ import okhttp3.ResponseBody
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Path
 import retrofit2.http.PUT
 import retrofit2.http.Query
 import retrofit2.http.Streaming
@@ -63,6 +64,7 @@ internal data class ProtonGateDComposition(
     val emailLabels: ProtonContactEmailLabelGateway,
     val membershipReader: ProtonEmailGroupMembershipReader,
     val vCardCodec: ProtonContactVCardCodec,
+    val events: ProtonContactEventsGateway,
     val richInventoryUnitStatus: ProtonRichInventoryUnitStatus =
         ProtonRichInventoryUnitStatus.LIVE_VALIDATION_REQUIRED,
 )
@@ -75,6 +77,14 @@ internal enum class ProtonRichInventoryUnitStatus {
 
 /** Public Proton Core routes plus isolated, replaceable legacy-evidence routes. */
 internal interface ProtonGateDWireApi : BaseRetrofitApi {
+    @GET("contacts/v6/events/latest")
+    @Streaming
+    suspend fun latestContactEvent(): ResponseBody
+
+    @GET("contacts/v6/events/{eventId}")
+    @Streaming
+    suspend fun contactEvents(@Path("eventId") eventId: String): ResponseBody
+
     /** Maintained Proton Core Android ContactApi create route. */
     @POST("contacts/v4/contacts")
     @Streaming
@@ -125,7 +135,15 @@ internal class ProtonCoreGateDWireClient(
     private val apiProvider: ApiProvider,
 ) : ProtonRichInventoryWireTransport,
     ProtonEmailGroupAssignmentWireTransport,
-    ProtonRawContactCreateTransport {
+    ProtonRawContactCreateTransport, ProtonContactEventsTransport {
+
+    override suspend fun latest(account: AccountScope): String =
+        invokeBounded(account, ProtonContactEventReader.MAX_BYTES) { latestContactEvent() }
+
+    override suspend fun events(account: AccountScope, cursor: String): String {
+        validateContactEventCursor(cursor)
+        return invokeBounded(account, ProtonContactEventReader.MAX_BYTES) { contactEvents(cursor) }
+    }
 
     override suspend fun create(
         userId: UserId,
