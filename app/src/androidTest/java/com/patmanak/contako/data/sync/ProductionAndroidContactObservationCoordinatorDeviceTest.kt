@@ -140,7 +140,7 @@ class ProductionAndroidContactObservationCoordinatorDeviceTest {
     }
 
     @Test
-    fun duplicateValueOrderRollsBackCreationAndPreservesOtherContacts() = runBlocking {
+    fun duplicateValueOrderIsNormalizedWithoutDroppingValuesOrStrandingFollowingContact() = runBlocking {
         val acknowledged = mutableListOf<Long>()
         val coordinator = coordinator { _, rawId, _, _, _, _ ->
             acknowledged += rawId
@@ -152,11 +152,16 @@ class ProductionAndroidContactObservationCoordinatorDeviceTest {
                 row(10, 104, "vnd.android.cursor.item/email_v2", null, "two@example.test").copy(canonicalOrder = 0),
             ))
         }
-        assertEquals(AndroidBoundedPageResult.PartiallyApplied,
+        assertEquals(AndroidBoundedPageResult.Applied,
             coordinator.ingest(scope, page(invalid, observation(11, jpeg()))))
-        assertEquals(listOf(11L), acknowledged)
-        assertNull(database.androidProjectionLedgerDao().getByRawContactLocator(account.value, 0, 10))
-        assertEquals(1, database.outboxDao().getAll(account.value).size)
+        assertEquals(listOf(10L, 11L), acknowledged)
+        val createdId = requireNotNull(database.androidProjectionLedgerDao()
+            .getByRawContactLocator(account.value, 0, 10)).canonicalContactId
+        val emails = requireNotNull(database.contactDao().get(account.value, createdId))
+            .toDomain().values.filter { it.kind == ContactValueKind.EMAIL }
+        assertEquals(listOf("one@example.test", "two@example.test"), emails.map { it.value })
+        assertEquals(listOf(0, 1), emails.map { it.order })
+        assertEquals(2, database.outboxDao().getAll(account.value).size)
     }
 
     @Test

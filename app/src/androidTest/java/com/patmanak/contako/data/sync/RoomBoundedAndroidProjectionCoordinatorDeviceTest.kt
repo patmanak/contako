@@ -352,7 +352,7 @@ class RoomBoundedAndroidProjectionCoordinatorDeviceTest {
 
         assertEquals(AndroidBoundedPageResult.ReplanRequired, result)
         assertEquals(null, page.nextKey)
-        assertEquals(1, writes)
+        assertEquals(0, writes)
     }
 
     @Test fun sqliteFailureIsClosedAsLocalPersistenceFailureWithoutPageAdvance() = runBlocking {
