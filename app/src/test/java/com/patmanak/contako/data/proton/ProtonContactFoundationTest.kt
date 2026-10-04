@@ -1325,7 +1325,7 @@ class ProtonContactUpdateDiagnosticTest {
             })
         val contact = CanonicalContact(accountId = ACCOUNT.value, id = "contact-0", remoteContactId = "contact-0",
             displayName = "Note fixture", values = listOf(ContactValue("note", ContactValueKind.NOTE,
-                "invalid\uFFFD", order = 0)))
+                "invalid\u202E", order = 0)))
         val localFailure = gateway.apply(ACCOUNT, ContactMutation.Update(RemoteContactId("contact-0"), null, contact))
         assertEquals(GatewayOutcome.Failure(GatewayFailureCategory.VALIDATION_REJECTED), localFailure)
         assertEquals(listOf(ProtonContactUpdateStage.ENCODE, GatewayFailureCategory.VALIDATION_REJECTED,

@@ -14,7 +14,7 @@ class SanitizedDiagnosticEventTest {
     @Test fun compiledEventSchemaCannotCarryFreeTextOrPayloadObjects() {
         val events = SanitizedDiagnosticEvent::class.java.declaredClasses
             .filter { SanitizedDiagnosticEvent::class.java.isAssignableFrom(it) }
-        assertEquals(25, events.size)
+        assertEquals(26, events.size)
         fun checkFields(type: Class<*>) {
             type.declaredFields.filterNot { Modifier.isStatic(it.modifiers) }.forEach { field ->
                 val leaf = field.type

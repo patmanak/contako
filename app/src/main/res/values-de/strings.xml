@@ -369,4 +369,5 @@
     <string name="conflict_group_pending">Die Proton-Version entfernt eine E-Mail mit ausstehenden Gruppenänderungen. Kläre diese Zuordnungen vor der Übernahme.</string>
     <string name="conflict_remote_deleted">Dieser Kontakt wurde auf Proton gelöscht. Der lokale Entwurf bleibt erhalten; der vorherige Vergleich kann eine Löschung nicht auflösen.</string>
     <string name="field_structured_name">Strukturierter Name</string>
+    <string name="sync_problem_remote_permission">Proton hat das Senden einer Kontaktänderung nicht erlaubt. Versuche die Synchronisierung erneut und prüfe die verfügbaren Kontaktfunktionen deines Kontos.</string>
 </resources>

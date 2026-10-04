@@ -12,6 +12,8 @@ data class LocalDiagnosticInput(
     val actionRequiredCount: Int,
     val syncState: DiagnosticSyncState,
     val contactsPermissionGranted: Boolean,
+    val importInvestigation: Boolean = false,
+    val investigationEvents: List<InvestigationTraceEntry> = emptyList(),
 )
 
 enum class DiagnosticSyncState {
@@ -51,7 +53,7 @@ object LocalDiagnosticReportGenerator {
                 input.pendingMutationCount >= 0 && input.actionRequiredCount >= 0,
         )
         val report = buildString {
-            appendLine("contako_diagnostic_schema=1")
+            appendLine("contako_diagnostic_schema=${if (input.importInvestigation) 2 else 1}")
             appendLine("app_version=${input.appVersion}")
             appendLine("platform=android")
             appendLine("api_level_band=${apiBand(input.apiLevel)}")
@@ -63,6 +65,11 @@ object LocalDiagnosticReportGenerator {
             appendLine("actions_required=${countBand(input.actionRequiredCount)}")
             appendLine("sync_state=${input.syncState.name.lowercase()}")
             appendLine("contacts_permission=${if (input.contactsPermissionGranted) "granted" else "not_granted"}")
+            if (input.importInvestigation) {
+                appendLine("import_mode=batch_25_parallel_10")
+                appendLine("investigation_events=" + input.investigationEvents.takeLast(InvestigationTrace.MAX_EVENTS)
+                    .joinToString("|") { it.code }.ifEmpty { "none" })
+            }
         }
         check(LocalDiagnosticSafetyScanner.isSafeReport(report))
         return LocalDiagnosticReport(report)
@@ -87,8 +94,8 @@ object LocalDiagnosticReportGenerator {
 object LocalDiagnosticSafetyScanner {
     private val countBand = Regex("none|small|medium|large|very_large")
     private val schema = linkedMapOf(
-        "contako_diagnostic_schema" to Regex("1"),
-        "app_version" to Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-(?:debug|preview|diagnostic|sync-diagnostic|benchmark))?"),
+        "contako_diagnostic_schema" to Regex("1|2"),
+        "app_version" to Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-(?:debug|preview|diagnostic|sync-diagnostic|benchmark|investigation[0-9]*))?"),
         "platform" to Regex("android"),
         "api_level_band" to Regex("below_supported|31_34|35|36_or_later"),
         "build_type" to Regex("debug|release"),
@@ -113,10 +120,21 @@ object LocalDiagnosticSafetyScanner {
     )
 
     fun isSafeReport(candidate: String): Boolean {
+        if (candidate.length > 32 * 1024) return false
         if (forbidden.any { it.containsMatchIn(candidate) }) return false
         val lines = candidate.lineSequence().filter(String::isNotEmpty).toList()
-        if (lines.size != schema.size) return false
-        return schema.entries.zip(lines).all { (entry, line) ->
+        val investigation = lines.firstOrNull() == "contako_diagnostic_schema=2"
+        if (lines.size != schema.size + if (investigation) 2 else 0) return false
+        if (investigation) {
+            if (lines[schema.size] != "import_mode=batch_25_parallel_10") return false
+            val trace = lines.last().removePrefix("investigation_events=")
+            if (lines.last() != "investigation_events=$trace") return false
+            if (trace != "none") {
+                val events = trace.split('|')
+                if (events.size > InvestigationTrace.MAX_EVENTS || events.any { !InvestigationTrace.isAllowedCode(it) }) return false
+            }
+        }
+        return schema.entries.zip(lines.take(schema.size)).all { (entry, line) ->
             val separator = line.indexOf('=')
             separator > 0 && line.substring(0, separator) == entry.key &&
                 entry.value.matches(line.substring(separator + 1))

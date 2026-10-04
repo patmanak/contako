@@ -243,9 +243,9 @@ internal sealed interface AndroidCreatedContactCommitResult {
     data object Stale : AndroidCreatedContactCommitResult
 }
 
-private enum class AndroidCreatedContactAbortReason { STALE, REJECTED, INVALID_INPUT }
+internal enum class AndroidCreatedContactAbortReason { STALE, REJECTED, INVALID_INPUT }
 
-private class AndroidCreatedContactAbort(
+internal class AndroidCreatedContactAbort(
     val reason: AndroidCreatedContactAbortReason,
     val issues: Set<SaveValidationIssue>,
     val inputFailure: AndroidCreatedContactInputFailure? = null,

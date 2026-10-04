@@ -31,6 +31,7 @@ internal sealed interface SanitizedDiagnosticEvent {
     data class AuthPhase(val phase: GateCAuthPhase) : SanitizedDiagnosticEvent
     data class AuthFailure(val event: GateCAuthDiagnosticEvent) : SanitizedDiagnosticEvent
     data class SyncStage(val stage: SyncPassStage) : SanitizedDiagnosticEvent
+    data class ImportPhase(val phase: com.patmanak.contako.data.sync.RemoteImportPhase) : SanitizedDiagnosticEvent
     data class ContactUpdateFailure(
         val stage: com.patmanak.contako.data.proton.ProtonContactUpdateStage,
         val category: GatewayFailureCategory,
@@ -135,6 +136,7 @@ internal fun renderDiagnostic(event: SanitizedDiagnosticEvent): String = when (e
     is SanitizedDiagnosticEvent.AuthFailure ->
         "AUTH_ERROR=${event.event.diagnosticClass.name} HTTP=${event.event.httpCode} CODE=${event.event.protonCode}"
     is SanitizedDiagnosticEvent.SyncStage -> "SYNC_STAGE=${event.stage.name}"
+    is SanitizedDiagnosticEvent.ImportPhase -> "IMPORT_PHASE=${event.phase.name}"
     is SanitizedDiagnosticEvent.ContactUpdateFailure ->
         "CONTACT_UPDATE_FAILURE=${event.stage.name} CATEGORY=${event.category.name} " +
             "ENCODING=${event.encoding?.name} FIELD=${event.field?.name}"

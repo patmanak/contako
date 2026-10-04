@@ -64,7 +64,7 @@ class RoomBoundedAndroidProjectionCoordinatorDeviceTest {
         val result = coordinator.projectPage(CONTEXT, null)
 
         assertEquals(AndroidBoundedPageResult.Applied, result.second)
-        assertEquals(0, writes)
+        assertEquals(1, writes)
     }
 
     @Test fun acknowledgedContactsWithoutLedgersJoinBoundedTraversalWithoutReplacingExistingOwnership() = runBlocking {
@@ -104,6 +104,60 @@ class RoomBoundedAndroidProjectionCoordinatorDeviceTest {
     }
 
     @Test fun canonicalNicknameEditInvalidatesCleanProjectionWithoutInvalidatingUnchangedPass() = runBlocking {
+        val canonical = seedCurrentCleanProjection()
+        var writes = 0
+        val coordinator = RoomBoundedAndroidProjectionCoordinator(database, { _, _ ->
+            writes++
+            AndroidBoundedPageResult.Applied
+        }, presenceVerifier = AndroidCleanProjectionPresenceVerifier { _, candidates ->
+            candidates.map { it.canonicalContactId }.toSet()
+        })
+        assertEquals(AndroidBoundedPageResult.Applied, coordinator.projectPage(CONTEXT, null).second)
+        assertEquals(0, writes)
+        val currentLedger = requireNotNull(database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT))
+        database.androidProjectionLedgerDao().update(currentLedger.copy(
+            adoptionState = AndroidAdoptionState.SOURCE_ID_PENDING.name,
+        ))
+        assertEquals(AndroidBoundedPageResult.Applied, coordinator.projectPage(CONTEXT, null).second)
+        assertEquals(1, writes)
+        database.androidProjectionLedgerDao().update(currentLedger)
+        RoomContactRepository(database).saveContact(canonical.copy(values = listOf(
+            ContactValue("nickname", ContactValueKind.NICKNAME, "Changed", order = 0),
+        )))
+        assertEquals(AndroidBoundedPageResult.Applied, coordinator.projectPage(CONTEXT, null).second)
+        assertEquals(2, writes)
+    }
+
+    @Test fun missingCleanOwnedCopyDelegatesWithoutChangingTheDurableBinding() = runBlocking {
+        seedCurrentCleanProjection()
+        val before = database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT)
+        var calls = 0
+        val coordinator = RoomBoundedAndroidProjectionCoordinator(database, { _, _ ->
+            calls++
+            AndroidBoundedPageResult.RepairRequired
+        }) // Missing verifier proof MUST fail closed.
+        assertEquals(AndroidBoundedPageResult.PartiallyApplied, coordinator.projectPage(CONTEXT, null).second)
+        assertEquals(1, calls)
+        assertEquals(before, database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT))
+    }
+
+    @Test fun convergedDetachedDeletionDoesNotRequireProviderPresence() = runBlocking {
+        val canonical = seedCurrentCleanProjection()
+        database.contactDao().upsert(canonical.copy(isDeleted = true).toEntity())
+        val ledger = requireNotNull(database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT))
+        database.androidProjectionLedgerDao().update(ledger.copy(
+            projectionState = AndroidProjectionWriteState.DETACHED.name,
+            tombstoneState = AndroidTombstoneState.REMOTE_CONVERGED.name,
+        ))
+        val coordinator = RoomBoundedAndroidProjectionCoordinator(database, { _, _ ->
+            error("A converged deletion must not project")
+        }, presenceVerifier = AndroidCleanProjectionPresenceVerifier { _, _ ->
+            error("A converged deletion requires no owned raw row")
+        })
+        assertEquals(AndroidBoundedPageResult.Applied, coordinator.projectPage(CONTEXT, null).second)
+    }
+
+    private suspend fun seedCurrentCleanProjection(): CanonicalContact {
         seed(clean = true)
         val canonical = CanonicalContact(ACCOUNT.value, CONTACT, remoteContactId = "source")
         database.contactDao().upsert(canonical.toEntity())
@@ -127,25 +181,7 @@ class RoomBoundedAndroidProjectionCoordinatorDeviceTest {
             ACCOUNT.value, CONTACT,
             AndroidGroupMembershipSnapshotBinaryCodec.integrityFingerprint(encoded).sha256Hex, encoded,
         ))
-        var writes = 0
-        val coordinator = RoomBoundedAndroidProjectionCoordinator(database, { _, _ ->
-            writes++
-            AndroidBoundedPageResult.Applied
-        })
-        assertEquals(AndroidBoundedPageResult.Applied, coordinator.projectPage(CONTEXT, null).second)
-        assertEquals(0, writes)
-        val currentLedger = requireNotNull(database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT))
-        database.androidProjectionLedgerDao().update(currentLedger.copy(
-            adoptionState = AndroidAdoptionState.SOURCE_ID_PENDING.name,
-        ))
-        assertEquals(AndroidBoundedPageResult.Applied, coordinator.projectPage(CONTEXT, null).second)
-        assertEquals(1, writes)
-        database.androidProjectionLedgerDao().update(currentLedger)
-        RoomContactRepository(database).saveContact(canonical.copy(values = listOf(
-            ContactValue("nickname", ContactValueKind.NICKNAME, "Changed", order = 0),
-        )))
-        assertEquals(AndroidBoundedPageResult.Applied, coordinator.projectPage(CONTEXT, null).second)
-        assertEquals(2, writes)
+        return canonical
     }
 
     @Test fun repairEntryDelegatesExactlyOnceAndStaleAccountNeverDelegates() = runBlocking {

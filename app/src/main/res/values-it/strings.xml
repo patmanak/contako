@@ -376,4 +376,5 @@
     <string name="conflict_group_pending">La versione Proton elimina un indirizzo con modifiche ai gruppi in attesa. Risolvi le assegnazioni prima di usarla.</string>
     <string name="conflict_remote_deleted">Questo contatto è stato eliminato da Proton. La bozza locale è conservata; il confronto precedente non risolve una cancellazione.</string>
     <string name="field_structured_name">Nome strutturato</string>
+    <string name="sync_problem_remote_permission">Proton non ha consentito l’invio di una modifica al contatto. Riprova la sincronizzazione e verifica le funzioni dei contatti disponibili per il tuo account.</string>
 </resources>

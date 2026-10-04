@@ -4,6 +4,9 @@ import android.provider.ContactsContract
 import com.patmanak.contako.data.android.provider.AndroidOwnedDataRow
 import com.patmanak.contako.data.android.provider.AndroidOwnedRawContact
 import com.patmanak.contako.data.android.provider.AndroidProviderMimeRouter
+import com.patmanak.contako.data.android.provider.AndroidProviderRowCodecFailure
+import com.patmanak.contako.data.android.provider.AndroidProviderPhotoReferenceEncoder
+import com.patmanak.contako.data.android.provider.AndroidProviderAccountName
 import com.patmanak.contako.data.android.mapping.AndroidContactRow
 import com.patmanak.contako.data.android.mapping.AndroidContactSnapshot
 import com.patmanak.contako.data.android.mapping.AndroidRowKind
@@ -74,10 +77,48 @@ class ProductionAndroidContactObservationCoordinatorTest {
     }
 
     @Test
-    fun `created lifecycle accepts routed memberships but rejects unsupported or binary rows`() {
+    fun `created lifecycle accepts standard photos but rejects unsupported binary families`() {
         assertEquals(false, createdLifecycleRouteRequiresRepair(false, false))
         assertEquals(true, createdLifecycleRouteRequiresRepair(false, true))
         assertEquals(true, createdLifecycleRouteRequiresRepair(true, false))
+    }
+
+    @Test
+    fun `native photo capture retains bytes as a durable canonical reference`() {
+        val photo = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 1, 0xff.toByte(), 0xd9.toByte())
+        assertEquals(
+            AndroidProviderPhotoReferenceEncoder.encode(photo),
+            createdContactPhotoCapture().capture(AndroidProviderAccountName("fixture"), "contact", 7, photo),
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `native photo capture rejects unknown binary content`() {
+        createdContactPhotoCapture().capture(AndroidProviderAccountName("fixture"), "contact", 7, byteArrayOf(1))
+    }
+
+    @Test
+    fun `local payload failures are isolated while identity catalog and allocation failures stop ingestion`() {
+        assertEquals(true, isContactLocalPlanFailure(AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_IM))
+        assertEquals(true, isContactLocalPlanFailure(AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_READBACK_MISMATCH))
+        assertEquals(true, isContactLocalPlanFailure(
+            AndroidExistingContactPlanRepairReason.ROW_CODEC_FAILURE, AndroidProviderRowCodecFailure.MALFORMED_DATE,
+        ))
+        listOf(
+            AndroidExistingContactPlanRepairReason.ACCOUNT_MISSING,
+            AndroidExistingContactPlanRepairReason.CONTACT_LEDGER_SOURCE_IDENTITY_MISMATCH,
+            AndroidExistingContactPlanRepairReason.CONTACT_LEDGER_PROVIDER_EPOCH_MISMATCH,
+            AndroidExistingContactPlanRepairReason.MEMBERSHIP_CATALOG_MISMATCH,
+            AndroidExistingContactPlanRepairReason.GROUP_LEDGER_BINDING_INCOMPLETE,
+            AndroidExistingContactPlanRepairReason.INVALID_ARGUMENT,
+        ).forEach { assertEquals(false, isContactLocalPlanFailure(it)) }
+        listOf(
+            AndroidProviderRowCodecFailure.ACCOUNT_SCOPE_MISMATCH,
+            AndroidProviderRowCodecFailure.IDENTITY_BINDING_DIVERGENCE,
+            AndroidProviderRowCodecFailure.VALUE_ID_ALLOCATION_FAILED,
+            AndroidProviderRowCodecFailure.MALFORMED_LINKED_IDENTITIES,
+        ).forEach { assertEquals(false, isContactLocalCodecFailure(it)) }
+        assertEquals(false, isContactLocalPlanFailure(AndroidExistingContactPlanRepairReason.ROW_CODEC_FAILURE))
     }
 
     @Test

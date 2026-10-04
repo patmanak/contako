@@ -31,10 +31,10 @@ Screenshots show the application interface with fictional contacts.
   sanitized diagnostic summary from Sync.
 
 Android 12 or later is required. One Proton account is supported at a time.
-The current source candidate is **0.9.0-RC2**; see the
+The current development version is **0.10.0**; see the
 [changelog](CHANGELOG.md) and [known limitations](docs/KNOWN_LIMITATIONS.md).
-The Android application version remains 0.9.0; the source tag identifies this
-release candidate, not a final stable release.
+The latest published release candidate is 0.9.0-RC2. Development changes are not
+a published or fully qualified release.
 
 ## Using Contako
 

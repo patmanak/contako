@@ -5,7 +5,7 @@ import java.util.zip.ZipFile
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
 
-val contakoReleaseVersion = "0.9.0"
+val contakoReleaseVersion = "0.10.0"
 val contakoBaseApplicationId = "com.patmanak.contako"
 val contakoCandidatePackageSuffix = providers.gradleProperty("contakoCandidatePackageSuffix")
     .orNull
@@ -42,11 +42,12 @@ android {
         minSdk = 31
         targetSdk = 36
         contakoTargetAbi?.let { targetAbi -> ndk { abiFilters += targetAbi } }
-        versionCode = 10
+        versionCode = 16
         versionName = contakoReleaseVersion
         buildConfigField("String", "PROTON_RELEASE_VERSION", "\"$contakoReleaseVersion\"")
         buildConfigField("boolean", "SANITIZED_DIAGNOSTICS", "false")
         buildConfigField("boolean", "SYNC_DIAGNOSTICS", "false")
+        buildConfigField("boolean", "IMPORT_INVESTIGATION", "false")
         buildConfigField("String", "ANDROID_ACCOUNT_TYPE", "\"$contakoApplicationId\"")
         resValue("string", "contako_account_type", contakoApplicationId)
 
@@ -93,6 +94,13 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
             proguardFiles("benchmark-rules.pro")
+        }
+        create("investigation") {
+            initWith(getByName("release"))
+            versionNameSuffix = "-investigation${defaultConfig.versionCode}"
+            matchingFallbacks += listOf("release")
+            buildConfigField("boolean", "SYNC_DIAGNOSTICS", "true")
+            buildConfigField("boolean", "IMPORT_INVESTIGATION", "true")
         }
     }
 

@@ -11,6 +11,32 @@ import org.junit.Test
 
 class BoundedAndroidInteroperabilityStageTest {
     @Test
+    fun partialContactIngestionVisitsLaterPagesAndNeverReportsSuccess() = runTest {
+        var visited = 0
+        val stage = BoundedAndroidInteroperabilityStage(
+            contactsReader = { _, after -> AndroidStableRawContactPageResult.Stable(
+                AndroidStableRawContactObservationPage(
+                    if (after == 0L) listOf(com.patmanak.contako.data.android.provider.AndroidStableRawContactObservation(
+                        com.patmanak.contako.data.android.provider.AndroidOwnedRawContact(100L,
+                            sourceIdentity = null, dirty = true, deleted = false, version = 0), emptyList())) else emptyList(),
+                    if (after == 0L) 100L else null)) },
+            groupsReader = { account, after -> AndroidOwnedGroupRowPage(account, after, emptyList(), null) },
+            observationCoordinator = object : AndroidBoundedObservationCoordinator {
+                override suspend fun ingestGroups(context: AndroidInteroperabilityContext, pages: List<AndroidOwnedGroupRowPage>) = AndroidBoundedPageResult.Applied
+                override suspend fun ingestContacts(context: AndroidInteroperabilityContext, page: AndroidStableRawContactObservationPage): AndroidBoundedPageResult {
+                    visited++
+                    return if (visited == 1) AndroidBoundedPageResult.PartiallyApplied else AndroidBoundedPageResult.Applied
+                }
+            },
+            projectionCoordinator = { _, _ -> error("No projection during ingestion") },
+        )
+        assertEquals(AndroidInteroperabilityStageResult.ActionRequired, stage.ingest(context()) { false })
+        assertEquals(2, visited)
+        visited = 0
+        assertEquals(AndroidInteroperabilityStageResult.Cancelled, stage.ingest(context()) { visited == 1 })
+        assertEquals(1, visited)
+    }
+    @Test
     fun `04-STAGE cancellation before provider work is terminal`() = runTest {
         var coordinatorCalls = 0
         val stage = BoundedAndroidInteroperabilityStage(

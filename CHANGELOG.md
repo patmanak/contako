@@ -2,6 +2,21 @@
 
 Features and improvements by version.
 
+## 0.10.0
+
+- Capture photos durably when a contact is created in the Android system editor,
+  with photo-aware replay protection before acknowledging native changes.
+- Keep incompatible contact data pending while continuing ingestion of unrelated
+  contacts; retain account, ownership and storage failure guards.
+- Reduce Android read-page size when the combined payload exceeds its byte
+  budget, and verify owned raw-contact presence before skipping clean copies.
+- Distinguish denied contact uploads from group-capability errors, including
+  previously stored incorrect messages.
+- Share a bounded bitmap-processing scope across Android photo loaders and
+  verifiers to avoid multiplying decoded-photo allocations across workers.
+- Preserve imported replacement characters and extend Unicode, native creation,
+  partial-ingestion and projection regression coverage.
+
 ## 0.9.0-RC2
 
 - Detect private-only Proton Web edits through the contacts event feed, with a

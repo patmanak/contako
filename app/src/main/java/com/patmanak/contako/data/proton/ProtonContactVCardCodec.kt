@@ -627,7 +627,9 @@ internal class ProtonContactVCardCodec(
     private fun parse(raw: String, preservationNamespace: String): ParsedCard {
         requireVCardParse(raw.toByteArray(Charsets.UTF_8).size <= MAX_CARD_BYTES,
             GatewayContactHydrationCategory.VCARD_PARSE_BOUNDS)
-        requireVCardParse(raw.none { it in BIDI_CONTROL_CHARACTERS || it == '\uFFFD' },
+        // U+FFFD is valid Unicode and may already be stored in an imported contact.
+        // Preserve it literally; byte decoding remains strict at the transport/crypto boundary.
+        requireVCardParse(raw.none { it in BIDI_CONTROL_CHARACTERS },
             GatewayContactHydrationCategory.VCARD_PARSE_CHARACTERS)
         val lines = unfold(raw)
         requireVCardParse(lines.size <= MAX_LINES, GatewayContactHydrationCategory.VCARD_PARSE_BOUNDS)

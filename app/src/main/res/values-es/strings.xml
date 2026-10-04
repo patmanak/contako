@@ -376,4 +376,5 @@
     <string name="conflict_group_pending">La versión de Proton elimina un correo con cambios de grupo pendientes. Resuelve esas asignaciones antes de usarla.</string>
     <string name="conflict_remote_deleted">Este contacto se eliminó en Proton. Se conserva el borrador local; la comparación anterior no resuelve una eliminación.</string>
     <string name="field_structured_name">Nombre estructurado</string>
+    <string name="sync_problem_remote_permission">Proton no permitió enviar un cambio de contacto. Reintenta la sincronización y comprueba las funciones de contactos disponibles para tu cuenta.</string>
 </resources>

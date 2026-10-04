@@ -16,6 +16,7 @@ import com.patmanak.contako.data.android.mapping.AndroidTrustedGroupBinding
 import com.patmanak.contako.data.android.provider.GroupMembershipRows
 import com.patmanak.contako.data.android.provider.AndroidOwnedDataRow
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
+import com.patmanak.contako.domain.repository.SaveValidationIssue
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 
@@ -107,6 +108,8 @@ internal sealed interface RoomAndroidCreatedUnifiedObservationResult {
     data object Replayed : RoomAndroidCreatedUnifiedObservationResult
     data object ReplanRequired : RoomAndroidCreatedUnifiedObservationResult
     data object RepairRequired : RoomAndroidCreatedUnifiedObservationResult
+    /** Canonical payload validation rejected this contact; the surrounding transaction rolled back. */
+    data object RejectedPayload : RoomAndroidCreatedUnifiedObservationResult
 }
 
 internal data class RoomAndroidCreatedMembershipObservation(
@@ -164,7 +167,9 @@ internal class RoomAndroidUnifiedObservationCommitter(
         val frozenMembershipObservation = membershipObservation?.let { observation ->
             observation.copy(
                 rows = GroupMembershipRows(observation.rows.rows.map { it.copy(stringSlots = it.stringSlots.toList()) }),
-                stableDataRows = observation.stableDataRows.map { it.copy(stringSlots = it.stringSlots.toList()) },
+                stableDataRows = observation.stableDataRows.map {
+                    it.copy(stringSlots = it.stringSlots.toList(), binarySlot = it.binarySlot?.copyOf())
+                },
             )
         }
         return AndroidProviderAccountMutationLocks.withAccountLock(authorization.accountId) {
@@ -203,11 +208,7 @@ internal class RoomAndroidUnifiedObservationCommitter(
                             authorization.rawContactLocator,
                             authorization.rawContactVersion,
                             authorization.dirty,
-                            frozenMembershipObservation.stableDataRows.map { row ->
-                                listOf(row.dataRowId, row.rawContactId, row.mimeType, row.canonicalValueId,
-                                    row.canonicalOrder, row.linkedValueIdsEncoding, row.isPrimary,
-                                    row.isSuperPrimary, row.stringSlots)
-                            },
+                            frozenMembershipObservation.stableDataRows.map(::createdRowProof),
                         ))
                         if (receipt.providerEpoch == authorization.providerEpoch &&
                             receipt.rawContactVersion == authorization.rawContactVersion &&
@@ -351,11 +352,7 @@ internal class RoomAndroidUnifiedObservationCommitter(
                         authorization.accountId, canonicalContactId, authorization.providerEpoch,
                         authorization.rawContactLocator, authorization.rawContactVersion,
                         authorization.dirty,
-                        frozenMembershipObservation.stableDataRows.map { row ->
-                            listOf(row.dataRowId, row.rawContactId, row.mimeType, row.canonicalValueId,
-                                row.canonicalOrder, row.linkedValueIdsEncoding, row.isPrimary,
-                                row.isSuperPrimary, row.stringSlots)
-                        },
+                        frozenMembershipObservation.stableDataRows.map(::createdRowProof),
                     ))
                     dao.upsertUnifiedObservationCommitReceipt(
                         AndroidUnifiedObservationCommitReceiptEntity(
@@ -382,6 +379,17 @@ internal class RoomAndroidUnifiedObservationCommitter(
                 }
             } catch (abort: CreatedUnifiedObservationAbort) {
                 abort.result
+            } catch (abort: AndroidCreatedContactAbort) {
+                if (abort.reason == AndroidCreatedContactAbortReason.REJECTED && abort.issues.isNotEmpty() &&
+                    abort.issues.all { it == SaveValidationIssue.NEGATIVE_VALUE_ORDER || it == SaveValidationIssue.DUPLICATE_VALUE_ORDER }
+                ) {
+                    RoomAndroidCreatedUnifiedObservationResult.RejectedPayload
+                } else when (abort.reason) {
+                    AndroidCreatedContactAbortReason.STALE -> RoomAndroidCreatedUnifiedObservationResult.ReplanRequired
+                    AndroidCreatedContactAbortReason.REJECTED,
+                    AndroidCreatedContactAbortReason.INVALID_INPUT,
+                    -> RoomAndroidCreatedUnifiedObservationResult.RepairRequired
+                }
             }
         }
     }
@@ -615,6 +623,17 @@ internal class RoomAndroidUnifiedObservationCommitter(
             digest.update(bytes)
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /** Provider version and exact photo content both protect a lost-ack creation replay. */
+    private fun createdRowProof(row: AndroidOwnedDataRow): List<Any?> {
+        val originalProof = listOf(row.dataRowId, row.rawContactId, row.mimeType, row.canonicalValueId,
+            row.canonicalOrder, row.linkedValueIdsEncoding, row.isPrimary, row.isSuperPrimary, row.stringSlots)
+        // Preserve pre-photo receipt compatibility for non-binary creations.
+        val bytes = row.binarySlot ?: return originalProof
+        val binaryProof = MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { byte -> "%02x".format(byte) }
+        return originalProof + binaryProof
     }
 
     private fun contactReplanReason(

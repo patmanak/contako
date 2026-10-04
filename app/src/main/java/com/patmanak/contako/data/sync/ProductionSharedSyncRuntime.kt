@@ -310,6 +310,9 @@ internal fun composeProductionSharedSyncRuntime(
             RoomRemoteCanonicalReconciliationStore(database),
             existenceGateway = dependencies.existence,
             eventsGateway = dependencies.events,
+            hydrationBatchSize = 25,
+            hydrationReadConcurrency = 10,
+            importObserver = passStageObserver,
             actionRequiredObserver = RemoteContactActionRequiredObserver { boundary, category, hydration ->
                 remoteFailure.set(when (category) {
                     GatewayFailureCategory.AUTHENTICATION_REQUIRED -> SyncActionReason.AUTHENTICATION_REQUIRED

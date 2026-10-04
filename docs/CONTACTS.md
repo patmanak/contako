@@ -13,7 +13,25 @@ Other unsupported MIME types MUST retain their explicit unsupported handling;
 this is not a general vendor-field allowlist. Native edits to supported contact
 fields MUST still be durably ingested before acknowledging the observed version.
 
+Contact-local unsupported payloads MUST remain pending without stopping ingestion
+of unrelated contacts. This does not authorize acknowledging, dropping or uploading
+unknown data. Account/epoch, ownership, catalog and persistence failures MUST remain
+distinct from contact-local incompatibilities and stop the affected traversal.
+
+Native creation with a supported standard photo MUST capture its bounded bytes
+durably with the contact and outbox before acknowledgement. Lost-ack creation
+replay MUST prove the exact photo content as well as the observed row metadata.
+Android page acquisition MAY reduce its contact count to satisfy the unchanged
+aggregate byte budget; a smaller page MUST retain its stable-version and cursor
+proofs. An individually oversized contact MUST remain an explicit failure.
+
 ## Field contracts
+
+Valid Unicode text, including a literal replacement character U+FFFD, MUST be
+preserved during import and compatible edits. Contako MUST NOT guess or restore
+the character that may have preceded an earlier lossy conversion. Malformed
+UTF-8 bytes and prohibited bidirectional controls remain rejected; accepting
+U+FFFD MUST NOT weaken cryptographic verification or transport decoding.
 
 Field and loss-policy contract. Implementation limits are listed in
 [Known limitations](KNOWN_LIMITATIONS.md).

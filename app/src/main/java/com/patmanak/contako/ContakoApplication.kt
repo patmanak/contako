@@ -113,6 +113,9 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
             protonGateCRuntime,
             stopScheduling = syncSchedulingPolicy::close,
             passStageObserver = object : SyncPassStageObserver {
+                override fun onImportPhase(phase: com.patmanak.contako.data.sync.RemoteImportPhase) {
+                    syncDiagnostic { SanitizedDiagnosticEvent.ImportPhase(phase) }
+                }
                 override fun onStage(stage: SyncPassStage) {
                     syncDiagnostic { SanitizedDiagnosticEvent.SyncStage(stage) }
                 }

@@ -27,7 +27,7 @@ class AndroidProjectionRepairDiagnosticsTest {
             aggregate.snapshotAndReset(),
         )
         assertTrue(aggregate.snapshotAndReset().isEmpty())
-        assertEquals(99, AndroidProjectionRepairCategory.entries.size)
+        assertEquals(100, AndroidProjectionRepairCategory.entries.size)
     }
 
     @Test

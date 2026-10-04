@@ -65,10 +65,9 @@ internal fun productionGroupObservationCoordinator(
             canonicalContactRejectionObserver = canonicalContactRejectionObserver,
             interruptedPhotoProof = { account, observation, journal ->
                 val source = runCatching { photoLoader.load(journal.binaryReference) }.getOrNull()
-                source != null && source.size.toLong() == journal.contentSize &&
-                    java.security.MessageDigest.getInstance("SHA-256").digest(source)
-                        .joinToString("") { "%02x".format(it) } == journal.contentSha256 &&
-                    photoVerifier.matches(account, observation, source)
+                com.patmanak.contako.data.sync.interruptedAndroidPhotoProofFailure(
+                    source, journal.contentSize, journal.contentSha256,
+                ) { bytes -> photoVerifier.matches(account, observation, bytes) }
             },
         ),
         actionRequiredObserver,

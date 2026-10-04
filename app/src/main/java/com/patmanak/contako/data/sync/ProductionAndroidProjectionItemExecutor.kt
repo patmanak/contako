@@ -258,7 +258,17 @@ internal class ProductionAndroidProjectionItemExecutor(
         } ?: return replan(AndroidProjectionReplanCategory.CURRENT_OBSERVATION)
         // Never adopt a projection baseline over an uncommitted native edit, even for a no-op
         // write plan. The ingestion stage must durably consume and acknowledge DIRTY first.
-        if (currentObservation.rawContact.dirty) return replan(AndroidProjectionReplanCategory.CURRENT_OBSERVATION_DIRTY)
+        if (currentObservation.rawContact.dirty) {
+            // An unresolved first-photo recovery is contact-local. Preserve its dirty row and
+            // all proof guards; let the bounded coordinator continue with other contacts.
+            val photoRecoveryPending = ledger.androidBaselineFingerprint == null &&
+                ledger.pendingProjectionFingerprint != null && desiredPhoto != null &&
+                database.androidGroupProjectionDao().getPhotoProviderWriteJournal(
+                    context.account.value, canonical.id,
+                ) != null
+            return if (photoRecoveryPending) repair(AndroidProjectionRepairCategory.INTERRUPTED_PHOTO_RECOVERY_UNVERIFIED)
+                else replan(AndroidProjectionReplanCategory.CURRENT_OBSERVATION_DIRTY)
+        }
         val adoptingAndroidCreatedRawContact =
             ledger.adoptionState == AndroidAdoptionState.SOURCE_ID_PENDING.name &&
                 currentObservation.rawContact.sourceIdentity == null

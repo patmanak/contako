@@ -341,6 +341,14 @@ internal class AndroidContactsProviderReader(
         )
     }
 
+    /** Bounded ownership metadata only: never loads Data rows or photo streams. */
+    fun readOwnedRawContactMetadata(
+        accountName: AndroidProviderAccountName,
+        rawContactIds: Set<Long>,
+    ): List<AndroidOwnedRawContact> =
+        if (rawContactIds.isEmpty()) emptyList()
+        else readExactRawContacts(accountName, rawContactIds, includeDeleted = true)
+
     private fun readExactRawContacts(
         accountName: AndroidProviderAccountName,
         rawContactIds: Set<Long>,

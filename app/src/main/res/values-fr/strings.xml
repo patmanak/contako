@@ -376,4 +376,5 @@
     <string name="conflict_group_pending">La version Proton supprime un e-mail lié à des modifications de groupes en attente. Réglez ces affectations avant de l’utiliser.</string>
     <string name="conflict_remote_deleted">Ce contact a été supprimé sur Proton. Le brouillon local est conservé ; la comparaison précédente ne peut pas résoudre une suppression.</string>
     <string name="field_structured_name">Nom structuré</string>
+    <string name="sync_problem_remote_permission">Proton a refusé l’envoi d’une modification de contact. Réessayez la synchronisation et vérifiez les fonctions de contacts disponibles pour votre compte.</string>
 </resources>

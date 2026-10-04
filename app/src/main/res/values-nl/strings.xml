@@ -369,4 +369,5 @@
     <string name="conflict_group_pending">De Proton-versie verwijdert een e-mailadres met openstaande groepswijzigingen. Los die toewijzingen eerst op.</string>
     <string name="conflict_remote_deleted">Dit contact is verwijderd op Proton. Het lokale concept blijft bewaard; de vorige vergelijking kan een verwijdering niet oplossen.</string>
     <string name="field_structured_name">Gestructureerde naam</string>
+    <string name="sync_problem_remote_permission">Proton stond het verzenden van een contactwijziging niet toe. Probeer opnieuw te synchroniseren en controleer de beschikbare contactfuncties voor je account.</string>
 </resources>

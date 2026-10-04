@@ -42,14 +42,18 @@ internal fun interface SyncPassStageObserver {
     fun onStage(stage: SyncPassStage)
     fun onException(category: SyncPassExceptionCategory) {}
     fun onOutcome(outcome: SyncPassOutcome) {}
+    fun onImportPhase(phase: RemoteImportPhase) {}
 }
 
 /** MUST NOT retain exception messages, class names, causes or stack traces. */
 internal enum class SyncPassExceptionCategory {
-    PERMISSION, IO, INVALID_ARGUMENT, INVALID_STATE, UNEXPECTED,
+    PERMISSION, IO, INVALID_ARGUMENT, INVALID_STATE, SQLITE_ROW_TOO_LARGE, DATABASE, OUT_OF_MEMORY, UNEXPECTED,
 }
 
 internal fun syncPassExceptionCategory(error: Throwable): SyncPassExceptionCategory = when (error) {
+    is android.database.sqlite.SQLiteBlobTooBigException -> SyncPassExceptionCategory.SQLITE_ROW_TOO_LARGE
+    is android.database.sqlite.SQLiteException -> SyncPassExceptionCategory.DATABASE
+    is OutOfMemoryError -> SyncPassExceptionCategory.OUT_OF_MEMORY
     is SecurityException -> SyncPassExceptionCategory.PERMISSION
     is java.io.IOException -> SyncPassExceptionCategory.IO
     is IllegalArgumentException -> SyncPassExceptionCategory.INVALID_ARGUMENT

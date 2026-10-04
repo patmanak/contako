@@ -66,7 +66,7 @@ otherwise, apply the common setup, exact field comparison and cleanup above.
 | FT-09 | C04/C05/C06/C07/C08/C09; alternating Web edits, private-only changes and combined-save sequence below. Establish the event cursor, then change only a note on Web, sync normally, restart and repeat; keep the indexed name/emails unchanged. | Intended fields arrive without repair/public-field nudge; maintained signed/unsigned semantics and preservation hold. A failed hydration retains the event for replay; an unchanged follow-up does not hydrate every card. Verify actual imported syntax/type; normalization by Web does not qualify the original wire variant. |
 | FT-10 | C01/C03; local/native edits offline, reconnect, normal foreground return, automatic-sync switches disabled then re-enabled. | Pending intent survives; one eligible serialized runner; automatic convergence when permitted, no false acknowledgement or retry storm. |
 | FT-11 | Dedicated phone locked and unplugged, later reboot/first unlock, process restart and natural periodic runs. | Observe actual scheduled work, no attributable crash/ANR or unbounded retry; measure battery over a meaningful interval, not USB-powered CPU snapshots. No exact hourly deadline promised. |
-| FT-12 | load-300, optionally load-5000; large import/projection, partial provider failure and resume. | Bounded work, no missing/duplicate contacts or lost intent; independent sampled fields plus complete owned identity/count reconciliation. Counters alone do not prove full-field equality. |
+| FT-12 | load-300, optionally load-5000; large import/projection, partial provider failure and resume. Include an interrupted first-photo copy with a missing or mismatching exact photo proof, followed by an unrelated native edit and an acknowledged Proton deletion of another owned contact. | Bounded work, no missing/duplicate contacts or lost intent; independent sampled fields plus complete owned identity/count reconciliation. An unverified photo remains pending with its dirty row, journal and intent intact; it MUST NOT stop ingestion/projection of later contacts or authorize overwriting native edits. The unrelated edit and scoped deletion converge; foreign linked sources survive. Counters alone do not prove full-field equality. |
 | FT-13 | Delete from each supported origin, including unsent creation; restart and next no-change pass. | Scoped deletion/absence in all peers, no resurrection or deletion of another account's row; group deletion never deletes member contacts. |
 | FT-14 | C01/C03; offline concurrent updates in both orders, edit versus delete and lost acknowledgement. | Private-only Web edits followed by a local edit MUST block upload and retain both versions. Compare and choose each version in Sync, restart before/after choice, change Proton again before resolution, and test a lost acknowledgement. An obsolete choice MUST NOT overwrite new edits; remote deletion invalidates it. No fabricated timestamp or silent membership loss. |
 | FT-15 | Blank and rich drafts: grouped add-field picker, existing fields, photo from avatar, per-email groups, field options; invalid field in a collapsed section, both Save controls, repeated taps, failure/retry and back. | Empty optional families remain hidden until added; existing values remain reachable. Label/preference/order controls and per-email assignments preserve other fields. Invalid field revealed, busy state, no duplicate submit; draft retained until success or explicit discard. |
@@ -78,7 +78,7 @@ otherwise, apply the common setup, exact field comparison and cleanup above.
 | FT-21 | Converged fixtures, unchanged pass and unchanged foreground return. | No full-card fetch for every unchanged contact, no provider rewrite/identity churn. Measure request/write counts separately from a green status; 5-second target needs a measured start. |
 | FT-22 | load-300 initial import and ten-contact delta, load-5000 repair only when needed. | Record start/end and environment; targets 90 s / 15 s / 15 min respectively, not inferred from final counts. Compare field correctness independently. |
 | FT-23 | Separately planned dedicated lifecycle: dirty native contact/group/tombstone with empty Room outbox, offline/unavailable provider, edit racing cleanup; Cancel then successful sync then sign-out again. | Fresh warning state, Sync/Cancel/confirmed Discard as appropriate; unsafe cleanup refuses and retains session. Normal sign-out/account removal removes scoped local copies, never remote contacts. |
-| FT-24 | C02/C03/C04/C14: alias vs structured names, first/family edits, clear display name, generated names, separate/aggregated sources and first-photo baseline. | Names persist without replacing alias or importing generated parts as edits; actual source-owned values compared. Similar aggregate labels never authorize forced baseline adoption or merging. |
+| FT-24 | C02/C03/C04/C14: alias vs structured names, first/family edits, clear display name, generated names, separate/aggregated sources and first-photo baseline. Include an email-only display alias with empty given/family names; inspect native generated parts, sync unchanged, then edit only the native note. | Names persist without replacing alias or importing generated parts as edits; actual source-owned values compared. The email alias retains its punctuation and canonical given/family names remain empty after unchanged sync and the unrelated note edit. A genuine native name edit remains detectable. Similar aggregate labels never authorize forced baseline adoption or merging. |
 | FT-25 | Rich contact with Call/Message/Email actions, normal and narrow screen, long locale labels and large text. | Three actions share a row when measured labels fit; deliberate large-text reflow allowed; primary badges align with values. |
 | FT-26 | Generate/export/dismiss diagnostics on ordinary and diagnostic variants; correlate an authorized real failure, picker cancel/provider error. | Fixed-schema sanitized output, no credentials/contact values/IDs, no false success from missing logs; version-suffix defect remains explicit until fixed. Deleting the displayed report does not delete an exported file. |
 
@@ -89,6 +89,35 @@ code and the installed variant. Always include a relevant nominal path and
 no-change/cleanup check. A release candidate should cover the full applicable
 target matrix, with any unavailable or accepted-limitation cells explicitly
 recorded. Do not run every historical helper for every small change.
+
+### Native ingestion and bounded projection regressions
+
+For FT-03/FT-07/FT-12, create a rich contact through the native editor with a
+photo, accented names, multiple emails and a note. Verify durable creation and
+the exact intended fields in Contako and Proton. Interrupt before native
+acknowledgement and resume: there MUST be one canonical contact and one creation
+intent, and a changed photo MUST NOT replay an old receipt.
+
+Place an incompatible owned contact before another valid native edit and a
+scoped deletion. The incompatible row MUST retain its intent without being
+acknowledged; later contacts MUST still converge and the result MUST remain
+partial. Repeat for malformed supported content and unsupported MIME, separately
+from account/epoch, identity, catalog and storage failures, which MUST stop safely.
+Never use an aggregate display or a surviving foreign linked source as the oracle.
+
+Use rich-photo pages whose combined payload exceeds the Android page byte
+budget while each contact remains within individual limits. Acquisition MUST
+advance with smaller stable pages, without missing or duplicating contacts.
+An oversized individual contact MUST remain explicit. Measure concurrent photo
+projection separately from functional equality; successful convergence does not
+establish latency or battery targets.
+
+For FT-17, distinguish a denied contact upload from a denied group operation,
+including a stored denial from an older installation. The message MUST identify
+the applicable boundary without claiming a group failure for a contact. In an
+isolated provider fault scenario, remove one owned raw copy without a tombstone;
+normal sync MUST NOT report that stored CLEAN binding as a verified current copy
+or adopt another source to replace it.
 
 ### Ordered photo replacement regression
 

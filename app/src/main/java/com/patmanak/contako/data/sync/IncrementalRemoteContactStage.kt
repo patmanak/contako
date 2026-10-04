@@ -110,6 +110,13 @@ internal class BoundedContactInventoryReader(
  * Inventory -> bounded hydration -> durable canonical commit -> checkpoint CAS. No mutation upload
  * occurs in this stage; the durable mutation orchestrator runs only after this current-remote check.
  */
+internal enum class RemoteImportPhase {
+    EVENT_READ_START, EVENT_READ_DONE, INVENTORY_READ_START, INVENTORY_READ_DONE,
+    PLAN_START, PLAN_DONE, CARD_READ_START, CARD_READ_DONE, LOCAL_COMMIT_START,
+    LOCAL_COMMIT_DONE, CHECKPOINT_COMMIT_START, CHECKPOINT_COMMIT_DONE,
+    LOCAL_COMMIT_FAILED, RECEIPT_MISMATCH, CHECKPOINT_COMMIT_FAILED,
+}
+
 internal class IncrementalRemoteContactStage(
     inventoryGateway: ProtonContactInventoryGateway,
     private val cardGateway: ProtonVerifiedContactCardGateway,
@@ -122,7 +129,18 @@ internal class IncrementalRemoteContactStage(
         GatewayOutcome.Failure(GatewayFailureCategory.UNKNOWN)
     },
     private val eventsGateway: com.patmanak.contako.data.proton.ProtonContactEventsGateway? = null,
+    private val hydrationBatchSize: Int = HYDRATION_BATCH_SIZE,
+    private val hydrationReadConcurrency: Int = HYDRATION_READ_CONCURRENCY,
+    private val importObserver: SyncPassStageObserver = SyncPassStageObserver { },
 ) {
+    init {
+        require(hydrationBatchSize in 1..HYDRATION_BATCH_SIZE)
+        require(hydrationReadConcurrency in 1..HYDRATION_READ_CONCURRENCY)
+    }
+    private fun observe(phase: RemoteImportPhase) = runCatching { importObserver.onImportPhase(phase) }.let { }
+    private fun observeFailure(error: Throwable) = runCatching {
+        importObserver.onException(syncPassExceptionCategory(error))
+    }.let { }
     private val inventoryReader = BoundedContactInventoryReader(inventoryGateway)
 
     suspend fun run(
@@ -132,20 +150,26 @@ internal class IncrementalRemoteContactStage(
     ): RemoteContactStageResult {
         val cursor = try { planner.eventCursor(account) } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            observeFailure(error)
             return RemoteContactStageResult.LocalPersistenceFailure
         }
         if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
+        observe(RemoteImportPhase.EVENT_READ_START)
         val events = when (val result = eventsGateway?.read(account, cursor)) {
             null -> null
             is GatewayOutcome.Success -> result.value
             is GatewayOutcome.Failure -> return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result)
         }
+        observe(RemoteImportPhase.EVENT_READ_DONE)
+        observe(RemoteImportPhase.INVENTORY_READ_START)
         val inventory = when (val result = inventoryReader.read(account, isCancellationRequested)) {
             is GatewayOutcome.Success -> result.value
             is GatewayOutcome.Failure -> return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result)
         }
+        observe(RemoteImportPhase.INVENTORY_READ_DONE)
         if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
+        observe(RemoteImportPhase.PLAN_START)
         val plan = try {
             planner.plan(account, inventory, forceHydration, events)
         } catch (_: StaleContactInventoryPlan) {
@@ -153,6 +177,7 @@ internal class IncrementalRemoteContactStage(
         } catch (_: IllegalArgumentException) {
             return actionRequired(RemoteContactActionRequiredBoundary.PLANNING)
         }
+        observe(RemoteImportPhase.PLAN_DONE)
         if (inventory.snapshotAuthority == ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY) {
             for (id in plan.deleted.sortedBy { it.value }) {
                 if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
@@ -164,16 +189,16 @@ internal class IncrementalRemoteContactStage(
                 }
             }
         }
-        val hydrationBatches = plan.hydrate.sortedBy { it.value }.chunked(HYDRATION_BATCH_SIZE)
+        val hydrationBatches = plan.hydrate.sortedBy { it.value }.chunked(hydrationBatchSize)
         val durableHydrations = mutableSetOf<RemoteContactId>()
         val durableLabels = mutableSetOf<RemoteContactId>()
         val durableDeletions = mutableSetOf<RemoteContactId>()
         val batchCount = maxOf(1, hydrationBatches.size)
         repeat(batchCount) { batchIndex ->
             if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
-            val cards = ArrayList<VerifiedContactCard>(HYDRATION_BATCH_SIZE)
+            val cards = ArrayList<VerifiedContactCard>(hydrationBatchSize)
             val hydrationBatch = hydrationBatches.getOrNull(batchIndex).orEmpty()
-            hydrationBatch.chunked(HYDRATION_READ_CONCURRENCY).forEach { window ->
+            hydrationBatch.chunked(hydrationReadConcurrency).forEach { window ->
                 if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
                 val hydratedWindow = coroutineScope {
                     window.map { contactId ->
@@ -181,7 +206,8 @@ internal class IncrementalRemoteContactStage(
                             contactId to if (isCancellationRequested()) {
                                 GatewayOutcome.Failure(GatewayFailureCategory.CANCELLED)
                             } else {
-                                cardGateway.fetch(account, contactId)
+                                observe(RemoteImportPhase.CARD_READ_START)
+                                cardGateway.fetch(account, contactId).also { observe(RemoteImportPhase.CARD_READ_DONE) }
                             }
                         }
                     }.awaitAll()
@@ -206,14 +232,19 @@ internal class IncrementalRemoteContactStage(
             val isFinalBatch = batchIndex == batchCount - 1
             val labels = if (isFinalBatch) plan.labelOnly else emptySet()
             val deletions = if (isFinalBatch) plan.deleted else emptySet()
+            observe(RemoteImportPhase.LOCAL_COMMIT_START)
             val receipt = try {
                 canonicalStore.commit(account, plan, cards, labels, deletions)
-            } catch (_: Throwable) {
+            } catch (error: Throwable) {
+                observe(RemoteImportPhase.LOCAL_COMMIT_FAILED)
+                observeFailure(error)
                 return RemoteContactStageResult.LocalPersistenceFailure
             }
+            observe(RemoteImportPhase.LOCAL_COMMIT_DONE)
             if (receipt.hydrated != cards.map(VerifiedContactCard::id).toSet() ||
                 receipt.labelsReconciled != labels || receipt.deletionsReconciled != deletions
             ) {
+                observe(RemoteImportPhase.RECEIPT_MISMATCH)
                 return RemoteContactStageResult.LocalPersistenceFailure
             }
             durableHydrations += receipt.hydrated
@@ -232,13 +263,17 @@ internal class IncrementalRemoteContactStage(
             return RemoteContactStageResult.LocalPersistenceFailure
         }
         if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
+        observe(RemoteImportPhase.CHECKPOINT_COMMIT_START)
         try {
             planner.commit(account, completed)
         } catch (_: StaleContactInventoryPlan) {
             return RemoteContactStageResult.StalePlan
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            observe(RemoteImportPhase.CHECKPOINT_COMMIT_FAILED)
+            observeFailure(error)
             return RemoteContactStageResult.LocalPersistenceFailure
         }
+        observe(RemoteImportPhase.CHECKPOINT_COMMIT_DONE)
         return RemoteContactStageResult.Success(
             inventoryCount = inventory.totalCount,
             hydratedCount = plan.hydrate.size,

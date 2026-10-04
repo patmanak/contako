@@ -46,7 +46,7 @@ internal class RoomOutboxStore(private val database: ContakoDatabase) {
             mutation.aggregateType,
             mutation.aggregateId,
             mutation.revision,
-            blockedReason = category.toBlockedReason(),
+            blockedReason = mutation.blockedReasonFor(category),
             errorCategory = category.name,
         ) == 1
         RetryDecision.Cancelled -> database.outboxDao().markRetry(
@@ -153,19 +153,23 @@ internal class RoomOutboxStore(private val database: ContakoDatabase) {
         return true
     }
 
-    private fun GatewayFailureCategory.toBlockedReason(): String = when (this) {
-        GatewayFailureCategory.AUTHENTICATION_REQUIRED -> "AUTHENTICATION_REQUIRED"
-        GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED -> "INTERACTIVE_AUTHENTICATION_REQUIRED"
-        GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED -> "GROUP_CAPABILITY_REQUIRED"
-        GatewayFailureCategory.VALIDATION_REJECTED -> "VALIDATION_REJECTED"
-        GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED -> "CRYPTOGRAPHIC_VERIFICATION_FAILED"
-        GatewayFailureCategory.CONFLICT, GatewayFailureCategory.NOT_FOUND -> "CONFLICT_RECOVERY_REQUIRED"
-        else -> "REMOTE_ACTION_REQUIRED"
-    }
-
     companion object {
         const val MAX_BATCH_SIZE = 100
     }
+}
+
+/** Gateway failures do not identify a denied sub-operation inside a contact upload. */
+internal fun OutboxMutationEntity.blockedReasonFor(category: GatewayFailureCategory): String = when (category) {
+    GatewayFailureCategory.AUTHENTICATION_REQUIRED -> "AUTHENTICATION_REQUIRED"
+    GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED -> "INTERACTIVE_AUTHENTICATION_REQUIRED"
+    GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED -> when (AggregateType.valueOf(aggregateType)) {
+        AggregateType.GROUP -> "GROUP_CAPABILITY_REQUIRED"
+        AggregateType.CONTACT -> "REMOTE_PERMISSION_REQUIRED"
+    }
+    GatewayFailureCategory.VALIDATION_REJECTED -> "VALIDATION_REJECTED"
+    GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED -> "CRYPTOGRAPHIC_VERIFICATION_FAILED"
+    GatewayFailureCategory.CONFLICT, GatewayFailureCategory.NOT_FOUND -> "CONFLICT_RECOVERY_REQUIRED"
+    else -> "REMOTE_ACTION_REQUIRED"
 }
 
 internal fun OutboxMutationEntity.remoteOperation(): RemoteMutationOperation = when (MutationOperation.valueOf(operation)) {

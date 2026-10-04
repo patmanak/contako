@@ -3,6 +3,9 @@ package com.patmanak.contako.data.sync
 import androidx.room.withTransaction
 import com.patmanak.contako.data.local.ContakoDatabase
 import com.patmanak.contako.data.local.SyncAccountStatusEntity
+import com.patmanak.contako.data.local.OutboxMutationEntity
+import com.patmanak.contako.data.local.blockedReasonFor
+import com.patmanak.contako.data.gateway.GatewayFailureCategory
 import com.patmanak.contako.domain.sync.SyncPassOutcome
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -16,6 +19,7 @@ enum class SyncActionReason(val immediateNotification: Boolean) {
     CONFLICT_RECOVERY_REQUIRED(false),
     CRYPTOGRAPHIC_VERIFICATION_FAILED(false),
     GROUP_CAPABILITY_REQUIRED(false),
+    REMOTE_PERMISSION_REQUIRED(false),
 
     /**
      * Android interoperability is degraded while local and Proton work continues under `D-062`.
@@ -196,7 +200,7 @@ internal class RoomSyncPassStatusPublisher(
     override suspend fun publish(outcome: SyncPassOutcome) {
         val all = database.outboxDao().getAll(accountId)
         val blocked = database.outboxDao().getActionRequired(accountId)
-        val reason = blocked.toActionReason() ?: if (outcome == SyncPassOutcome.ACTION_REQUIRED) {
+        val reason = blocked.outboxActionReason() ?: if (outcome == SyncPassOutcome.ACTION_REQUIRED) {
             externalActionReason() ?: SyncActionReason.INTERNAL_FAILURE
         } else {
             null
@@ -214,22 +218,31 @@ internal class RoomSyncPassStatusPublisher(
         )
         afterPublish()
     }
+}
 
-    private fun List<com.patmanak.contako.data.local.OutboxMutationEntity>.toActionReason(): SyncActionReason? {
-        if (isEmpty()) return null
-        val reasons = mapNotNull { it.blockedReason }.toSet()
-        return when {
-            "AUTHENTICATION_REQUIRED" in reasons -> SyncActionReason.AUTHENTICATION_REQUIRED
-            "INTERACTIVE_AUTHENTICATION_REQUIRED" in reasons ->
-                SyncActionReason.INTERACTIVE_AUTHENTICATION_REQUIRED
-            "CRYPTOGRAPHIC_VERIFICATION_FAILED" in reasons ->
-                SyncActionReason.CRYPTOGRAPHIC_VERIFICATION_FAILED
-            "VALIDATION_REJECTED" in reasons || reasons.any { it.contains("INVALID") || it.contains("MISSING") } ->
-                SyncActionReason.VALIDATION_REJECTED
-            "GROUP_CAPABILITY_REQUIRED" in reasons -> SyncActionReason.GROUP_CAPABILITY_REQUIRED
-            reasons.any { it.contains("CONFLICT") || it.contains("RECOVERY_REQUIRED") } ->
-                SyncActionReason.CONFLICT_RECOVERY_REQUIRED
-            else -> SyncActionReason.INTERNAL_FAILURE
+internal fun List<OutboxMutationEntity>.outboxActionReason(): SyncActionReason? {
+    if (isEmpty()) return null
+    val reasons = mapNotNull { mutation ->
+        // Correct the historical group attribution without clearing durable blocked intent.
+        if (mutation.errorCategory == GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED.name &&
+            mutation.blockedReason == "GROUP_CAPABILITY_REQUIRED") {
+            mutation.blockedReasonFor(GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED)
+        } else {
+            mutation.blockedReason
         }
+    }.toSet()
+    return when {
+        "AUTHENTICATION_REQUIRED" in reasons -> SyncActionReason.AUTHENTICATION_REQUIRED
+        "INTERACTIVE_AUTHENTICATION_REQUIRED" in reasons ->
+            SyncActionReason.INTERACTIVE_AUTHENTICATION_REQUIRED
+        "CRYPTOGRAPHIC_VERIFICATION_FAILED" in reasons ->
+            SyncActionReason.CRYPTOGRAPHIC_VERIFICATION_FAILED
+        "VALIDATION_REJECTED" in reasons || reasons.any { it.contains("INVALID") || it.contains("MISSING") } ->
+            SyncActionReason.VALIDATION_REJECTED
+        "GROUP_CAPABILITY_REQUIRED" in reasons -> SyncActionReason.GROUP_CAPABILITY_REQUIRED
+        "REMOTE_PERMISSION_REQUIRED" in reasons -> SyncActionReason.REMOTE_PERMISSION_REQUIRED
+        reasons.any { it.contains("CONFLICT") || it.contains("RECOVERY_REQUIRED") } ->
+            SyncActionReason.CONFLICT_RECOVERY_REQUIRED
+        else -> SyncActionReason.INTERNAL_FAILURE
     }
 }

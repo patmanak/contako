@@ -95,6 +95,12 @@ internal class AndroidPhotoReadbackVerifier(private val resolver: ContentResolve
 
         /** Independent implementation of the reference provider's public raster conventions. */
         fun render(source: ByteArray, displayLimit: Int, thumbnailLimit: Int): Pair<ByteArray, ByteArray>? {
+            return AndroidPhotoWorkBudget.withDecodedPhoto {
+                renderWithinBudget(source, displayLimit, thumbnailLimit)
+            }
+        }
+
+        private fun renderWithinBudget(source: ByteArray, displayLimit: Int, thumbnailLimit: Int): Pair<ByteArray, ByteArray>? {
             if (source.isEmpty() || source.size > MAX_BYTES || displayLimit !in 1..4096 ||
                 thumbnailLimit !in 1..displayLimit) return null
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

@@ -29,8 +29,10 @@ import com.patmanak.contako.data.android.provider.AndroidProviderAcknowledgement
 import com.patmanak.contako.data.android.provider.AndroidProviderMimeRouter
 import com.patmanak.contako.data.android.provider.AndroidProviderPhotoReferenceEncoder
 import com.patmanak.contako.data.android.provider.AndroidProviderMimeRouterException
+import com.patmanak.contako.data.android.provider.AndroidProviderMimeRouterFailure
 import com.patmanak.contako.data.android.provider.AndroidProviderRowCodec
 import com.patmanak.contako.data.android.provider.AndroidProviderRowCodecException
+import com.patmanak.contako.data.android.provider.AndroidProviderRowCodecFailure
 import com.patmanak.contako.data.android.provider.AndroidStableRawContactObservation
 import com.patmanak.contako.data.android.provider.AndroidStableRawContactObservationPage
 import com.patmanak.contako.data.android.provider.RoomAndroidProviderIdentityResolver
@@ -121,6 +123,10 @@ internal enum class AndroidExistingContactPlanRepairReason {
     CONTACT_BASELINE_PHOTO_JOURNAL_MISSING,
     CONTACT_BASELINE_PHOTO_RECOVERY_STATE_MISMATCH,
     CONTACT_BASELINE_PHOTO_PROOF_FAILED,
+    CONTACT_BASELINE_PHOTO_SOURCE_UNAVAILABLE,
+    CONTACT_BASELINE_PHOTO_SOURCE_SIZE_MISMATCH,
+    CONTACT_BASELINE_PHOTO_SOURCE_DIGEST_MISMATCH,
+    CONTACT_BASELINE_PHOTO_READBACK_MISMATCH,
     CONTACT_BASELINE_VALUES_DIFFER,
     CONTACT_BASELINE_MEMBERSHIPS_DIFFER,
     MEMBERSHIP_LEDGER_MISSING,
@@ -206,9 +212,45 @@ internal fun interface AndroidExistingContactPlanRepairObserver {
 }
 
 internal fun createdLifecycleRouteRequiresRepair(
-    hasBinaryRow: Boolean,
+    hasUnsupportedBinaryRow: Boolean,
     hasUnsupportedOwnedRow: Boolean,
-): Boolean = hasBinaryRow || hasUnsupportedOwnedRow
+): Boolean = hasUnsupportedBinaryRow || hasUnsupportedOwnedRow
+
+/** Only payload-local failures may be quarantined; scope, ownership and catalog proofs stop the pass. */
+internal fun isContactLocalPlanFailure(
+    reason: AndroidExistingContactPlanRepairReason,
+    codecFailure: AndroidProviderRowCodecFailure? = null,
+): Boolean =
+    reason == AndroidExistingContactPlanRepairReason.ROW_CODEC_FAILURE && isContactLocalCodecFailure(codecFailure) ||
+    reason in ISOLATED_PHOTO_PROOF_FAILURES || reason in setOf(
+        AndroidExistingContactPlanRepairReason.BINARY_CONTACT_ROW,
+        AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_CUSTOM_FIELD,
+        AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_IM,
+        AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_SIP,
+        AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_IDENTITY,
+        AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_ANDROID_MIME,
+        AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_VENDOR_MIME,
+        AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_MULTIPLE_FAMILIES,
+        AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_VALUES_DIFFER,
+    )
+
+internal fun isContactLocalCodecFailure(reason: AndroidProviderRowCodecFailure?): Boolean = reason in setOf(
+    AndroidProviderRowCodecFailure.DUPLICATE_SINGLETON,
+    AndroidProviderRowCodecFailure.UNSUPPORTED_ROW_KIND,
+    AndroidProviderRowCodecFailure.MALFORMED_ROW,
+    AndroidProviderRowCodecFailure.PHOTO_BINARY_MISSING,
+    AndroidProviderRowCodecFailure.UNEXPECTED_BINARY,
+    AndroidProviderRowCodecFailure.MALFORMED_TYPE,
+    AndroidProviderRowCodecFailure.MALFORMED_DATE,
+    AndroidProviderRowCodecFailure.MALFORMED_ORDER,
+    AndroidProviderRowCodecFailure.PHOTO_CAPTURE_FAILED,
+    AndroidProviderRowCodecFailure.BOUND_EXCEEDED,
+)
+
+/** The returned reference is persisted with the canonical photo and outbox in the creation transaction. */
+internal fun createdContactPhotoCapture() = AndroidDurablePhotoCapture { _, _, _, bytes ->
+    requireNotNull(AndroidProviderPhotoReferenceEncoder.encode(bytes)) { "PHOTO_CAPTURE_UNSUPPORTED" }
+}
 
 internal fun com.patmanak.contako.data.android.provider.AndroidOwnedRawContact.observationPath() = when {
     deleted && canonicalContactIdClaim != null && sourceIdentity != null -> AndroidContactObservationPath.DELETED
@@ -218,7 +260,7 @@ internal fun com.patmanak.contako.data.android.provider.AndroidOwnedRawContact.o
     else -> AndroidContactObservationPath.INVALID
 }
 
-/** Production contact path. Photos and unknown MIME fail closed. */
+/** Production contact path. Unsupported data stays pending without stranding unrelated contacts. */
 internal class ProductionAndroidContactObservationCoordinator(
     private val database: ContakoDatabase,
     private val repository: RoomContactRepository,
@@ -241,7 +283,7 @@ internal class ProductionAndroidContactObservationCoordinator(
     private val interruptedPhotoProof: (
         AndroidProviderAccountName, AndroidStableRawContactObservation,
         com.patmanak.contako.data.local.AndroidPhotoProviderWriteJournalEntity,
-    ) -> Boolean = { _, _, _ -> false },
+    ) -> AndroidExistingContactPlanRepairReason? = { _, _, _ -> AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_PROOF_FAILED },
 ) : AndroidProductionContactObservationCoordinator {
     @Volatile private var catalogSession: CatalogSession? = null
 
@@ -265,9 +307,14 @@ internal class ProductionAndroidContactObservationCoordinator(
             it.account == context.account && it.androidAccountName == context.androidAccountName &&
                 it.providerEpoch == context.providerEpoch
         }?.catalog ?: return replan(AndroidIngestReplanReason.CONTACT_CATALOG_STALE)
+        var incompleteContacts = false
         for (observation in page.observations) {
             val lifecycle = ingestLifecycleObservation(context, observation)
             if (lifecycle != null) {
+                if (lifecycle == AndroidBoundedPageResult.PartiallyApplied) {
+                    incompleteContacts = true
+                    continue
+                }
                 if (lifecycle != AndroidBoundedPageResult.Applied) return lifecycle
                 continue
             }
@@ -282,7 +329,14 @@ internal class ProductionAndroidContactObservationCoordinator(
                     return replan(AndroidIngestReplanReason.CONTACT_EXISTING_PLAN_STALE)
                 is ContactPlanResult.Repair -> {
                     runCatching { existingPlanRepairObserver.onRepairRequired(result.reason) }
-                    return repair(AndroidIngestActionRequiredReason.CONTACT_EXISTING_PLAN)
+                    val failure = repair(AndroidIngestActionRequiredReason.CONTACT_EXISTING_PLAN)
+                    if (isContactLocalPlanFailure(result.reason, result.codecFailure)) {
+                        // No intent was committed or acknowledged for this row. Keep its
+                        // journal/baseline/DIRTY state intact, but do not strand later rows.
+                        incompleteContacts = true
+                        continue
+                    }
+                    return failure
                 }
                 ContactPlanResult.LocalFailure -> return AndroidBoundedPageResult.LocalPersistenceFailure
             }
@@ -328,7 +382,7 @@ internal class ProductionAndroidContactObservationCoordinator(
                 }
             }
         }
-        return AndroidBoundedPageResult.Applied
+        return if (incompleteContacts) AndroidBoundedPageResult.PartiallyApplied else AndroidBoundedPageResult.Applied
     }
 
     private suspend fun ingestLifecycleObservation(
@@ -344,19 +398,20 @@ internal class ProductionAndroidContactObservationCoordinator(
         if (path == AndroidContactObservationPath.DELETED && observation.dataRows.isNotEmpty()) {
             return repair(AndroidIngestActionRequiredReason.CONTACT_DELETED_WITH_DATA)
         }
-        if (observation.dataRows.any { it.binarySlot != null }) {
-            return repair(AndroidIngestActionRequiredReason.CONTACT_BINARY_ROW)
-        }
         val route = try {
             AndroidProviderMimeRouter().route(raw.rawContactId, observation.dataRows)
         } catch (_: AndroidProviderMimeRouterException) {
+            // Routing must prove complete ownership/cardinality before payload isolation.
             return repair(AndroidIngestActionRequiredReason.CONTACT_MIME_ROUTING)
         }
+        if (observation.dataRows.any { it.binarySlot != null && !it.isStandardPhoto }) {
+            return contactLocalRepair(AndroidIngestActionRequiredReason.CONTACT_BINARY_ROW)
+        }
         if (createdLifecycleRouteRequiresRepair(
-                hasBinaryRow = false,
+                hasUnsupportedBinaryRow = false,
                 hasUnsupportedOwnedRow = route.unsupportedOwnedRows.rows.isNotEmpty(),
             )) {
-            return repair(AndroidIngestActionRequiredReason.CONTACT_UNSUPPORTED_OWNED_MIME)
+            return contactLocalRepair(AndroidIngestActionRequiredReason.CONTACT_UNSUPPORTED_OWNED_MIME)
         }
         val unified = unified(context)
         val authorization = RoomAndroidCreatedRawContactAuthorization(
@@ -386,7 +441,7 @@ internal class ProductionAndroidContactObservationCoordinator(
                     ) {
                         AndroidProviderRowCodec(
                             RoomAndroidProviderIdentityResolver(database, context.account, context.providerEpoch),
-                            AndroidDurablePhotoCapture { _, _, _, _ -> error("PHOTO_CAPTURE_NOT_COMPOSED") },
+                            createdContactPhotoCapture(),
                         ).decode(
                             AndroidProviderAccountName(context.androidAccountName),
                             canonicalId,
@@ -398,8 +453,10 @@ internal class ProductionAndroidContactObservationCoordinator(
                     throw cancelled
                 } catch (_: SQLiteException) {
                     return AndroidBoundedPageResult.LocalPersistenceFailure
-                } catch (_: AndroidProviderRowCodecException) {
-                    return repair(AndroidIngestActionRequiredReason.CONTACT_CREATED_ROW_CODEC)
+                } catch (failure: AndroidProviderRowCodecException) {
+                    return if (isContactLocalCodecFailure(failure.category)) {
+                        contactLocalRepair(AndroidIngestActionRequiredReason.CONTACT_CREATED_ROW_CODEC)
+                    } else repair(AndroidIngestActionRequiredReason.CONTACT_CREATED_ROW_CODEC)
                 } catch (_: IllegalArgumentException) {
                     return repair(AndroidIngestActionRequiredReason.CONTACT_CREATED_ARGUMENT)
                 }
@@ -415,6 +472,8 @@ internal class ProductionAndroidContactObservationCoordinator(
                         return replan(AndroidIngestReplanReason.CONTACT_CREATED_COMMIT_STALE)
                     RoomAndroidCreatedUnifiedObservationResult.RepairRequired ->
                         return repair(AndroidIngestActionRequiredReason.CONTACT_CREATED_COMMIT)
+                    RoomAndroidCreatedUnifiedObservationResult.RejectedPayload ->
+                        return contactLocalRepair(AndroidIngestActionRequiredReason.CONTACT_CREATED_COMMIT)
                 }
             }
             else -> {
@@ -500,9 +559,6 @@ internal class ProductionAndroidContactObservationCoordinator(
         if (raw.deleted || raw.canonicalContactIdClaim == null || raw.sourceIdentity == null) {
             return planRepair(AndroidExistingContactPlanRepairReason.LIFECYCLE_SHAPE)
         }
-        val route = AndroidProviderMimeRouter().route(raw.rawContactId, observation.dataRows)
-        existingContactUnsupportedRowsRepairReason(route)?.let { return planRepair(it) }
-
         database.withTransaction {
             val account = database.androidProjectionLedgerDao().getAccount(context.account.value)
                 ?: return@withTransaction planRepair(AndroidExistingContactPlanRepairReason.ACCOUNT_MISSING)
@@ -542,6 +598,10 @@ internal class ProductionAndroidContactObservationCoordinator(
                     AndroidExistingContactPlanRepairReason.CANONICAL_REMOTE_IDENTITY_MISMATCH,
                 )
             }
+            // Establish scope/ownership before classifying an incompatible payload as local.
+            // A malformed source claim must not be hidden by an unrelated unsupported MIME.
+            val route = AndroidProviderMimeRouter().route(raw.rawContactId, observation.dataRows)
+            existingContactUnsupportedRowsRepairReason(route)?.let { return@withTransaction planRepair(it) }
             var baseline = RoomAndroidProjectionLedger(database).loadBaseline(
                 context.account, entity.canonicalContactId,
             )
@@ -561,8 +621,8 @@ internal class ProductionAndroidContactObservationCoordinator(
                         context, entity, canonical.revision, raw, recoveryDesired, journal, mapper)) {
                     return@withTransaction planRepair(AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_RECOVERY_STATE_MISMATCH)
                 }
-                if (!interruptedPhotoProof(AndroidProviderAccountName(context.androidAccountName), observation, journal)) {
-                    return@withTransaction planRepair(AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_PROOF_FAILED)
+                interruptedPhotoProof(AndroidProviderAccountName(context.androidAccountName), observation, journal)?.let {
+                    return@withTransaction planRepair(it)
                 }
                 journal
             } else null
@@ -719,7 +779,7 @@ internal class ProductionAndroidContactObservationCoordinator(
             planRepair(AndroidExistingContactPlanRepairReason.MIME_ROUTING_FAILURE)
         } catch (failure: AndroidProviderRowCodecException) {
             runCatching { existingPlanRepairObserver.onRowCodecFailure(failure.category) }
-            planRepair(AndroidExistingContactPlanRepairReason.ROW_CODEC_FAILURE)
+            ContactPlanResult.Repair(AndroidExistingContactPlanRepairReason.ROW_CODEC_FAILURE, failure.category)
         } catch (_: IllegalArgumentException) {
             planRepair(AndroidExistingContactPlanRepairReason.INVALID_ARGUMENT)
         }
@@ -731,6 +791,11 @@ internal class ProductionAndroidContactObservationCoordinator(
         AndroidBoundedPageResult.RepairRequired.also {
             runCatching { actionRequiredObserver.onActionRequired(reason) }
         }
+
+    private fun contactLocalRepair(reason: AndroidIngestActionRequiredReason): AndroidBoundedPageResult {
+        repair(reason)
+        return AndroidBoundedPageResult.PartiallyApplied
+    }
 
     private fun replan(reason: AndroidIngestReplanReason): AndroidBoundedPageResult.ReplanRequired =
         AndroidBoundedPageResult.ReplanRequired.also {
@@ -777,7 +842,10 @@ internal class ProductionAndroidContactObservationCoordinator(
     private sealed interface ContactPlanResult {
         data class Ready(val command: RoomAndroidUnifiedObservationCommand) : ContactPlanResult
         data object Replan : ContactPlanResult
-        data class Repair(val reason: AndroidExistingContactPlanRepairReason) : ContactPlanResult
+        data class Repair(
+            val reason: AndroidExistingContactPlanRepairReason,
+            val codecFailure: AndroidProviderRowCodecFailure? = null,
+        ) : ContactPlanResult
         data object LocalFailure : ContactPlanResult
     }
 }

@@ -369,4 +369,5 @@
     <string name="conflict_group_pending">The Proton version removes an email with pending group changes. Resolve those group assignments before using it.</string>
     <string name="conflict_remote_deleted">This contact was deleted on Proton. The local draft is kept; the previous comparison cannot resolve a deletion.</string>
     <string name="field_structured_name">Structured name</string>
+    <string name="sync_problem_remote_permission">Proton did not permit sending a contact change. Retry synchronization and check the account’s available contact features.</string>
 </resources>

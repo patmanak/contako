@@ -49,6 +49,12 @@ internal object AndroidProjectionPhotoScaler {
     }
 
     private fun scale(bytes: ByteArray, target: Int, byteLimit: Int, qualityStart: Int, preserveSmall: Boolean): ByteArray? {
+        return AndroidPhotoWorkBudget.withDecodedPhoto {
+            scaleWithinBudget(bytes, target, byteLimit, qualityStart, preserveSmall)
+        }
+    }
+
+    private fun scaleWithinBudget(bytes: ByteArray, target: Int, byteLimit: Int, qualityStart: Int, preserveSmall: Boolean): ByteArray? {
         if (bytes.isEmpty() || bytes.size > MAX_DISPLAY_PHOTO_BYTES) return null
         var source: Bitmap? = null
         var scaled: Bitmap? = null

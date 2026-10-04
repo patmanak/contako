@@ -7,6 +7,12 @@ a listed test is not a claim that its entire case already passes.
 
 | Reported problem | Dataset / required state | Unit | Software | Target |
 | --- | --- | --- | --- | --- |
+| Import rejects literal Unicode replacement characters | Synthetic display/name/address/note with U+FFFD, sharp S and quotes; unrelated edit and round-trip, plus bidi rejection control | ProtonContactReplacementCharacterTest | SW-01/02/05 | FT-09; verify literal text in each peer, without reconstructing lost characters |
+| Native photo creation rejected or replayed without photo proof | C04 entered through the native editor; photo, lost acknowledgement, restart and changed photo at the same observed version | ProductionAndroidContactObservationCoordinatorTest | ProductionAndroidContactObservationCoordinatorDeviceTest | FT-03/07; compare durable creation, photo and all retained fields in Proton |
+| Incompatible owned contact strands later native edits | Unsupported MIME or rejected payload before a valid edit/deletion; identity failure control | ProductionAndroidContactObservationCoordinatorTest; BoundedAndroidInteroperabilityStageTest | ProductionAndroidContactObservationCoordinatorDeviceTest | FT-07/12; retain incompatible intent, converge unrelated contacts, preserve foreign sources |
+| Aggregate Android byte budget rejects individually valid photos | Rich-photo page above aggregate budget; individually oversized control | AdaptiveAndroidContactPageReaderTest; AndroidPhotoWorkBudgetTest | SW-06/07 | FT-12; bounded smaller pages, complete identity reconciliation, measured photo working set |
+| Stored CLEAN copy hides a missing Android source | Owned raw locator absent, dirty, deleted, rebound or ambiguous; converged deletion control | AndroidCleanProjectionPresenceTest | RoomBoundedAndroidProjectionCoordinatorDeviceTest | FT-17; no false completion or foreign-source adoption |
+| Denied contact upload labelled as a group error | Contact/group writes and historical stored permission denial | OutboxPermissionReasonTest | SW-11 | FT-17; accurate cause with unchanged durable intent |
 | F-01 Background timing/reboot | C01; screen off, reboot/first unlock, network return | UT-08 | SW-09/10 | FT-10/11 |
 | F-02 Bulk/partial Android projection | load-300/load-5000; bounded interruption | UT-07/08 | SW-02/07/09 | FT-12/20/22 |
 | F-03 Concurrent edit/delete, resurrection | C01/C03; offline opposing peers | UT-08/09 | SW-01/02 | FT-13/14 |

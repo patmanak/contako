@@ -8,6 +8,7 @@ import com.patmanak.contako.data.android.provider.AndroidProviderFailureCategory
 import com.patmanak.contako.data.android.provider.AndroidStableRawContactObservationPage
 import com.patmanak.contako.data.android.provider.AndroidStableRawContactPageResult
 import com.patmanak.contako.data.android.provider.AndroidOwnedGroupRowPage
+import com.patmanak.contako.data.android.provider.readAdaptiveAndroidContactPage
 
 internal sealed interface AndroidBoundedPageResult {
     data object Applied : AndroidBoundedPageResult
@@ -143,6 +144,7 @@ internal class BoundedAndroidInteroperabilityStage(
         map(groupResult)?.let { return@boundary it }
 
         var after = 0L
+        var incompleteContactPage = false
         do {
             if (isCancelled()) return@boundary AndroidInteroperabilityStageResult.Cancelled
             var attempts = 0
@@ -159,13 +161,14 @@ internal class BoundedAndroidInteroperabilityStage(
                 if (isCancelled()) return@boundary AndroidInteroperabilityStageResult.Cancelled
             }
             val contactResult = observationCoordinator.ingestContacts(context, stable)
+            if (contactResult == AndroidBoundedPageResult.PartiallyApplied) incompleteContactPage = true
             if (contactResult == AndroidBoundedPageResult.ReplanRequired) {
                 notifyReplan(AndroidIngestReplanReason.CONTACT_OBSERVATION_STALE)
             }
             map(contactResult)?.let { return@boundary it }
             after = stable.nextAfterRawContactId ?: 0L
         } while (after != 0L)
-        AndroidInteroperabilityStageResult.Success
+        if (incompleteContactPage) AndroidInteroperabilityStageResult.ActionRequired else AndroidInteroperabilityStageResult.Success
     }
 
     override suspend fun project(
@@ -255,7 +258,9 @@ internal class BoundedAndroidInteroperabilityStage(
             groups: AndroidGroupsProviderReader,
         ): Pair<AndroidStableContactPageReader, AndroidGroupPageReader> =
             AndroidStableContactPageReader { account, after ->
-                contacts.readStableObservationPage(account, after, 100, includeDeleted = true)
+                readAdaptiveAndroidContactPage { limit ->
+                    contacts.readStableObservationPage(account, after, limit, includeDeleted = true)
+                }
             } to AndroidGroupPageReader { account, after ->
                 groups.readGroupPage(account, after, 100, includeDeleted = true)
             }

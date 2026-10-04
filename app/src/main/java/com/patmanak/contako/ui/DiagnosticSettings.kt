@@ -82,6 +82,9 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
                         actionRequiredCount = maxOf(state.actionContacts.size, state.syncDashboard.actionRequiredCount),
                         syncState = DiagnosticSyncState.fromDashboard(state.syncDashboard.state),
                         contactsPermissionGranted = state.contactsPermissionGranted,
+                        importInvestigation = BuildConfig.IMPORT_INVESTIGATION,
+                        investigationEvents = if (BuildConfig.IMPORT_INVESTIGATION)
+                            com.patmanak.contako.diagnostics.InvestigationTrace.snapshot() else emptyList(),
                     ),
                 )
                 .also { generationFailed = false } } catch (_: IllegalStateException) {

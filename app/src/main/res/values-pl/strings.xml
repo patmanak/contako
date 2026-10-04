@@ -383,4 +383,5 @@
     <string name="conflict_group_pending">Wersja Proton usuwa adres e-mail z oczekującymi zmianami grup. Rozwiąż te przypisania przed jej użyciem.</string>
     <string name="conflict_remote_deleted">Kontakt został usunięty w Proton. Lokalny szkic jest zachowany; poprzednie porównanie nie rozwiąże usunięcia.</string>
     <string name="field_structured_name">Nazwa strukturalna</string>
+    <string name="sync_problem_remote_permission">Proton nie zezwolił na wysłanie zmiany kontaktu. Ponów synchronizację i sprawdź funkcje kontaktów dostępne dla Twojego konta.</string>
 </resources>

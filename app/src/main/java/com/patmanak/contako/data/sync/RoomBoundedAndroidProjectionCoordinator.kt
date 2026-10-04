@@ -31,7 +31,15 @@ internal fun interface AndroidProjectionSkipObserver {
     fun onSkipped(canonicalContactId: String, result: AndroidBoundedPageResult)
 }
 
-/** Room-keyset projection traversal. Clean entries produce no provider call. */
+/** Confirms exact owned raw identities before treating a stored CLEAN copy as current. */
+internal fun interface AndroidCleanProjectionPresenceVerifier {
+    suspend fun present(
+        context: AndroidInteroperabilityContext,
+        candidates: List<AndroidProjectionLedgerEntity>,
+    ): Set<String>
+}
+
+/** Room-keyset traversal; CLEAN entries require a bounded provider metadata proof. */
 internal class RoomBoundedAndroidProjectionCoordinator(
     private val database: ContakoDatabase,
     private val itemExecutor: AndroidProjectionItemExecutor,
@@ -40,6 +48,8 @@ internal class RoomBoundedAndroidProjectionCoordinator(
     private val groupProjectionCoordinator: AndroidCanonicalGroupProjectionCoordinator =
         AndroidCanonicalGroupProjectionCoordinator { AndroidBoundedPageResult.Applied },
     private val canonicalMapper: CanonicalAndroidContactMapper = CanonicalAndroidContactMapper(),
+    private val presenceVerifier: AndroidCleanProjectionPresenceVerifier =
+        AndroidCleanProjectionPresenceVerifier { _, _ -> emptySet() },
 ) : AndroidBoundedProjectionCoordinator {
     init { require(pageSize in 1..MAX_PAGE_SIZE) }
 
@@ -79,7 +89,19 @@ internal class RoomBoundedAndroidProjectionCoordinator(
             return AndroidProjectionPage(null, page.size) to AndroidBoundedPageResult.ReplanRequired
         }
         var skipped = 0
-        val currentIds = currentProjectionIds(context, page)
+        val locallyCurrentIds = currentProjectionIds(context, page)
+        val detachedIds = page.filter {
+            it.canonicalContactId in locallyCurrentIds &&
+                it.projectionState == AndroidProjectionWriteState.DETACHED.name
+        }.map { it.canonicalContactId }.toSet()
+        val presenceCandidates = page.filter {
+            it.canonicalContactId in locallyCurrentIds && it.canonicalContactId !in detachedIds
+        }
+        // Provider calls stay outside the Room transaction. The ordinary executor retains
+        // all version/ownership guards if a copy is missing, dirty, deleted or rebound.
+        val presentIds = if (presenceCandidates.isEmpty()) emptySet()
+            else presenceVerifier.present(context, presenceCandidates)
+        val currentIds = detachedIds + presentIds.intersect(locallyCurrentIds)
         val outcomes = executeContinuously(context, page, currentIds)
         outcomes.forEach { (ledger, result) ->
                 if (result != null) when (result) {

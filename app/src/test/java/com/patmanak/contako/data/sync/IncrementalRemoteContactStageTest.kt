@@ -29,6 +29,47 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IncrementalRemoteContactStageTest {
+    @Test fun serialInvestigationCommitsEachContactBeforeReadingTheNext() = runTest {
+        val inventory = (1..36).map { metadata("serial-$it", 1) }
+        var active = 0
+        var maximum = 0
+        var fetched = 0
+        var committed = 0
+        val checkpoint = FakeCheckpointStore()
+        val phases = mutableListOf<RemoteImportPhase>()
+        val candidate = IncrementalRemoteContactStage(
+            pagedGateway { pages(inventory, 36) },
+            ProtonVerifiedContactCardGateway { _, id ->
+                assertEquals(fetched, committed)
+                fetched++
+                active++
+                maximum = maxOf(maximum, active)
+                delay(10)
+                active--
+                success(card(id, 1))
+            },
+            PersistentContactInventoryPlanner(checkpoint),
+            RemoteCanonicalReconciliationStore { _, _, cards, labels, deletions ->
+                assertEquals(1, cards.size)
+                committed++
+                assertEquals(0, checkpoint.commitCount)
+                CanonicalReconciliationReceipt(cards.map { it.id }.toSet(), labels, deletions)
+            },
+            hydrationBatchSize = 1,
+            hydrationReadConcurrency = 1,
+            importObserver = object : SyncPassStageObserver {
+                override fun onStage(stage: SyncPassStage) = Unit
+                override fun onImportPhase(phase: RemoteImportPhase) { phases += phase }
+            },
+        )
+        assertTrue(candidate.run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertEquals(1, maximum)
+        assertEquals(36, committed)
+        assertEquals(1, checkpoint.commitCount)
+        assertEquals(36, phases.count { it == RemoteImportPhase.LOCAL_COMMIT_DONE })
+        assertEquals(RemoteImportPhase.CHECKPOINT_COMMIT_DONE, phases.last())
+    }
+
     @Test fun privateChangeEventHydratesUnchangedIndexAndFailedReadKeepsCursorForReplay() = runTest {
         val checkpoint = FakeCheckpointStore()
         var failRead = false

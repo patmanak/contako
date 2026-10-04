@@ -1108,6 +1108,7 @@ private fun syncProblemBody(snapshot: com.patmanak.contako.domain.sync.SyncDashb
         com.patmanak.contako.domain.sync.SyncProblem.CONFLICT_RECOVERY_REQUIRED -> R.string.sync_problem_conflict
         com.patmanak.contako.domain.sync.SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED -> R.string.sync_problem_crypto
         com.patmanak.contako.domain.sync.SyncProblem.GROUP_CAPABILITY_REQUIRED -> R.string.sync_problem_group
+        com.patmanak.contako.domain.sync.SyncProblem.REMOTE_PERMISSION_REQUIRED -> R.string.sync_problem_remote_permission
         com.patmanak.contako.domain.sync.SyncProblem.INTERNAL_FAILURE -> R.string.sync_problem_internal
         else -> syncStateBody(snapshot)
     }

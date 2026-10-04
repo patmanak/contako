@@ -100,7 +100,7 @@ class ProtonContactFieldValidator(
     }
 
     private fun requireSafeText(value: String) {
-        require(value.none { it in BIDI_CONTROL_CHARACTERS || it == '\uFFFD' })
+        require(value.none { it in BIDI_CONTROL_CHARACTERS })
     }
 
     private fun validateTimeZone(raw: String) {
