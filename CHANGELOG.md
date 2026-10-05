@@ -2,8 +2,11 @@
 
 Features and improvements by version.
 
-## 0.10.0
+## 0.10.0-RC1
 
+- Record the actual Android photo representation after a guarded synchronous
+  write, preserving the original during unrelated native edits and retaining
+  explicit pending states for interrupted or unverified copies.
 - Capture photos durably when a contact is created in the Android system editor,
   with photo-aware replay protection before acknowledging native changes.
 - Keep incompatible contact data pending while continuing ingestion of unrelated

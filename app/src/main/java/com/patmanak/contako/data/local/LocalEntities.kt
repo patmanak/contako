@@ -995,6 +995,45 @@ internal data class AndroidPhotoProviderWriteJournalEntity(
         "AndroidPhotoProviderWriteJournalEntity(REDACTED, state=$state, contentSize=$contentSize)"
 }
 
+/** Exact provider representation captured after a guarded synchronous photo write. */
+@Entity(
+    tableName = "android_photo_projection_receipts",
+    primaryKeys = ["account_id", "canonical_contact_id"],
+    foreignKeys = [
+        ForeignKey(
+            entity = AndroidProjectionLedgerEntity::class,
+            parentColumns = ["account_id", "canonical_contact_id"],
+            childColumns = ["account_id", "canonical_contact_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+)
+internal data class AndroidPhotoProjectionReceiptEntity(
+    @ColumnInfo(name = "account_id") val accountId: String,
+    @ColumnInfo(name = "canonical_contact_id") val canonicalContactId: String,
+    @ColumnInfo(name = "android_account_name") val androidAccountName: String,
+    @ColumnInfo(name = "provider_epoch") val providerEpoch: Long,
+    @ColumnInfo(name = "raw_contact_locator") val rawContactLocator: Long,
+    @ColumnInfo(name = "data_row_locator") val dataRowLocator: Long,
+    @ColumnInfo(name = "canonical_value_id") val canonicalValueId: String,
+    @ColumnInfo(name = "binary_reference") val binaryReference: String,
+    @ColumnInfo(name = "source_sha256") val sourceSha256: String,
+    @ColumnInfo(name = "source_size") val sourceSize: Long,
+    @ColumnInfo(name = "readback_sha256") val readbackSha256: String,
+    @ColumnInfo(name = "readback_size") val readbackSize: Long,
+    @ColumnInfo(name = "raw_contact_version") val rawContactVersion: Long,
+) {
+    init {
+        require(accountId.isNotBlank() && canonicalContactId.isNotBlank() && androidAccountName.isNotBlank())
+        require(providerEpoch >= 0 && rawContactLocator > 0 && dataRowLocator > 0 && rawContactVersion >= 0)
+        require(canonicalValueId.isNotBlank() && binaryReference.isNotBlank())
+        require(sourceSize in 1..10L * 1_024 * 1_024 && readbackSize in 1..10L * 1_024 * 1_024)
+        require(ANDROID_SHA_256_HEX.matches(sourceSha256) && ANDROID_SHA_256_HEX.matches(readbackSha256))
+    }
+
+    override fun toString(): String = "AndroidPhotoProjectionReceiptEntity(REDACTED)"
+}
+
 private val ANDROID_SHA_256_HEX = Regex("[0-9a-f]{64}")
 private val ANDROID_PROJECTION_STATES = setOf("DETACHED", "WRITE_PENDING", "CLEAN", "REPAIR_REQUIRED")
 private val ANDROID_INGESTION_STATES = setOf("NONE", "BASELINED", "CANONICAL_DELTA_COMMITTED")

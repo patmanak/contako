@@ -3,22 +3,15 @@ package com.patmanak.contako.data.android.provider
 import android.content.ContentResolver
 import android.content.ContentProviderOperation
 import android.content.OperationApplicationException
-import android.content.ContentUris
 import android.provider.ContactsContract
 import androidx.room.withTransaction
 import com.patmanak.contako.android.account.ContakoAndroidAccountContract
 import com.patmanak.contako.data.android.mapping.AndroidContactRow
 import com.patmanak.contako.data.android.mapping.AndroidRowKind
+import com.patmanak.contako.data.local.AndroidPhotoProjectionReceiptEntity
 import com.patmanak.contako.data.local.AndroidPhotoProviderWriteJournalEntity
 import com.patmanak.contako.data.local.ContakoDatabase
 import com.patmanak.contako.data.sync.AndroidInteroperabilityContext
-import java.io.FileNotFoundException
-import java.io.IOException
-import java.security.MessageDigest
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
 
 internal sealed interface AndroidPhotoProviderWriteResult {
     data class Committed(val rawContactVersion: Long) : AndroidPhotoProviderWriteResult
@@ -46,15 +39,18 @@ internal enum class AndroidPhotoProviderStaleCategory {
     JOURNAL_COMMIT,
 }
 
-/** Journaled, bounded full-resolution RawContacts/display_photo writer. */
+
+/**
+ * Synchronous, version-guarded photo projection. Provider-produced bytes are the Android
+ * representation receipt; the canonical source remains unchanged. A lost return without
+ * a durable receipt is never evidence that arbitrary provider bytes came from this write.
+ */
 internal class RoomAndroidPhotoProviderWriteCoordinator(
     private val database: ContakoDatabase,
     private val contentResolver: ContentResolver,
     private val reader: AndroidContactsProviderReader,
     private val binaryLoader: AndroidProjectionBinaryLoader,
 ) {
-    private val photoVerifier = AndroidPhotoReadbackVerifier(contentResolver)
-    /** A committed photo write may recreate a previously used value on a new Data row. */
     suspend fun reconcileCommittedIdentity(
         context: AndroidInteroperabilityContext,
         canonicalContactId: String,
@@ -62,7 +58,7 @@ internal class RoomAndroidPhotoProviderWriteCoordinator(
         observation: AndroidStableRawContactObservation,
         desiredPhoto: AndroidContactRow?,
     ): Boolean = database.withTransaction {
-        val photo = observation.photoRow() ?: return@withTransaction true
+        val photo = observation.dataRows.singleOrNull { it.isStandardPhoto } ?: return@withTransaction true
         val valueId = photo.canonicalValueId ?: return@withTransaction true
         val dao = database.androidProviderIdentityDao()
         val binding = dao.getBindingByCanonicalValueId(context.account.value, canonicalContactId, context.providerEpoch, valueId)
@@ -112,285 +108,153 @@ internal class RoomAndroidPhotoProviderWriteCoordinator(
     ): AndroidPhotoProviderWriteResult {
         require(photo.kind == AndroidRowKind.PHOTO)
         val reference = requireNotNull(photo.binaryReference)
-        val bytes = try {
-            binaryLoader.load(reference)
-        } catch (_: RuntimeException) {
-            null
-        } ?: return AndroidPhotoProviderWriteResult.RepairRequired(AndroidPhotoProviderRepairCategory.PAYLOAD_UNAVAILABLE)
-        if (bytes.isEmpty()) return AndroidPhotoProviderWriteResult.RepairRequired(AndroidPhotoProviderRepairCategory.PAYLOAD_EMPTY)
-        if (bytes.size > MAX_PHOTO_BYTES) {
-            return AndroidPhotoProviderWriteResult.RepairRequired(AndroidPhotoProviderRepairCategory.PAYLOAD_BOUND_EXCEEDED)
-        }
-        val digest = bytes.sha256()
-        val candidate = AndroidPhotoProviderWriteJournalEntity(
+        val source = try { binaryLoader.load(reference) } catch (_: RuntimeException) { null }
+            ?: return repair(AndroidPhotoProviderRepairCategory.PAYLOAD_UNAVAILABLE)
+        if (source.isEmpty()) return repair(AndroidPhotoProviderRepairCategory.PAYLOAD_EMPTY)
+        if (source.size > MAX_PHOTO_BYTES) return repair(AndroidPhotoProviderRepairCategory.PAYLOAD_BOUND_EXCEEDED)
+        val bytes = AndroidProjectionPhotoScaler.normalizeForAtomicPhoto(source)
+            ?: return repair(AndroidPhotoProviderRepairCategory.PAYLOAD_BOUND_EXCEEDED)
+        val command = AndroidPhotoProviderWriteJournalEntity(
             context.account.value, canonicalContactId, accountName.value, context.providerEpoch,
             rawContactId, expectedRawContactVersion, expectedSourceIdentity, canonicalRevision,
-            ledgerRevision, photo.identity.canonicalValueId, reference, bytes.size.toLong(), digest,
-            STATE_PREPARED, null,
+            ledgerRevision, photo.identity.canonicalValueId, reference, source.size.toLong(),
+            androidPhotoSha256(source), "PREPARED", null,
         )
+        val before = readExact(accountName, rawContactId)
+            ?: return stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_OBSERVATION)
+        if (!before.matchesIdentity(command) || before.rawContact.dirty ||
+            before.rawContact.version != expectedRawContactVersion ||
+            context.androidAccountName != accountName.value) {
+            return stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_VERSION)
+        }
+        val row = before.dataRows.singleOrNull { it.isStandardPhoto }
+            ?: return stale(AndroidPhotoProviderStaleCategory.POST_STREAM_PHOTO_ROW)
+        if (row.canonicalValueId != photo.identity.canonicalValueId || row.canonicalOrder != photo.order ||
+            row.isPrimary != photo.isPrimary || row.isSuperPrimary != photo.isSuperPrimary) {
+            return stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_UPDATE)
+        }
+        val previous = database.androidGroupProjectionDao().getPhotoProjectionReceipt(
+            context.account.value, canonicalContactId)
+        if (previous != null && previous.binaryReference == reference &&
+            previous.canonicalValueId == command.canonicalValueId && previous.sourceSha256 == command.contentSha256 &&
+            previous.sourceSize == command.contentSize && previous.matchesPhoto(context, canonicalContactId, before)) {
+            return database.withTransaction {
+                if (!hasExactDurableClaims(command)) {
+                    stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_VERSION)
+                } else AndroidPhotoProviderWriteResult.Committed(before.rawContact.version)
+            }
+        }
         val prepared = database.withTransaction {
-            val current = database.androidGroupProjectionDao()
-                .getPhotoProviderWriteJournal(context.account.value, canonicalContactId)
-            when {
-                current?.sameCommand(candidate) == true && hasExactDurableClaims(candidate) -> current
-                // A prepared journal for a *different* command describes an older desired photo:
-                // the canonical value changed between that prepare and now. Refusing it left the
-                // entry prepared forever, so the photo never reached the provider. The provider
-                // write is idempotent, so replacing the stale command is safe.
-                current != null && current.state == STATE_PREPARED && hasExactDurableClaims(candidate) ->
-                    candidate.also {
-                        database.androidGroupProjectionDao().upsertPhotoProviderWriteJournal(it)
-                    }
-                current != null && current.state == STATE_PREPARED -> null
-                !hasExactDurableClaims(candidate) -> null
-                else -> candidate.also {
-                    database.androidGroupProjectionDao().upsertPhotoProviderWriteJournal(it)
-                }
-            }
-        } ?: return AndroidPhotoProviderWriteResult.Stale(AndroidPhotoProviderStaleCategory.JOURNAL_PREPARATION)
-        if (prepared.state == STATE_COMMITTED) {
-            return AndroidPhotoProviderWriteResult.Committed(requireNotNull(prepared.resultRawContactVersion))
+            if (!hasExactDurableClaims(command)) return@withTransaction false
+            database.androidGroupProjectionDao().upsertPhotoProviderWriteJournal(command)
+            true
         }
-
-        var before = readExact(accountName, rawContactId)
-            ?: return AndroidPhotoProviderWriteResult.Stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_OBSERVATION)
-        if (!before.matches(candidate) || before.rawContact.dirty || before.rawContact.version != expectedRawContactVersion) {
-            return AndroidPhotoProviderWriteResult.Stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_VERSION)
+        if (!prepared) return stale(AndroidPhotoProviderStaleCategory.JOURNAL_PREPARATION)
+        // VERSION advances once for this transaction. Unexpected OEM behavior or any concurrent
+        // mutation is rejected rather than classified as recompression.
+        if (expectedRawContactVersion == Long.MAX_VALUE) return stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_VERSION)
+        if (!writeAtomic(accountName, command, row.dataRowId, bytes)) {
+            return stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_UPDATE)
         }
-        val protectedRows = before.dataRows.filterNot { it.isStandardPhoto }
-        var beforePhotoBytes = before.photoRow()?.binarySlot
-        if (beforePhotoBytes == null || beforePhotoBytes.isEmpty()) {
-            if (seedInlinePhoto(accountName, rawContactId, before, bytes) != 1) {
-                return AndroidPhotoProviderWriteResult.Stale(
-                    AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_UPDATE,
-                )
-            }
-            if (!hasNonEmptyInlinePhoto(before.photoRow()!!.dataRowId, rawContactId)) {
-                return AndroidPhotoProviderWriteResult.Stale(
-                    AndroidPhotoProviderStaleCategory.PRE_WRITE_INLINE_BLOB,
-                )
-            }
-            before = readExact(accountName, rawContactId)
-                ?: return AndroidPhotoProviderWriteResult.Stale(
-                    AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_PAYLOAD,
-                )
-            beforePhotoBytes = before.photoRow()?.binarySlot
-            if (!before.matchesIdentity(candidate) || before.rawContact.dirty ||
-                before.dataRows.filterNot { it.isStandardPhoto } != protectedRows ||
-                beforePhotoBytes == null || beforePhotoBytes.isEmpty()) {
-                return AndroidPhotoProviderWriteResult.Stale(
-                    AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_PAYLOAD,
-                )
-            }
+        val after = readExact(accountName, rawContactId)
+            ?: return stale(AndroidPhotoProviderStaleCategory.POST_BIND_OBSERVATION)
+        if (!after.matchesIdentity(command) || after.rawContact.dirty ||
+            after.rawContact.version != expectedRawContactVersion + 1 ||
+            before.dataRows.filterNot { it.isStandardPhoto } != after.dataRows.filterNot { it.isStandardPhoto }) {
+            return stale(AndroidPhotoProviderStaleCategory.POST_BIND_OBSERVATION)
         }
-        // A previous acknowledged/lost-return attempt may already have written these exact
-        // Android bytes. Do not reopen the asynchronous pipe just to produce the same image.
-        if (!photoVerifier.matches(accountName, before, bytes, requireDisplay = true)) stream(accountName, rawContactId, bytes)
-        val streamed = when (val settled = readExactAfterProviderWrite(accountName, rawContactId, bytes)) {
-            is AndroidPhotoSettleResult.Stable -> settled.observation
-            is AndroidPhotoSettleResult.Stale -> return AndroidPhotoProviderWriteResult.Stale(settled.category)
+        val output = after.dataRows.singleOrNull { it.isStandardPhoto }
+            ?: return stale(AndroidPhotoProviderStaleCategory.POST_STREAM_PHOTO_ROW)
+        val actual = output.binarySlot
+            ?: return stale(AndroidPhotoProviderStaleCategory.POST_STREAM_DISPLAY_PHOTO)
+        if (output.dataRowId != row.dataRowId || output.canonicalValueId != command.canonicalValueId ||
+            actual.isEmpty() || actual.size > MAX_PHOTO_BYTES) {
+            return repair(AndroidPhotoProviderRepairCategory.POST_BIND_VALUE_IDENTITY)
         }
-        if (!streamed.matchesIdentity(candidate)) {
-            return AndroidPhotoProviderWriteResult.RepairRequired(AndroidPhotoProviderRepairCategory.POST_STREAM_IDENTITY)
+        // Data.PHOTO_FILE_ID must identify a newly published immutable display file, not
+        // the previous display stream. A provider that publishes it later remains unverified.
+        val oldFile = row.stringSlots[13]?.toLongOrNull()
+        val newFile = output.stringSlots[13]?.toLongOrNull()
+        val published = if (newFile != null && newFile > 0) {
+            newFile != oldFile && readDisplayFile(newFile).contentEquals(actual)
+        } else readInlinePhoto(accountName, rawContactId, output.dataRowId).contentEquals(actual)
+        if (!published) {
+            return stale(AndroidPhotoProviderStaleCategory.POST_STREAM_DISPLAY_PHOTO)
         }
-        // Photo processing is the only difference this writer owns. A concurrent native
-        // field edit must be ingested, never acknowledged by a photo-only write.
-        if (protectedRows != streamed.dataRows.filterNot { it.isStandardPhoto }) {
-            return AndroidPhotoProviderWriteResult.Stale(AndroidPhotoProviderStaleCategory.POST_BIND_OBSERVATION)
+        val receipt = AndroidPhotoProjectionReceiptEntity(
+            command.accountId, command.canonicalContactId, command.androidAccountName, command.providerEpoch,
+            command.rawContactLocator, output.dataRowId, command.canonicalValueId, command.binaryReference,
+            command.contentSha256, command.contentSize, androidPhotoSha256(actual), actual.size.toLong(),
+            after.rawContact.version,
+        )
+        val confirmed = readExact(accountName, rawContactId)
+        if (confirmed == null || confirmed.rawContact != after.rawContact ||
+            !receipt.matchesPhoto(context, canonicalContactId, confirmed) ||
+            confirmed.dataRows != after.dataRows) {
+            return stale(AndroidPhotoProviderStaleCategory.JOURNAL_COMMIT)
         }
-        if (!bindAndAcknowledgePhoto(accountName, candidate, streamed, photo)) {
-            return AndroidPhotoProviderWriteResult.Stale(AndroidPhotoProviderStaleCategory.POST_BIND_OBSERVATION)
-        }
-        val after = when (val settled = readExactAfterProviderWrite(accountName, rawContactId, bytes)) {
-            is AndroidPhotoSettleResult.Stable -> settled.observation
-            is AndroidPhotoSettleResult.Stale -> return AndroidPhotoProviderWriteResult.Stale(
-                AndroidPhotoProviderStaleCategory.POST_BIND_OBSERVATION,
-            )
-        }
-        val postBindFailure = when {
-            !after.matchesIdentity(candidate) -> AndroidPhotoProviderRepairCategory.POST_BIND_IDENTITY
-            after.rawContact.dirty -> AndroidPhotoProviderRepairCategory.POST_BIND_DIRTY
-            after.photoRow()?.canonicalValueId != candidate.canonicalValueId ->
-                AndroidPhotoProviderRepairCategory.POST_BIND_VALUE_IDENTITY
-            else -> null
-        }
-        if (postBindFailure != null) return AndroidPhotoProviderWriteResult.RepairRequired(postBindFailure)
         return database.withTransaction {
-            val current = database.androidGroupProjectionDao()
-                .getPhotoProviderWriteJournal(context.account.value, canonicalContactId)
-                ?: return@withTransaction AndroidPhotoProviderWriteResult.Stale(
-                    AndroidPhotoProviderStaleCategory.JOURNAL_COMMIT,
-                )
-            if (!current.sameCommand(candidate) || current.state != STATE_PREPARED || !hasExactDurableClaims(candidate)) {
-                return@withTransaction AndroidPhotoProviderWriteResult.Stale(
-                    AndroidPhotoProviderStaleCategory.JOURNAL_COMMIT,
-                )
+            if (database.androidGroupProjectionDao().getPhotoProviderWriteJournal(
+                    command.accountId, command.canonicalContactId) != command || !hasExactDurableClaims(command)) {
+                return@withTransaction stale(AndroidPhotoProviderStaleCategory.JOURNAL_COMMIT)
             }
+            database.androidGroupProjectionDao().upsertPhotoProjectionReceipt(receipt)
             database.androidGroupProjectionDao().upsertPhotoProviderWriteJournal(
-                current.copy(state = STATE_COMMITTED, resultRawContactVersion = after.rawContact.version),
-            )
+                command.copy(state = "COMMITTED", resultRawContactVersion = after.rawContact.version))
             AndroidPhotoProviderWriteResult.Committed(after.rawContact.version)
         }
     }
 
     suspend fun cleanupCommitted(accountId: String, canonicalContactId: String, contentSha256: String) {
-        database.androidGroupProjectionDao()
-            .deleteCommittedPhotoProviderWriteJournal(accountId, canonicalContactId, contentSha256)
+        // The representation receipt survives journal cleanup and subsequent native note edits.
+        database.androidGroupProjectionDao().deleteCommittedPhotoProviderWriteJournal(
+            accountId, canonicalContactId, contentSha256)
     }
 
-    private suspend fun stream(
-        accountName: AndroidProviderAccountName,
-        rawContactId: Long,
-        bytes: ByteArray,
-    ) {
-        withContext(Dispatchers.IO) {
-            val uri = displayPhotoUri(accountName, rawContactId)
-            try {
-                contentResolver.openAssetFileDescriptor(uri, "rw")?.use { descriptor ->
-                    descriptor.createOutputStream().use { output ->
-                        var offset = 0
-                        while (offset < bytes.size) {
-                            coroutineContext.ensureActive()
-                            val count = minOf(STREAM_BUFFER_BYTES, bytes.size - offset)
-                            output.write(bytes, offset, count)
-                            offset += count
-                        }
-                        output.flush()
-                    }
-                } ?: throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PROVIDER_UNAVAILABLE)
-            } catch (_: FileNotFoundException) {
-                throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PROVIDER_UNAVAILABLE)
-            } catch (_: SecurityException) {
-                throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PERMISSION_DENIED)
-            } catch (_: IOException) {
-                throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PROVIDER_UNAVAILABLE)
-            }
-        }
-    }
-
-    private fun bindAndAcknowledgePhoto(
-        accountName: AndroidProviderAccountName,
-        command: AndroidPhotoProviderWriteJournalEntity,
-        observation: AndroidStableRawContactObservation,
-        photo: AndroidContactRow,
-    ): Boolean {
-        val row = observation.photoRow() ?: throw AndroidProviderBoundaryException(
-            AndroidProviderFailureCategory.MALFORMED_PROVIDER_DATA,
-        )
-        val values = android.content.ContentValues().apply {
-            put(DATA_SYNC1, command.canonicalValueId)
-            put(DATA_SYNC2, photo.order.toString())
-            put(ContactsContract.Data.IS_PRIMARY, if (photo.isPrimary) 1 else 0)
-            put(ContactsContract.Data.IS_SUPER_PRIMARY, if (photo.isSuperPrimary) 1 else 0)
-        }
-        val rawUri = syncAdapterUri(ContactsContract.RawContacts.CONTENT_URI, accountName)
+    private fun writeAtomic(account: AndroidProviderAccountName, command: AndroidPhotoProviderWriteJournalEntity,
+        rowId: Long, bytes: ByteArray): Boolean {
+        val rawUri = syncAdapterUri(ContactsContract.RawContacts.CONTENT_URI, account)
         val selection = "${ContactsContract.RawContacts._ID} = ? AND " +
             "${ContactsContract.RawContacts.ACCOUNT_NAME} = ? AND ${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND " +
             "${ContactsContract.RawContacts.SOURCE_ID} = ? AND ${ContactsContract.RawContacts.VERSION} = ? AND " +
-            "${ContactsContract.RawContacts.SYNC1} = ? AND ${ContactsContract.RawContacts.DELETED} = 0"
-        val args = arrayOf(command.rawContactLocator.toString(), accountName.value,
-            ContakoAndroidAccountContract.ACCOUNT_TYPE, command.expectedSourceIdentity, observation.rawContact.version.toString(),
-            command.canonicalContactId)
+            "${ContactsContract.RawContacts.SYNC1} = ? AND ${ContactsContract.RawContacts.DIRTY} = 0 AND " +
+            "${ContactsContract.RawContacts.DELETED} = 0"
+        val args = arrayOf(command.rawContactLocator.toString(), account.value,
+            ContakoAndroidAccountContract.ACCOUNT_TYPE, command.expectedSourceIdentity,
+            command.expectedRawContactVersion.toString(), command.canonicalContactId)
+        val values = android.content.ContentValues().apply {
+            put(ContactsContract.CommonDataKinds.Photo.PHOTO, bytes)
+        }
         return try {
-            val operations = arrayListOf(
-                ContentProviderOperation.newAssertQuery(rawUri).withSelection(selection, args).withExpectedCount(1).build(),
-                ContentProviderOperation.newUpdate(syncAdapterUri(ContactsContract.Data.CONTENT_URI, accountName))
-                    .withSelection("${ContactsContract.Data._ID} = ? AND ${ContactsContract.Data.RAW_CONTACT_ID} = ?",
-                        arrayOf(row.dataRowId.toString(), command.rawContactLocator.toString()))
-                    .withValues(values).withExpectedCount(1).build(),
-                ContentProviderOperation.newUpdate(rawUri)
-                    .withSelection("${ContactsContract.RawContacts._ID} = ?", arrayOf(command.rawContactLocator.toString()))
-                    .withValue(ContactsContract.RawContacts.DIRTY, 0).build(),
-            )
-            contentResolver.applyBatch(ContakoAndroidAccountContract.CONTACTS_AUTHORITY, operations)
-            true
-        } catch (_: OperationApplicationException) {
-            false
-        } catch (_: android.os.RemoteException) {
-            throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PROVIDER_UNAVAILABLE)
-        } catch (_: SecurityException) {
-            throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PERMISSION_DENIED)
-        } catch (_: RuntimeException) {
-            throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.MALFORMED_PROVIDER_DATA)
-        }
-    }
-
-    /**
-     * Repairs a provider placeholder left without bytes before the separately journaled stream.
-     * The command is already PREPARED and the stable observation has proved exact ownership. The
-     * bounded inline update is idempotent and is verified by a fresh stable read before streaming.
-     */
-    private fun seedInlinePhoto(
-        accountName: AndroidProviderAccountName,
-        rawContactId: Long,
-        observation: AndroidStableRawContactObservation,
-        displayBytes: ByteArray,
-    ): Int {
-        val row = observation.photoRow() ?: throw AndroidProviderBoundaryException(
-            AndroidProviderFailureCategory.MALFORMED_PROVIDER_DATA,
-        )
-        val inlineBytes = AndroidProjectionPhotoScaler.scaleForProvider(displayBytes)
-            ?: throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.MALFORMED_PROVIDER_DATA)
-        val updated = try {
             contentResolver.applyBatch(ContakoAndroidAccountContract.CONTACTS_AUTHORITY, arrayListOf(
-                ContentProviderOperation.newAssertQuery(syncAdapterUri(ContactsContract.RawContacts.CONTENT_URI, accountName))
-                    .withSelection("${ContactsContract.RawContacts._ID} = ? AND ${ContactsContract.RawContacts.VERSION} = ? AND " +
-                        "${ContactsContract.RawContacts.ACCOUNT_NAME} = ? AND ${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND " +
-                        "${ContactsContract.RawContacts.SOURCE_ID} = ? AND ${ContactsContract.RawContacts.SYNC1} = ? AND " +
-                        "${ContactsContract.RawContacts.DIRTY} = 0 AND ${ContactsContract.RawContacts.DELETED} = 0",
-                        arrayOf(rawContactId.toString(), observation.rawContact.version.toString(), accountName.value,
-                            ContakoAndroidAccountContract.ACCOUNT_TYPE, requireNotNull(observation.rawContact.sourceIdentity),
-                            requireNotNull(observation.rawContact.canonicalContactIdClaim)))
+                ContentProviderOperation.newAssertQuery(rawUri).withSelection(selection, args)
                     .withExpectedCount(1).build(),
-                ContentProviderOperation.newUpdate(syncAdapterUri(ContactsContract.Data.CONTENT_URI, accountName))
-                    .withSelection("${ContactsContract.Data._ID} = ? AND ${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
-                        arrayOf(row.dataRowId.toString(), rawContactId.toString(), ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE))
-                    .withValue(ContactsContract.CommonDataKinds.Photo.PHOTO, inlineBytes).withExpectedCount(1).build(),
+                ContentProviderOperation.newUpdate(syncAdapterUri(ContactsContract.Data.CONTENT_URI, account))
+                    .withSelection("${ContactsContract.Data._ID} = ? AND ${ContactsContract.Data.RAW_CONTACT_ID} = ? AND " +
+                        "${ContactsContract.Data.MIMETYPE} = ?", arrayOf(rowId.toString(),
+                        command.rawContactLocator.toString(), ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE))
+                    .withValues(values).withExpectedCount(1).build(),
             ))
-            1
-        } catch (_: OperationApplicationException) {
-            0
-        } catch (_: android.os.RemoteException) {
+            true
+        } catch (_: OperationApplicationException) { false }
+        catch (_: android.os.RemoteException) {
             throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PROVIDER_UNAVAILABLE)
         } catch (_: SecurityException) {
             throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PERMISSION_DENIED)
         } catch (_: RuntimeException) {
             throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.MALFORMED_PROVIDER_DATA)
         }
-        if (updated > 1) throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.ACCOUNT_SCOPE_MISMATCH)
-        return updated
     }
-
-    private fun hasNonEmptyInlinePhoto(dataRowId: Long, rawContactId: Long): Boolean = try {
-        contentResolver.query(
-            ContactsContract.Data.CONTENT_URI,
-            arrayOf(ContactsContract.CommonDataKinds.Photo.PHOTO),
-            "${ContactsContract.Data._ID} = ? AND ${ContactsContract.Data.RAW_CONTACT_ID} = ? AND " +
-                "${ContactsContract.Data.MIMETYPE} = ?",
-            arrayOf(
-                dataRowId.toString(),
-                rawContactId.toString(),
-                ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE,
-            ),
-            null,
-        )?.use { cursor ->
-            cursor.moveToFirst() && !cursor.isNull(0) && cursor.getBlob(0).isNotEmpty()
-        } ?: false
-    } catch (_: SecurityException) {
-        throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PERMISSION_DENIED)
-    } catch (_: RuntimeException) {
-        false
-    }
-
 
     private suspend fun hasExactDurableClaims(command: AndroidPhotoProviderWriteJournalEntity): Boolean {
         val account = database.androidProjectionLedgerDao().getAccount(command.accountId) ?: return false
         val ledger = database.androidProjectionLedgerDao().get(command.accountId, command.canonicalContactId) ?: return false
-        val canonical = database.contactDao().get(command.accountId, command.canonicalContactId) ?: return false
+        val canonical = database.contactDao().get(command.accountId, command.canonicalContactId)?.contact ?: return false
         return account.providerEpoch == command.providerEpoch && account.androidAccountName == command.androidAccountName &&
-            canonical.contact.revision == command.expectedCanonicalRevision && ledger.revision == command.expectedLedgerRevision &&
+            canonical.revision == command.expectedCanonicalRevision && !canonical.isDeleted && canonical.conflictState == null &&
+            ledger.revision == command.expectedLedgerRevision && ledger.tombstoneState == "NONE" &&
             ledger.providerEpoch == command.providerEpoch && ledger.rawContactLocator == command.rawContactLocator &&
-            ledger.sourceIdentity == command.expectedSourceIdentity
+            ledger.sourceIdentity == command.expectedSourceIdentity && canonical.remoteContactId == command.expectedSourceIdentity
     }
 
     private fun readExact(accountName: AndroidProviderAccountName, rawContactId: Long) =
@@ -399,100 +263,44 @@ internal class RoomAndroidPhotoProviderWriteCoordinator(
             is AndroidStableRawContactPageResult.Stable -> result.page.observations.singleOrNull()
         }
 
-    /**
-     * Display-photo writes are finalized asynchronously by some ContactsProvider builds. Their
-     * raw-contact version can therefore change between the stable reader's two snapshots even
-     * though this writer is the only actor. Retry only that transient observation window; the
-     * caller still validates every durable identity and the final photo binding afterwards.
-     */
-    private suspend fun readExactAfterProviderWrite(
-        accountName: AndroidProviderAccountName,
-        rawContactId: Long,
-        expectedBytes: ByteArray,
-    ): AndroidPhotoSettleResult {
-        var lastFailure = AndroidPhotoProviderStaleCategory.POST_STREAM_OBSERVATION
-        repeat(PROVIDER_SETTLE_ATTEMPTS) { attempt ->
-            val observation = readExact(accountName, rawContactId)
-            val photo = observation?.photoRow()
-            lastFailure = when {
-                observation == null -> AndroidPhotoProviderStaleCategory.POST_STREAM_OBSERVATION
-                photo == null -> AndroidPhotoProviderStaleCategory.POST_STREAM_PHOTO_ROW
-                !photoVerifier.matches(accountName, observation, expectedBytes,
-                    requireDisplay = attempt + 1 < PROVIDER_SETTLE_ATTEMPTS) ->
-                    AndroidPhotoProviderStaleCategory.POST_STREAM_DISPLAY_PHOTO
-                else -> return AndroidPhotoSettleResult.Stable(observation)
+    private fun AndroidStableRawContactObservation.matchesIdentity(command: AndroidPhotoProviderWriteJournalEntity) =
+        !rawContact.deleted && rawContact.rawContactId == command.rawContactLocator &&
+            rawContact.canonicalContactIdClaim == command.canonicalContactId &&
+            rawContact.sourceIdentity == command.expectedSourceIdentity
+
+    private fun stale(category: AndroidPhotoProviderStaleCategory) = AndroidPhotoProviderWriteResult.Stale(category)
+    private fun repair(category: AndroidPhotoProviderRepairCategory) = AndroidPhotoProviderWriteResult.RepairRequired(category)
+
+    private fun readDisplayFile(fileId: Long): ByteArray? = try {
+        val uri = android.content.ContentUris.withAppendedId(ContactsContract.DisplayPhoto.CONTENT_URI, fileId)
+        contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+            descriptor.createInputStream().use { input ->
+                val result = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (result.size() + count > MAX_PHOTO_BYTES) return null
+                    result.write(buffer, 0, count)
+                }
+                result.toByteArray()
             }
-            if (attempt + 1 < PROVIDER_SETTLE_ATTEMPTS) delay(PROVIDER_SETTLE_DELAY_MILLIS)
         }
-        return AndroidPhotoSettleResult.Stale(lastFailure)
-    }
+    } catch (_: java.io.IOException) { null }
 
-
-    private fun com.patmanak.contako.data.android.provider.AndroidStableRawContactObservation.matches(
-        command: AndroidPhotoProviderWriteJournalEntity,
-    ): Boolean = matchesIdentity(command) && rawContact.version >= command.expectedRawContactVersion
-
-    private fun com.patmanak.contako.data.android.provider.AndroidStableRawContactObservation.matchesIdentity(
-        command: AndroidPhotoProviderWriteJournalEntity,
-    ): Boolean = !rawContact.deleted && rawContact.rawContactId == command.rawContactLocator &&
-        rawContact.canonicalContactIdClaim == command.canonicalContactId &&
-        rawContact.sourceIdentity == command.expectedSourceIdentity
-
-    private fun AndroidStableRawContactObservation.photoRow(): AndroidOwnedDataRow? =
-        dataRows.singleOrNull { it.mimeType == ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE }
-
-    private fun displayPhotoUri(
-        accountName: AndroidProviderAccountName,
-        rawContactId: Long,
-    ): android.net.Uri =
-        ContentUris.withAppendedId(ContactsContract.RawContacts.CONTENT_URI, rawContactId)
-            .buildUpon()
-            .appendPath(ContactsContract.RawContacts.DisplayPhoto.CONTENT_DIRECTORY)
-            .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true")
-            .appendQueryParameter(ContactsContract.RawContacts.ACCOUNT_NAME, accountName.value)
-            .appendQueryParameter(
-                ContactsContract.RawContacts.ACCOUNT_TYPE,
-                ContakoAndroidAccountContract.ACCOUNT_TYPE,
-            )
-            .build()
-
-    private fun syncAdapterUri(base: android.net.Uri, accountName: AndroidProviderAccountName): android.net.Uri =
-        base.buildUpon()
-            .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true")
-            .appendQueryParameter(ContactsContract.RawContacts.ACCOUNT_NAME, accountName.value)
-            .appendQueryParameter(ContactsContract.RawContacts.ACCOUNT_TYPE, ContakoAndroidAccountContract.ACCOUNT_TYPE)
-            .build()
-
-    private fun AndroidPhotoProviderWriteJournalEntity.sameCommand(other: AndroidPhotoProviderWriteJournalEntity) =
-        copy(
-            expectedRawContactVersion = 0,
-            state = STATE_PREPARED,
-            resultRawContactVersion = null,
-        ) == other.copy(
-            expectedRawContactVersion = 0,
-            state = STATE_PREPARED,
-            resultRawContactVersion = null,
-        )
-
-    private fun ByteArray.sha256(): String = MessageDigest.getInstance("SHA-256").digest(this)
-        .joinToString("") { "%02x".format(it) }
+    private fun readInlinePhoto(account: AndroidProviderAccountName, rawId: Long, rowId: Long): ByteArray? =
+        contentResolver.query(ContactsContract.Data.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Photo.PHOTO),
+            "${ContactsContract.Data._ID} = ? AND ${ContactsContract.Data.RAW_CONTACT_ID} = ? AND " +
+                "${ContactsContract.RawContacts.ACCOUNT_NAME} = ? AND ${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND " +
+                "length(${ContactsContract.CommonDataKinds.Photo.PHOTO}) <= ?",
+            arrayOf(rowId.toString(), rawId.toString(), account.value, ContakoAndroidAccountContract.ACCOUNT_TYPE,
+                AndroidProjectionPhotoScaler.MAX_INLINE_PHOTO_BYTES.toString()), null)?.use { cursor ->
+            if (!cursor.moveToFirst() || cursor.isNull(0)) null
+            else cursor.getBlob(0).takeIf { it.isNotEmpty() && !cursor.moveToNext() }
+        }
 
     private companion object {
         const val MAX_PHOTO_BYTES = 10 * 1_024 * 1_024
-        const val STREAM_BUFFER_BYTES = 32 * 1_024
-        // The reference ContactsProvider can publish the aggregate display-photo stream more than
-        // 200 ms after the raw-contact pipe closes. This bounded three-second window applies only
-        // after an actual photo write; converged no-change passes never enter it.
-        const val PROVIDER_SETTLE_ATTEMPTS = 30
-        const val PROVIDER_SETTLE_DELAY_MILLIS = 100L
-        const val STATE_PREPARED = "PREPARED"
         const val STATE_COMMITTED = "COMMITTED"
-        const val DATA_SYNC1 = "data_sync1"
-        const val DATA_SYNC2 = "data_sync2"
     }
-}
-
-private sealed interface AndroidPhotoSettleResult {
-    data class Stable(val observation: AndroidStableRawContactObservation) : AndroidPhotoSettleResult
-    data class Stale(val category: AndroidPhotoProviderStaleCategory) : AndroidPhotoSettleResult
 }

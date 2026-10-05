@@ -1,5 +1,7 @@
 package com.patmanak.contako.data.sync
 
+import com.patmanak.contako.data.android.provider.matchesPhoto
+
 import android.database.sqlite.SQLiteException
 import androidx.room.withTransaction
 import com.patmanak.contako.data.android.AndroidAdoptionState
@@ -280,7 +282,7 @@ internal class ProductionAndroidContactObservationCoordinator(
         RoomAndroidMembershipLedgerStaleObserver { },
     private val canonicalContactRejectionObserver: AndroidCanonicalContactRejectionObserver =
         AndroidCanonicalContactRejectionObserver { },
-    private val interruptedPhotoProof: (
+    private val interruptedPhotoProof: suspend (
         AndroidProviderAccountName, AndroidStableRawContactObservation,
         com.patmanak.contako.data.local.AndroidPhotoProviderWriteJournalEntity,
     ) -> AndroidExistingContactPlanRepairReason? = { _, _, _ -> AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_PROOF_FAILED },
@@ -627,8 +629,15 @@ internal class ProductionAndroidContactObservationCoordinator(
                 journal
             } else null
             val hasBinaryContactRow = route.contactRows.rows.any { it.binarySlot != null }
+            val photoReceipt = database.androidGroupProjectionDao().getPhotoProjectionReceipt(
+                context.account.value, entity.canonicalContactId)
             val retainedPhotoReference = recoveryJournal?.binaryReference ?: baseline?.let {
-                existingContactRetainedPhotoReference(route, it, raw.dirty)
+                if (photoReceipt != null) {
+                    photoReceipt.binaryReference.takeIf { reference ->
+                        it.rows.singleOrNull { row -> row.kind == AndroidRowKind.PHOTO }?.binaryReference == reference &&
+                            photoReceipt.matchesPhoto(context, entity.canonicalContactId, observation)
+                    }
+                } else existingContactRetainedPhotoReference(route, it, raw.dirty)
             }
             val binaryContactRows = route.contactRows.rows.filter { it.binarySlot != null }
             if (hasBinaryContactRow && (

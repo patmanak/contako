@@ -1023,6 +1023,24 @@ internal interface AndroidGroupProjectionDao {
     suspend fun upsertPhotoProviderWriteJournal(journal: AndroidPhotoProviderWriteJournalEntity)
 
     @Query(
+        "SELECT * FROM android_photo_projection_receipts " +
+            "WHERE account_id = :accountId AND canonical_contact_id = :canonicalContactId",
+    )
+    suspend fun getPhotoProjectionReceipt(
+        accountId: String,
+        canonicalContactId: String,
+    ): AndroidPhotoProjectionReceiptEntity?
+
+    @Upsert
+    suspend fun upsertPhotoProjectionReceipt(receipt: AndroidPhotoProjectionReceiptEntity)
+
+    @Query(
+        "DELETE FROM android_photo_projection_receipts " +
+            "WHERE account_id = :accountId AND canonical_contact_id = :canonicalContactId",
+    )
+    suspend fun deletePhotoProjectionReceipt(accountId: String, canonicalContactId: String): Int
+
+    @Query(
         "DELETE FROM android_photo_provider_write_journal " +
             "WHERE account_id = :accountId AND canonical_contact_id = :canonicalContactId " +
             "AND content_sha256 = :contentSha256 AND state = 'COMMITTED'",

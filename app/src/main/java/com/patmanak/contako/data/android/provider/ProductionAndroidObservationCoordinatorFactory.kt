@@ -65,9 +65,24 @@ internal fun productionGroupObservationCoordinator(
             canonicalContactRejectionObserver = canonicalContactRejectionObserver,
             interruptedPhotoProof = { account, observation, journal ->
                 val source = runCatching { photoLoader.load(journal.binaryReference) }.getOrNull()
+                val receipt = database.androidGroupProjectionDao().getPhotoProjectionReceipt(
+                    journal.accountId, journal.canonicalContactId)
                 com.patmanak.contako.data.sync.interruptedAndroidPhotoProofFailure(
                     source, journal.contentSize, journal.contentSha256,
-                ) { bytes -> photoVerifier.matches(account, observation, bytes) }
+                ) { bytes ->
+                    if (receipt != null) {
+                        receipt.sourceSha256 == journal.contentSha256 && receipt.sourceSize == journal.contentSize &&
+                            receipt.binaryReference == journal.binaryReference &&
+                            receipt.canonicalValueId == journal.canonicalValueId && journal.state == "COMMITTED" &&
+                            receipt.rawContactVersion == journal.resultRawContactVersion &&
+                            observation.rawContact.version == receipt.rawContactVersion &&
+                            receipt.matchesPhoto(
+                                com.patmanak.contako.data.sync.AndroidInteroperabilityContext(
+                                    com.patmanak.contako.data.gateway.AccountScope(journal.accountId),
+                                    journal.androidAccountName, 0, journal.providerEpoch),
+                                journal.canonicalContactId, observation)
+                    } else photoVerifier.matches(account, observation, bytes)
+                }
             },
         ),
         actionRequiredObserver,

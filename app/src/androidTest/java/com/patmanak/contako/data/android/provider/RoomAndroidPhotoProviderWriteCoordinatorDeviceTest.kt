@@ -47,6 +47,7 @@ class RoomAndroidPhotoProviderWriteCoordinatorDeviceTest {
     private lateinit var accountManager: AccountManager
     private lateinit var androidAccount: Account
     private var rawContactId: Long? = null
+    private var ownsAndroidAccount = false
 
     @Before
     fun setUp() {
@@ -57,11 +58,14 @@ class RoomAndroidPhotoProviderWriteCoordinatorDeviceTest {
         context.deleteDatabase(DATABASE_NAME)
         database = ContakoDatabase.create(context, DATABASE_NAME)
         accountManager = AccountManager.get(context)
-        androidAccount = Account(
-            "contako-photo-${System.nanoTime().toString(36)}",
-            ContakoAndroidAccountContract.ACCOUNT_TYPE,
-        )
-        check(accountManager.addAccountExplicitly(androidAccount, null, null))
+        if (InstrumentationRegistry.getArguments().getString("useExistingContakoAccount") == "true") {
+            androidAccount = accountManager.getAccountsByType(ContakoAndroidAccountContract.ACCOUNT_TYPE).single()
+        } else {
+            androidAccount = Account("contako-photo-${System.nanoTime().toString(36)}",
+                ContakoAndroidAccountContract.ACCOUNT_TYPE)
+            check(accountManager.addAccountExplicitly(androidAccount, null, null))
+            ownsAndroidAccount = true
+        }
     }
 
     @After
@@ -73,7 +77,7 @@ class RoomAndroidPhotoProviderWriteCoordinatorDeviceTest {
                 arrayOf(locator.toString()),
             )
         }
-        if (::androidAccount.isInitialized) accountManager.removeAccountExplicitly(androidAccount)
+        if (ownsAndroidAccount) accountManager.removeAccountExplicitly(androidAccount)
         if (::database.isInitialized) database.close()
         context.deleteDatabase(DATABASE_NAME)
     }
@@ -107,7 +111,8 @@ class RoomAndroidPhotoProviderWriteCoordinatorDeviceTest {
             isSuperPrimary = true,
             binaryReference = CURRENT_PHOTO_REFERENCE,
         )
-        val beforeInline = reader.readRawContactPage(accountName).contacts.single().version
+        val beforeInline = (reader.readStableRawContact(accountName, locator) as AndroidStableRawContactPageResult.Stable)
+            .page.observations.single().rawContact.version
         val inlineSnapshot = AndroidContactSnapshot(CONTACT_ID, listOf(desiredPhoto))
         val inlineResult = AndroidContactsProviderWriter(
             context.contentResolver,
@@ -138,7 +143,8 @@ class RoomAndroidPhotoProviderWriteCoordinatorDeviceTest {
             it.mimeType == ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE
         }
         assertNull(emptyPhoto.binarySlot)
-        val initialVersion = reader.readRawContactPage(accountName).contacts.single().version
+        val initialVersion = (reader.readStableRawContact(accountName, locator) as AndroidStableRawContactPageResult.Stable)
+            .page.observations.single().rawContact.version
         seedCurrentDurableClaims(locator)
         database.androidGroupProjectionDao().upsertPhotoProviderWriteJournal(
             AndroidPhotoProviderWriteJournalEntity(
@@ -169,6 +175,8 @@ class RoomAndroidPhotoProviderWriteCoordinatorDeviceTest {
             },
         )
 
+        val beforeWrite = (reader.readStableRawContact(accountName, locator) as AndroidStableRawContactPageResult.Stable)
+            .page.observations.single()
         val result = coordinator.write(
             AndroidInteroperabilityContext(ACCOUNT, androidAccount.name, 1, PROVIDER_EPOCH),
             CONTACT_ID,
@@ -188,12 +196,17 @@ class RoomAndroidPhotoProviderWriteCoordinatorDeviceTest {
             it.mimeType == ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE
         }
         val diagnosticPhoto = diagnosticPhotoRows.singleOrNull()
+        val afterWrite = (reader.readStableRawContact(accountName, locator) as AndroidStableRawContactPageResult.Stable)
+            .page.observations.single()
         assertTrue(
             "PHOTO_WRITE_NOT_COMMITTED_${result}_" +
                 "JOURNAL_${journal.state}_CURRENT_${journal.expectedCanonicalRevision == CURRENT_CANONICAL_REVISION}_" +
                 "PHOTO_ROWS_${diagnosticPhotoRows.size}_" +
                 "BINARY_${diagnosticPhoto?.binarySlot?.isNotEmpty() == true}_" +
-                "IDENTITY_${diagnosticPhoto?.canonicalValueId == CURRENT_PHOTO_VALUE_ID}",
+                "IDENTITY_${diagnosticPhoto?.canonicalValueId == CURRENT_PHOTO_VALUE_ID}_" +
+                "VERSION_DELTA_${afterWrite.rawContact.version - initialVersion}_" +
+                "DIRTY_${afterWrite.rawContact.dirty}_" +
+                "NON_PHOTO_EQUAL_${beforeWrite.dataRows.filterNot { it.isStandardPhoto } == afterWrite.dataRows.filterNot { it.isStandardPhoto }}",
             result is AndroidPhotoProviderWriteResult.Committed,
         )
         assertEquals("COMMITTED", journal.state)
@@ -205,7 +218,8 @@ class RoomAndroidPhotoProviderWriteCoordinatorDeviceTest {
         assertEquals(1, photoRows.size)
         assertEquals(CURRENT_PHOTO_VALUE_ID, photoRows.single().canonicalValueId)
         assertTrue("DISPLAY_PHOTO_BINARY_MISSING", displayPhotoHasBytes(locator))
-        val finalRawContact = reader.readRawContactPage(accountName).contacts.single()
+        val finalRawContact = (reader.readStableRawContact(accountName, locator) as AndroidStableRawContactPageResult.Stable)
+            .page.observations.single().rawContact
         assertFalse("DISPLAY_PHOTO_MARKED_RAW_CONTACT_DIRTY", finalRawContact.dirty)
         val stable = reader.readStableRawContact(accountName, locator) as AndroidStableRawContactPageResult.Stable
         val observedPhoto = stable.page.observations.single().dataRows.single { it.isStandardPhoto }
@@ -226,6 +240,37 @@ class RoomAndroidPhotoProviderWriteCoordinatorDeviceTest {
             } finally { bitmap.recycle() }
         }
         assertFalse("DIFFERENT_PHOTO_ACCEPTED", verifier.matches(accountName, stable.page.observations.single(), differentPhoto))
+        val receipt = database.androidGroupProjectionDao().getPhotoProjectionReceipt(ACCOUNT.value, CONTACT_ID)!!
+        val scope = AndroidInteroperabilityContext(ACCOUNT, androidAccount.name, 1, PROVIDER_EPOCH)
+        assertEquals(currentBytes.sha256(), receipt.sourceSha256)
+        assertEquals(observedPhoto.binarySlot!!.sha256(), receipt.readbackSha256)
+        assertTrue(receipt.matchesPhoto(scope, CONTACT_ID, stable.page.observations.single()))
+        coordinator.cleanupCommitted(ACCOUNT.value, CONTACT_ID, currentBytes.sha256())
+        assertNull(database.androidGroupProjectionDao().getPhotoProviderWriteJournal(ACCOUNT.value, CONTACT_ID))
+        assertEquals(receipt, database.androidGroupProjectionDao().getPhotoProjectionReceipt(ACCOUNT.value, CONTACT_ID))
+        val unchanged = coordinator.write(scope, CONTACT_ID, CURRENT_CANONICAL_REVISION, LEDGER_REVISION,
+            accountName, locator, stable.page.observations.single().rawContact.version, SOURCE_ID, desiredPhoto)
+        assertTrue(unchanged is AndroidPhotoProviderWriteResult.Committed)
+        val unchangedObservation = (reader.readStableRawContact(accountName, locator) as AndroidStableRawContactPageResult.Stable)
+            .page.observations.single()
+        assertEquals(stable.page.observations.single(), unchangedObservation)
+        assertNull(database.androidGroupProjectionDao().getPhotoProviderWriteJournal(ACCOUNT.value, CONTACT_ID))
+        // Native note editing marks the raw contact dirty, but does not replace the original photo.
+        context.contentResolver.insert(ContactsContract.Data.CONTENT_URI, ContentValues().apply {
+            put(ContactsContract.Data.RAW_CONTACT_ID, locator)
+            put(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE)
+            put(ContactsContract.CommonDataKinds.Note.NOTE, "Synthetic native note")
+        })
+        val noted = (reader.readStableRawContact(accountName, locator) as AndroidStableRawContactPageResult.Stable)
+            .page.observations.single()
+        assertTrue(noted.rawContact.dirty)
+        assertTrue(receipt.matchesPhoto(scope, CONTACT_ID, noted))
+        context.contentResolver.update(ContactsContract.Data.CONTENT_URI, ContentValues().apply {
+            put(ContactsContract.CommonDataKinds.Photo.PHOTO, differentPhoto)
+        }, "${ContactsContract.Data._ID} = ?", arrayOf(receipt.dataRowLocator.toString()))
+        val changed = (reader.readStableRawContact(accountName, locator) as AndroidStableRawContactPageResult.Stable)
+            .page.observations.single()
+        assertFalse(receipt.matchesPhoto(scope, CONTACT_ID, changed))
     }
 
     private suspend fun seedCurrentDurableClaims(locator: Long) {

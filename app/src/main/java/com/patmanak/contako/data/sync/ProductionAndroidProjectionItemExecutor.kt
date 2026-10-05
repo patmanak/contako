@@ -1,5 +1,7 @@
 package com.patmanak.contako.data.sync
 
+import com.patmanak.contako.data.android.provider.matchesPhoto
+
 import android.database.sqlite.SQLiteException
 import androidx.room.withTransaction
 import com.patmanak.contako.data.android.AndroidAdoptionState
@@ -581,6 +583,9 @@ internal class ProductionAndroidProjectionItemExecutor(
         if (result == AndroidBoundedPageResult.Applied && committedPhotoSha256 != null) {
             photoWriter.cleanupCommitted(context.account.value, ledger.canonicalContactId, committedPhotoSha256)
         }
+        if (result == AndroidBoundedPageResult.Applied && desiredPhoto == null) {
+            database.androidGroupProjectionDao().deletePhotoProjectionReceipt(context.account.value, canonical.id)
+        }
         return result
     }
 
@@ -673,12 +678,19 @@ internal class ProductionAndroidProjectionItemExecutor(
         if (route.unsupportedOwnedRows.rows.isNotEmpty()) null
         else {
             val desiredPhoto = desired.rows.singleOrNull { it.kind == AndroidRowKind.PHOTO }
+            val photoReceipt = database.androidGroupProjectionDao().getPhotoProjectionReceipt(context.account.value, canonical.id)
             var identityFailure: Pair<AndroidProviderIdentityFailure, AndroidRowKind?>? = null
             val resolver = RoomAndroidProviderIdentityResolver(database, context.account, context.providerEpoch) { reason, kind ->
                 identityFailure = reason to kind
             }
             val photoCapture = com.patmanak.contako.data.android.provider.AndroidDurablePhotoCapture { _, _, _, _ ->
-                desiredPhoto?.binaryReference ?: return@AndroidDurablePhotoCapture "provider-photo"
+                if (photoReceipt != null && photoReceipt.matchesPhoto(context, canonical.id, observation)) {
+                    photoReceipt.binaryReference
+                } else if (stage == AndroidProjectionDecodeStage.POST_WRITE) {
+                    throw IllegalArgumentException("PHOTO_RECEIPT_MISSING_OR_STALE")
+                } else if (photoReceipt != null) {
+                    "provider-photo"
+                } else desiredPhoto?.binaryReference ?: "provider-photo"
             }
             // Projection reconciliation must decode a provider Photo row whose bytes are absent,
             // but it must not pretend that row already carries the desired photo. The distinct

@@ -21,6 +21,25 @@ distinct from contact-local incompatibilities and stop the affected traversal.
 Native creation with a supported standard photo MUST capture its bounded bytes
 durably with the contact and outbox before acknowledgement. Lost-ack creation
 replay MUST prove the exact photo content as well as the observed row metadata.
+
+Android photo projection MUST preserve the canonical original separately from
+the provider's representation. New photo copies use one synchronous, scoped,
+version-guarded `Data.PHOTO` transaction, with at most 192 KiB of image input and
+a 2048-pixel long-edge bound. Provider readback MUST match the owned row and the
+single expected version increment, with unchanged non-photo rows and DIRTY clear.
+A newly published display-file locator MUST be read independently and agree with
+the stable observation; a thumbnail-only result requires exact scoped inline
+readback. An old display file MUST NOT be adopted as proof of a new photo.
+
+The source and observed representation SHA-256/size, row identity, provider epoch
+and version MUST be stored in a durable receipt. An unrelated dirty note edit
+MUST retain the canonical photo reference when the actual photo matches that
+receipt; changed photo bytes MUST follow native-edit capture. Receipts survive
+ordinary journal cleanup and MUST NOT authorize another account, epoch or row.
+Provider queries remain outside Room transactions. Lost returns before receipt
+persistence MUST NOT authorize adopting arbitrary bytes: historical exact proof
+or an explicit pending state is required. Different JPEG encoders do not by
+themselves invalidate a freshly proven receipt; visual similarity is never proof.
 Android page acquisition MAY reduce its contact count to satisfy the unchanged
 aggregate byte budget; a smaller page MUST retain its stable-version and cursor
 proofs. An individually oversized contact MUST remain an explicit failure.

@@ -64,12 +64,12 @@ tagging and publishing are separate actions governed by the requested scope.
 
 | Location or consumer | Required action |
 | --- | --- |
-| `app/build.gradle.kts`: `contakoReleaseVersion` | Set the requested `X.Y.Z` application version. This also supplies `defaultConfig.versionName` and `BuildConfig.PROTON_RELEASE_VERSION`. |
+| `app/build.gradle.kts`: `contakoReleaseVersion` | Set the requested `X.Y.Z` or `X.Y.Z-RCn` application version. This supplies `defaultConfig.versionName`; its numeric part supplies `BuildConfig.PROTON_RELEASE_VERSION`. |
 | Same file: `defaultConfig.versionCode` | Increase the integer beyond previously distributed builds on the intended upgrade path. Do not derive it by dropping dots or reset it for a new major version. |
 | Same file: `versionNameSuffix` per build type | Preserve the variant suffixes. A base-version bump does not turn a preview or diagnostic build into a release. |
 | `ContakoApp.kt`: About page | Reads `BuildConfig.VERSION_NAME` through the localized `about_version` format. Do not edit the UI or eight string catalogs merely to change a version. Settings contain no independent version number. |
 | `DiagnosticSettings.kt`: exported report | Reads `BuildConfig.VERSION_NAME`, including the variant suffix. Check applicable validator limitations; do not disguise the build by stripping its suffix. |
-| `ProtonGateCNetwork.kt`: client identity | Reads `BuildConfig.PROTON_RELEASE_VERSION`, without the Android variant suffix. Keep client identity and its validator derived from the same value. |
+| `ProtonGateCNetwork.kt`: client identity | Reads `BuildConfig.PROTON_RELEASE_VERSION`, derived from the numeric `X.Y.Z` part of the central version, without an RC or Android variant suffix. Keep the strict protocol identity and its validator derived from the same value. |
 | Root `CHANGELOG.md` | Add a concise section for the version, describing delivered user-facing changes. Retain older sections; do not claim unfinished fixes or unexecuted qualification. |
 | `README.md`, `app/README.md` and `docs/` | Update current-version/download examples if present, and user guide, specification, limitations or test acceptance when behavior changes. Avoid repeating a current-version number where a link to the changelog suffices. |
 | Generated BuildConfig, merged manifest, APK/AAB metadata, SBOM and copied APKs | Regenerate from the intended source when needed. Never hand-edit generated files or rename an old APK to imply a new version. `app/qa/check-release.ps1` derives the SBOM application version from the Gradle declaration. |
@@ -89,8 +89,9 @@ For a metadata-only change, run from `app/` with the toolchain described in
 
 Add `--offline` only with a complete verified dependency cache. Inspect the
 generated release `BuildConfig.java` and merged `AndroidManifest.xml` under
-`app/build/`: `VERSION_NAME` and `PROTON_RELEASE_VERSION` MUST match the requested
-base version, and `VERSION_CODE`/manifest `versionCode` MUST match the new integer.
+`app/build/`: `VERSION_NAME` MUST match the requested version, including `-RCn`
+when applicable; `PROTON_RELEASE_VERSION` MUST match its numeric `X.Y.Z` part,
+and `VERSION_CODE`/manifest `versionCode` MUST match the new integer.
 This checks metadata, not an assembled APK or runtime behavior. Document the
 scope in the ignored [result template](testing/RESULT_TEMPLATE.md).
 
@@ -107,7 +108,8 @@ replaying the full contact campaign.
    the intended version, versionCode and matching changelog. Uncommitted changes
    are not part of a tag; preserve unrelated work and commit the release changes
    within the authorized scope before tagging.
-2. Use an annotated `vX.Y.Z` tag whose number matches the base Gradle version.
+2. Use an annotated `vX.Y.Z` tag for a stable release, or `X.Y.Z-RCn` for a release
+   candidate, matching the central Gradle version (apart from the stable `v` prefix).
    Confirm whether that name already exists. An existing tag at another commit
    MUST NOT be replaced or deleted implicitly; an existing matching tag needs no
    recreation. Record the resolved target, not just the branch name.

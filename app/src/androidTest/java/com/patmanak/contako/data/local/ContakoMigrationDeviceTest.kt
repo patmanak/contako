@@ -25,6 +25,30 @@ class ContakoMigrationDeviceTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
 
     @Test
+    fun photoReceiptMigrationPreservesJournalWithoutInventingReadbackProof() {
+        val name = "migration-photo-receipt.db"
+        context.deleteDatabase(name)
+        migrations.createDatabase(name, 18).use(MigrationFixture::seed)
+        val upgraded = migrations.runMigrationsAndValidate(name, CURRENT_VERSION, true, *ALL_MIGRATIONS)
+        try {
+            assertEquals("1", upgraded.scalar("SELECT COUNT(*) FROM android_photo_provider_write_journal"))
+            assertEquals("0", upgraded.scalar("SELECT COUNT(*) FROM android_photo_projection_receipts"))
+            upgraded.execSQL(
+                "INSERT INTO android_photo_projection_receipts VALUES " +
+                    "('synthetic-account','synthetic-contact','synthetic@android.test',4,42,43," +
+                    "'synthetic-photo','photo://synthetic','${"a".repeat(64)}',4,'${"b".repeat(64)}',6,9)",
+            )
+            upgraded.execSQL("PRAGMA foreign_keys = ON")
+            upgraded.execSQL("DELETE FROM android_projection_ledger WHERE account_id = 'synthetic-account'")
+            assertEquals("0", upgraded.scalar("SELECT COUNT(*) FROM android_photo_projection_receipts"))
+            upgraded.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
+        } finally {
+            upgraded.close()
+            context.deleteDatabase(name)
+        }
+    }
+
+    @Test
     fun everyExportedSchemaUpgradesToCurrentWithoutLosingExistingRows() {
         (1 until CURRENT_VERSION).forEach { startVersion ->
             val name = "migration-$startVersion-to-$CURRENT_VERSION.db"
@@ -171,7 +195,7 @@ class ContakoMigrationDeviceTest {
     private class SimulatedMigrationProcessDeath : RuntimeException()
 
     private companion object {
-        const val CURRENT_VERSION = 18
+        const val CURRENT_VERSION = 19
         val ALL_MIGRATIONS = arrayOf(
             ContakoDatabase.MIGRATION_1_2,
             ContakoDatabase.MIGRATION_2_3,
@@ -190,6 +214,7 @@ class ContakoMigrationDeviceTest {
             ContakoDatabase.MIGRATION_15_16,
             ContakoDatabase.MIGRATION_16_17,
             ContakoDatabase.MIGRATION_17_18,
+            ContakoDatabase.MIGRATION_18_19,
         )
     }
 }
@@ -208,6 +233,7 @@ private object MigrationFixture {
         "contact_inventory_email_memberships",
         "contact_inventory_email_groups",
         "android_photo_provider_write_journal",
+        "android_photo_projection_receipts",
     )
 
     fun seed(db: SupportSQLiteDatabase) {
@@ -275,6 +301,13 @@ private object MigrationFixture {
             )
         }
         seedPhotoJournalIfPresent(db)
+        if (db.tableExists("android_photo_projection_receipts")) {
+            db.execSQL(
+                "INSERT INTO android_photo_projection_receipts VALUES " +
+                    "('synthetic-account','synthetic-contact','synthetic@android.test',4,42,43," +
+                    "'synthetic-photo','photo://synthetic','${"a".repeat(64)}',4,'${"b".repeat(64)}',6,9)",
+            )
+        }
     }
 
     private fun seedPhotoJournalIfPresent(db: SupportSQLiteDatabase) {

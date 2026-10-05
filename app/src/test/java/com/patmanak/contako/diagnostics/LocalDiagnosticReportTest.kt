@@ -10,10 +10,10 @@ class LocalDiagnosticReportTest {
     @Test
     fun supportedVariantVersionsAreAcceptedWithoutAllowingFreeFormSuffixes() {
         val report = validReport()
-        listOf("", "-debug", "-preview", "-diagnostic", "-sync-diagnostic", "-benchmark").forEach { suffix ->
+        listOf("", "-debug", "-preview", "-diagnostic", "-sync-diagnostic", "-benchmark", "-RC1", "-RC12", "-RC1-debug").forEach { suffix ->
             assertTrue(LocalDiagnosticSafetyScanner.isSafeReport(report.replace("app_version=0.8.0", "app_version=0.9.0$suffix")))
         }
-        listOf("-arbitrary", "-sync-diagnostic-extra", "\nprivate=payload").forEach { suffix ->
+        listOf("-arbitrary", "-sync-diagnostic-extra", "-RC0", "-RC01", "-RC1-extra", "\nprivate=payload").forEach { suffix ->
             assertFalse(LocalDiagnosticSafetyScanner.isSafeReport(report.replace("app_version=0.8.0", "app_version=0.9.0$suffix")))
         }
     }

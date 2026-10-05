@@ -148,8 +148,10 @@ rechecked non-DIRTY observation MUST hold. All linked bindings MUST move atomica
 no canonical value or mutation intent is rewritten. Other non-photo rows, including
 dates and linked organization/title/role bindings, MAY relocate only against the
 matching pending whole-projection receipt, with the same guards and atomicity.
-CLEAN-baseline recovery remains name-only. PHOTO relocation MUST use its separate
-stream journal; this batch recovery MUST NOT bypass that boundary.
+CLEAN-baseline recovery remains name-only. Historical PHOTO relocation MUST use
+its separate committed stream journal; batch recovery MUST NOT bypass that
+boundary. New synchronous photo writes retain a distinct durable representation
+receipt under the ownership, version and readback guards in Contacts.
 Baseline recovery MUST NOT skip normal planning or photo byte verification:
 a decoded projection fingerprint alone is not proof of the current image bytes.
 

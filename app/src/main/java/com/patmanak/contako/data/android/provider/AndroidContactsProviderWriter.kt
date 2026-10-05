@@ -1049,8 +1049,8 @@ internal class AndroidContactsProviderWriter(
         const val MAX_ID_LENGTH = 4_096
         const val MAX_DATA_OPERATIONS = 199
         const val MAX_BATCH_OPERATIONS = 200
-        // applyBatch crosses Binder. Full-resolution photos MUST use the separately journaled
-        // display_photo streaming path; this boundary accepts only a bounded provider thumbnail.
+        // applyBatch crosses Binder. Photo projection uses the separately journaled,
+        // bounded atomic photo coordinator; this generic boundary accepts bounded inline bytes.
         const val MAX_BINARY_BYTES = 256 * 1_024
         const val MAX_TEXT_UTF8_BYTES = 16 * 1_024
         const val MAX_ID_UTF8_BYTES = 4_096

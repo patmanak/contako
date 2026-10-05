@@ -159,7 +159,7 @@ class ProjectInvariantTest {
             }
         assertTrue(productionText.contains("Other_"))
         assertTrue(productionText.contains("+contako"))
-        val version = Regex("val contakoReleaseVersion = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"").find(build)
+        val version = Regex("val contakoReleaseVersion = \"([0-9]+\\.[0-9]+\\.[0-9]+(?:-RC[1-9][0-9]*)?)\"").find(build)
         assertNotNull("A single release version must be declared", version)
         assertTrue(build.contains("versionName = contakoReleaseVersion"))
         assertTrue(Regex("versionCode = ([0-9]+)").find(build)!!.groupValues[1].toInt() > 0)
@@ -343,7 +343,7 @@ class ProjectInvariantTest {
         assertTrue(extractionRules.contains("<cloud-backup"))
         assertTrue(extractionRules.contains("<device-transfer>"))
 
-        assertTrue(databaseSource.contains("version = 18"))
+        assertTrue(databaseSource.contains("version = 19"))
         assertTrue(databaseSource.contains("exportSchema = true"))
         assertFalse(databaseSource.contains("fallbackToDestructiveMigration"))
         listOf(
@@ -364,6 +364,7 @@ class ProjectInvariantTest {
             "MIGRATION_15_16",
             "MIGRATION_16_17",
             "MIGRATION_17_18",
+            "MIGRATION_18_19",
         )
             .forEach { migration -> assertTrue(databaseSource.contains(migration)) }
         assertTrue(schema.contains("\"version\": 16"))

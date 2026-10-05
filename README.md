@@ -31,10 +31,11 @@ Screenshots show the application interface with fictional contacts.
   sanitized diagnostic summary from Sync.
 
 Android 12 or later is required. One Proton account is supported at a time.
-The current development version is **0.10.0**; see the
+The current release candidate is **0.10.0-RC1**; see the
 [changelog](CHANGELOG.md) and [known limitations](docs/KNOWN_LIMITATIONS.md).
-The latest published release candidate is 0.9.0-RC2. Development changes are not
-a published or fully qualified release.
+Download the signed universal APK from the
+[0.10.0-RC1 prerelease](https://github.com/patmanak/contako/releases/tag/0.10.0-RC1).
+Release candidates are testing builds; review the known limitations before use.
 
 ## Using Contako
 

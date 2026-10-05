@@ -43,10 +43,16 @@ internal object AndroidProjectionPhotoScaler {
         return scale(bytes, MAX_DIMENSION, MAX_INLINE_PHOTO_BYTES, INITIAL_QUALITY, preserveSmall = true)
     }
 
-    /** Produces a broadly supported, bounded JPEG for the full-resolution display-photo pipe. */
+    /** Produces a broadly supported, bounded JPEG for the Android display-photo copy. */
     fun normalizeForDisplayPhoto(bytes: ByteArray): ByteArray? {
         return scale(bytes, MAX_DISPLAY_DIMENSION, MAX_DISPLAY_PHOTO_BYTES, 92, preserveSmall = false)
     }
+
+    /** One synchronous provider transaction, leaving Binder headroom for guards and metadata. */
+    fun normalizeForAtomicPhoto(bytes: ByteArray): ByteArray? =
+        scale(bytes, MAX_DISPLAY_DIMENSION, MAX_ATOMIC_PHOTO_BYTES, 92, preserveSmall = true)
+
+    const val MAX_ATOMIC_PHOTO_BYTES = 192 * 1_024
 
     private fun scale(bytes: ByteArray, target: Int, byteLimit: Int, qualityStart: Int, preserveSmall: Boolean): ByteArray? {
         return AndroidPhotoWorkBudget.withDecodedPhoto {
@@ -95,7 +101,7 @@ internal object AndroidProjectionPhotoScaler {
     }
 }
 
-/** Separates the Binder-safe thumbnail boundary from the full-resolution stream loader. */
+/** Keeps generic inline photo writes within their Binder-safe thumbnail boundary. */
 internal class AndroidInlinePhotoBinaryLoader(
     private val canonicalLoader: AndroidProjectionBinaryLoader,
 ) : AndroidProjectionBinaryLoader {
