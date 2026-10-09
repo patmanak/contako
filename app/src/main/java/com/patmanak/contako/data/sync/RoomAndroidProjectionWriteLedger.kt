@@ -159,7 +159,9 @@ internal class RoomAndroidProjectionWriteLedger(
         ) return@withTransaction AndroidProjectionWriteLedgerResult.Stale
         val contactFingerprint = mapper.fingerprint(observedContact).sha256Hex
         val verifiedProjectionFingerprint = mapper.fingerprint(
-            mapper.normalizeGeneratedName(observedContact, mapper.project(contact)),
+            mapper.projectionComparisonSnapshot(
+                mapper.normalizeGeneratedName(observedContact, mapper.project(contact)),
+            ),
         ).sha256Hex
         val membershipFingerprint = observedMembership.semanticFingerprint().sha256Hex
         if (ledger.pendingProjectionFingerprint != verifiedProjectionFingerprint ||

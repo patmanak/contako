@@ -98,7 +98,7 @@ internal class CanonicalAndroidContactMapper(
         return snapshot.copy(rows = snapshot.rows.map { row ->
             row.withoutProviderLocator().copy(
                 isPrimary = row.semanticPrimary(singleEmailPrimaryIsImplicit),
-                isSuperPrimary = row.semanticSuperPrimary(),
+                isSuperPrimary = if (row.kind == AndroidRowKind.PHOTO) false else row.semanticSuperPrimary(),
                 components = row.components.filterValues(String::isNotEmpty),
                 binaryReference = row.binaryReference?.takeIf(String::isNotEmpty),
             )
@@ -124,7 +124,11 @@ internal class CanonicalAndroidContactMapper(
                     !existing.samePayload(replacement, singleEmailPrimaryIsImplicit) -> add(
                         AndroidRowOperation.Update(
                             currentIdentity = existing.identity.requireProviderLocator(),
-                            desired = replacement.withoutProviderLocator(),
+                            desired = replacement.withoutProviderLocator().let {
+                                // PHOTO super-primary is the aggregate's native display choice,
+                                // not a Proton preference. Preserve it on real payload updates.
+                                if (it.kind == AndroidRowKind.PHOTO) it.copy(isSuperPrimary = existing.isSuperPrimary) else it
+                            },
                         ),
                     )
                 }
@@ -827,6 +831,7 @@ internal class CanonicalAndroidContactMapper(
     ): AndroidContactRow = withoutProviderLocator().let { row ->
         when {
             row.kind in DATE_ROW_KINDS -> row.copy(isPrimary = false, isSuperPrimary = false)
+            row.kind == AndroidRowKind.PHOTO -> row.copy(isSuperPrimary = false)
             singleEmailPrimaryIsImplicit && row.kind == AndroidRowKind.EMAIL -> row.copy(isPrimary = false)
             else -> row
         }

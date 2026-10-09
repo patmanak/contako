@@ -178,6 +178,7 @@ internal class PersistentContactInventoryPlanner(
         inventory: ValidatedCompleteInventory,
         forceHydration: Boolean = false,
         events: ContactEventsDelta? = null,
+        identityRepairContacts: Set<RemoteContactId> = emptySet(),
     ): ContactInventoryPlan {
         requireAuthoritative(inventory)
         val loadedCheckpoint = checkpointStore.load(account)
@@ -208,7 +209,7 @@ internal class PersistentContactInventoryPlanner(
 
         val hydrate = current.filter { (id, now) ->
             val before = previous[id]
-            forceHydration || refreshAll || id in events?.changedContacts.orEmpty() || id in emailContacts ||
+            forceHydration || refreshAll || id in identityRepairContacts || id in events?.changedContacts.orEmpty() || id in emailContacts ||
                 before == null || now.contentChangedFrom(before)
         }.keys
         val labelOnly = current.filter { (id, now) ->

@@ -28,6 +28,8 @@ internal data class CanonicalReconciliationReceipt(
 
 /** Local-only boundary. Returning success means the complete batch is already durable. */
 internal fun interface RemoteCanonicalReconciliationStore {
+    suspend fun identityRepairContacts(account: AccountScope): Set<RemoteContactId> = emptySet()
+
     suspend fun commit(
         account: AccountScope,
         plan: ContactInventoryPlan,
@@ -115,6 +117,25 @@ internal enum class RemoteImportPhase {
     PLAN_START, PLAN_DONE, CARD_READ_START, CARD_READ_DONE, LOCAL_COMMIT_START,
     LOCAL_COMMIT_DONE, CHECKPOINT_COMMIT_START, CHECKPOINT_COMMIT_DONE,
     LOCAL_COMMIT_FAILED, RECEIPT_MISMATCH, CHECKPOINT_COMMIT_FAILED,
+    LOCAL_INTENT_REVISION_MISMATCH, LOCAL_CREATION_UID_MISMATCH,
+    LOCAL_PENDING_GROUP_EMAIL_REMAP_FAILED, LOCAL_CONTACT_PROJECTION_RECEIPT_MISMATCH,
+    LOCAL_MEMBERSHIP_PROJECTION_RECEIPT_MISMATCH,
+}
+
+/** Fixed local invariant identity only; never carries a contact, payload or identifier. */
+internal enum class LocalReconciliationInvariant(val phase: RemoteImportPhase) {
+    INTENT_REVISION(RemoteImportPhase.LOCAL_INTENT_REVISION_MISMATCH),
+    CREATION_UID(RemoteImportPhase.LOCAL_CREATION_UID_MISMATCH),
+    PENDING_GROUP_EMAIL_REMAP(RemoteImportPhase.LOCAL_PENDING_GROUP_EMAIL_REMAP_FAILED),
+    CONTACT_PROJECTION_RECEIPT(RemoteImportPhase.LOCAL_CONTACT_PROJECTION_RECEIPT_MISMATCH),
+    MEMBERSHIP_PROJECTION_RECEIPT(RemoteImportPhase.LOCAL_MEMBERSHIP_PROJECTION_RECEIPT_MISMATCH),
+}
+
+internal class LocalReconciliationInvariantFailure(val invariant: LocalReconciliationInvariant) :
+    IllegalStateException(invariant.name)
+
+internal fun checkLocalReconciliationInvariant(condition: Boolean, invariant: LocalReconciliationInvariant) {
+    if (!condition) throw LocalReconciliationInvariantFailure(invariant)
 }
 
 internal class IncrementalRemoteContactStage(
@@ -139,6 +160,7 @@ internal class IncrementalRemoteContactStage(
     }
     private fun observe(phase: RemoteImportPhase) = runCatching { importObserver.onImportPhase(phase) }.let { }
     private fun observeFailure(error: Throwable) = runCatching {
+        if (error is LocalReconciliationInvariantFailure) importObserver.onImportPhase(error.invariant.phase)
         importObserver.onException(syncPassExceptionCategory(error))
     }.let { }
     private val inventoryReader = BoundedContactInventoryReader(inventoryGateway)
@@ -171,7 +193,7 @@ internal class IncrementalRemoteContactStage(
         if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
         observe(RemoteImportPhase.PLAN_START)
         val plan = try {
-            planner.plan(account, inventory, forceHydration, events)
+            planner.plan(account, inventory, forceHydration, events, canonicalStore.identityRepairContacts(account))
         } catch (_: StaleContactInventoryPlan) {
             return RemoteContactStageResult.StalePlan
         } catch (_: IllegalArgumentException) {

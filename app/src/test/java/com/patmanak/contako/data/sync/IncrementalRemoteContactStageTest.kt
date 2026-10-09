@@ -29,6 +29,34 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IncrementalRemoteContactStageTest {
+    @Test fun localInvariantFailuresReportOnlyClosedCodesAndNeverAdvanceCheckpoint() = runTest {
+        LocalReconciliationInvariant.entries.forEach { invariant ->
+            val checkpoint = FakeCheckpointStore()
+            val phases = mutableListOf<RemoteImportPhase>()
+            val failures = mutableListOf<SyncPassExceptionCategory>()
+            val candidate = IncrementalRemoteContactStage(
+                pagedGateway { pages(listOf(metadata("synthetic", 1)), 1) },
+                ProtonVerifiedContactCardGateway { _, id -> success(card(id, 1)) },
+                PersistentContactInventoryPlanner(checkpoint),
+                RemoteCanonicalReconciliationStore { _, _, _, _, _ ->
+                    checkLocalReconciliationInvariant(false, invariant)
+                    error("Unreachable")
+                },
+                importObserver = object : SyncPassStageObserver {
+                    override fun onStage(stage: SyncPassStage) = Unit
+                    override fun onImportPhase(phase: RemoteImportPhase) { phases += phase }
+                    override fun onException(category: SyncPassExceptionCategory) { failures += category }
+                },
+            )
+            assertEquals(RemoteContactStageResult.LocalPersistenceFailure, candidate.run(ACCOUNT))
+            assertEquals(0, checkpoint.commitCount)
+            assertTrue(phases.contains(RemoteImportPhase.LOCAL_COMMIT_FAILED))
+            assertTrue(phases.contains(invariant.phase))
+            assertFalse(phases.contains(RemoteImportPhase.LOCAL_COMMIT_DONE))
+            assertEquals(listOf(SyncPassExceptionCategory.INVALID_STATE), failures)
+        }
+    }
+
     @Test fun serialInvestigationCommitsEachContactBeforeReadingTheNext() = runTest {
         val inventory = (1..36).map { metadata("serial-$it", 1) }
         var active = 0
@@ -387,6 +415,31 @@ class IncrementalRemoteContactStageTest {
             ),
             reasons,
         )
+    }
+
+    @Test fun `unchanged inventory selectively rehydrates identity repair then returns to no change`() = runTest {
+        val checkpoint = FakeCheckpointStore()
+        val reads = mutableListOf<RemoteContactId>()
+        var repairs = emptySet<RemoteContactId>()
+        val canonical = object : RemoteCanonicalReconciliationStore {
+            override suspend fun identityRepairContacts(account: AccountScope) = repairs
+            override suspend fun commit(account: AccountScope, plan: com.patmanak.contako.data.proton.ContactInventoryPlan,
+                hydratedCards: List<VerifiedContactCard>, labelsToReconcile: Set<RemoteContactId>,
+                deletionsToReconcile: Set<RemoteContactId>): CanonicalReconciliationReceipt {
+                repairs -= hydratedCards.map { it.id }.toSet()
+                return CanonicalReconciliationReceipt(hydratedCards.map { it.id }.toSet(), labelsToReconcile, deletionsToReconcile)
+            }
+        }
+        val candidate = stage(pagedGateway { pages(listOf(metadata("one", 1), metadata("two", 1)), 2) },
+            ProtonVerifiedContactCardGateway { _, id -> reads += id; success(card(id, 1)) }, checkpoint, canonical)
+        assertTrue(candidate.run(ACCOUNT) is RemoteContactStageResult.Success)
+        reads.clear()
+        repairs = setOf(RemoteContactId("one"))
+        assertTrue(candidate.run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertEquals(listOf(RemoteContactId("one")), reads)
+        reads.clear()
+        assertTrue(candidate.run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertTrue(reads.isEmpty())
     }
 
     private fun stage(

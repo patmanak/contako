@@ -471,6 +471,15 @@ internal class ProtonContactVCardCodec(
                 )
             }
         }
+        val emailBindings = protonEmailOccurrences(values.filter { it.kind == ContactValueKind.EMAIL }, remote.contactEmails)
+        values.indices.forEach { index ->
+            val current = values[index]
+            val email = emailBindings[current.id] ?: return@forEach
+            values[index] = current.copy(metadata = current.metadata + mapOf(
+                PROTON_EMAIL_ID_KEY to email.id.id,
+                PROTON_GROUP_IDS_KEY to email.labelIds.joinToString(","),
+            ))
+        }
         val emailIndexes = mutableMapOf<String, Int>()
         values.forEachIndexed { index, value ->
             if (value.kind == ContactValueKind.EMAIL) {
@@ -479,7 +488,7 @@ internal class ProtonContactVCardCodec(
         }
         var nextEmailOrder = values.count { it.kind == ContactValueKind.EMAIL }
 
-        remote.contactEmails.forEach { email ->
+        remote.contactEmails.sortedBy { it.order }.forEach { email ->
             val normalizedEmail = email.email.normalizedEmail()
             val existingIndex = emailIndexes[normalizedEmail]
             if (existingIndex == null) {
@@ -491,15 +500,6 @@ internal class ProtonContactVCardCodec(
                     order = nextEmailOrder++,
                     isPrimary = email.order == 0,
                     metadata = mapOf(
-                        PROTON_EMAIL_ID_KEY to email.id.id,
-                        PROTON_GROUP_IDS_KEY to email.labelIds.joinToString(","),
-                    ),
-                )
-                emailIndexes[normalizedEmail] = values.lastIndex
-            } else {
-                val current = values[existingIndex]
-                values[existingIndex] = current.copy(
-                    metadata = current.metadata + mapOf(
                         PROTON_EMAIL_ID_KEY to email.id.id,
                         PROTON_GROUP_IDS_KEY to email.labelIds.joinToString(","),
                     ),

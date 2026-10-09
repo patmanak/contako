@@ -138,6 +138,16 @@ still present, stale epoch/revision and forged phonetic/primary claims. Record
 whether the provider state actually occurred; ordinary photo replacement is not
 proof of internal journal recovery.
 
+For FT-12/SW-07, interrupt the first membership initialization between ledger and
+baseline persistence. New initialization MUST roll back both records on failure.
+For legacy interrupted state, ordinary sync MAY reconstruct only the exact
+initial marker's empty snapshot under unchanged account/epoch/owned contact
+context; this MUST NOT mark the contact synchronized. Observe current owned rows
+and verify actual group projection and all untouched fields before completion.
+A missing completed, pending, detached or mismatching baseline MUST remain blocked;
+native DIRTY state MUST be ingested before any initialization. Retry and restart
+MUST preserve existing references and per-email group assignments.
+
 ### Display alias and separate native source regression
 
 For FT-24, use C03/C14 with a photo on the Contako fixture. Create the second
@@ -197,12 +207,62 @@ not a reason to restart development or to mark an unexecuted case passed.
 
 ## Concurrent edits and recovery variants
 
+For photo projection, link the owned contact to a foreign source and select the
+owned photo as the aggregate default in the native editor. A change to Android's
+photo super-primary flag alone MUST NOT create a Proton edit or a perpetual
+copy obligation. Replace the actual photo separately: its bytes MUST still be
+delivered and read back with the guarded receipt, while preserving the existing
+native aggregate photo preference. Persisted provider baselines MUST retain
+their actual flags and remain verifiable after upgrading the application.
+
 For FT-06/FT-15, use a rich contact with two emails and different group assignments.
 Change only the secondary email's groups, then make it preferred; repeat the
 preference switch in both directions. Verify each email's independent Proton
 assignments, the Android owned email rows' primary flags and membership following
 the preferred email. A successful upload alone MUST NOT qualify Android projection.
 Restart and run a no-change pass; preference and memberships MUST remain stable.
+
+For FT-06/FT-07, establish two distinct emails with two different groups each
+and two phone numbers. Delete one phone through the native contact editor,
+without changing emails or groups. Repeat with a foreign raw contact linked to
+the owned Contako source, selecting that source explicitly when the editor asks.
+Then edit the owned surname through another available native editor. Both edits
+MUST reach Contako and Proton without repair; all four per-email group edges
+MUST survive ingestion, remote reconciliation and a subsequent no-change pass.
+A number retained by the foreign source MAY remain visible in the aggregate;
+it MUST NOT reappear in the owned Contako source or Proton. Compare each source
+independently and retain any failing pending state for diagnosis.
+
+Repeat with the same email address in two differently labelled rows, each with
+two group assignments: equal groups on both rows, then overlapping but different
+groups. Include repeated phone, postal address and URL values with different
+labels and accented names. Test both one shared Proton email identity and two
+distinct ordered identities, including different assignments per occurrence.
+Delete a postal address and add a phone in the native editor without touching
+emails. Both email rows, labels and their assignments MUST survive hydration,
+contact acknowledgement, group upload and a subsequent no-change pass.
+Ambiguous service multiplicity or order MUST remain blocked rather than guessing
+which email occurrence owns a group. Include a repair retry of already blocked
+assignments and compare each occurrence independently on Proton.
+For an older assignment conflict caused by a missing identity on a repeated row,
+ordinary sync MUST refresh only the affected unchanged card, preserve pending
+occurrence-level memberships and reconcile before retrying the assignment.
+Permission denials, contact conflicts, deleted groups and stale revisions MUST
+remain blocked. A subsequent no-change pass MUST NOT repeat the repair hydration.
+
+RepeatedEmailNativeJourneyDeviceTest provides an opt-in retained two-contact,
+three-group fixture and independently compares Room, fresh verified Proton cards,
+remote group members and source-owned Android rows. Its provider mutations use
+ordinary native DIRTY handling. They qualify the provider boundary, not touch/IME
+behavior in a specific contact editor; repeat the editor journey separately.
+Preparation requires an existing authorized clean session, without account
+creation or repair. Link its second contact to an authorized foreign source for
+the source-isolation variant and retain the exact private fixture journal.
+The fixture uses repeated URLs without labels to isolate email-group behavior.
+Run URL-label preservation separately: create labelled URLs, then perform a
+remote adoption and a no-change pass. Compare local and owned Android labels
+against the original intent even though Proton omits unsupported URL types.
+A successful status MUST NOT hide lost labels; see [known limitations](KNOWN_LIMITATIONS.md).
 
 Extend FT-14/FT-17 with the rich and imported fixtures, comparing changed and
 untouched values independently on each peer:

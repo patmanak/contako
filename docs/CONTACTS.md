@@ -46,6 +46,12 @@ proofs. An individually oversized contact MUST remain an explicit failure.
 
 ## Field contracts
 
+Android's photo `IS_SUPER_PRIMARY` flag selects the aggregate display photo across
+accounts. It MUST NOT create a Proton mutation or block delivery of the owned
+photo solely because it differs from the canonical preference. Existing aggregate
+photo preference MUST be preserved on compatible payload updates. Provider row
+ownership, version guards and exact photo write/readback receipts remain required.
+
 Valid Unicode text, including a literal replacement character U+FFFD, MUST be
 preserved during import and compatible edits. Contako MUST NOT guess or restore
 the character that may have preceded an earlier lossy conversion. Malformed
@@ -62,6 +68,12 @@ Compatible edits MUST preserve the association between imported clear-card
 When email order changes, both prefixes MUST be remapped together. This does not
 prove arbitrary standalone CATEGORY persistence or resolve the broader D-124
 compatibility gap; it preserves an observed imported association.
+
+Repeated email rows MUST retain their labels, order and per-occurrence Proton
+identities during hydration and write acknowledgement. A unique service identity
+for an address MAY bind several preserved local rows. Multiple identities MUST
+be matched by occurrence order only when multiplicities and orders are
+unambiguous; otherwise group upload MUST remain blocked without guessing.
 
 Every field family MUST define:
 

@@ -149,10 +149,11 @@ internal class RoomBackedMutationPreparationGateway(
         if (database.outboxDao().hasPendingContactWrite(group.accountId)) {
             return GatewayOutcome.Success(MutationPreparation.WaitingForDependencies)
         }
-        val desired = desiredEmailIds(group.accountId, group.id)
+        var missingIdentityReason = MutationPreparationActionRequiredReason.GROUP_MEMBER_REMOTE_EMAIL_IDENTITY_MISSING
+        val desired = desiredEmailIds(group.accountId, group.id) { missingIdentityReason = it }
             ?: return GatewayOutcome.Success(
                 MutationPreparation.ActionRequired(
-                    MutationPreparationActionRequiredReason.GROUP_MEMBER_REMOTE_EMAIL_IDENTITY_MISSING,
+                    missingIdentityReason,
                 ),
             )
         // The upload step reads current membership; its reconciled gateway also verifies
@@ -178,13 +179,28 @@ internal class RoomBackedMutationPreparationGateway(
         }
     }
 
-    internal suspend fun desiredEmailIds(accountId: String, groupId: String): List<RemoteEmailId>? {
+    internal suspend fun desiredEmailIds(
+        accountId: String,
+        groupId: String,
+        onMissing: (MutationPreparationActionRequiredReason) -> Unit = {},
+    ): List<RemoteEmailId>? {
         val group = database.contactGroupDao().get(accountId, groupId) ?: return null
         return group.memberships.map { membership ->
             val value = database.contactDao().getValue(accountId, membership.contactId, membership.emailValueId)
-                ?: return null
+                ?: run {
+                    onMissing(MutationPreparationActionRequiredReason.GROUP_MEMBER_LOCAL_EMAIL_MISSING)
+                    return null
+                }
             val remoteId = StringMapCodec.decode(value.metadataEncoding)["protonEmailId"]
-                ?.takeIf(String::isNotBlank) ?: return null
+                ?.takeIf(String::isNotBlank) ?: run {
+                    val repeated = database.contactDao().get(accountId, membership.contactId)?.values.orEmpty().any {
+                        it.kind == "EMAIL" && it.id != value.id &&
+                            it.value.trim().equals(value.value.trim(), ignoreCase = true)
+                    }
+                    onMissing(if (repeated) MutationPreparationActionRequiredReason.GROUP_MEMBER_DUPLICATE_EMAIL_IDENTITY_MISSING
+                        else MutationPreparationActionRequiredReason.GROUP_MEMBER_REMOTE_EMAIL_IDENTITY_MISSING)
+                    return null
+                }
             RemoteEmailId(remoteId)
         }.distinct()
     }

@@ -304,6 +304,46 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         assertEquals(1, database.outboxDao().getAll(ACCOUNT.value).size)
     }
 
+    @Test
+    fun blockedDuplicateAssignmentsRefreshOnlyAffectedCardAndRetainPendingIntent() = runBlocking {
+        val kind = com.patmanak.contako.domain.model.ContactValueKind.EMAIL
+        val old = listOf(
+            com.patmanak.contako.domain.model.ContactValue("home-old", kind, "fixture@example.test", label = "HOME", order = 0),
+            com.patmanak.contako.domain.model.ContactValue("work-old", kind, "fixture@example.test", label = "WORK", order = 1),
+        )
+        val original = remote.single()
+        remote = listOf(original.copy(card = original.card.copy(contact = original.card.contact.copy(values = old))))
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        repository.saveGroup(com.patmanak.contako.domain.model.ContactGroup(
+            ACCOUNT.value, "duplicate-group", "Duplicate", "#6D4AFF", remoteLabelId = "remote-group",
+            memberships = old.map { com.patmanak.contako.domain.model.GroupMembership("remote", it.id) },
+        ))
+        val queued = database.outboxDao().getAll(ACCOUNT.value).single()
+        database.outboxDao().upsert(queued.copy(operation = "ASSIGNMENTS", state = "ACTION_REQUIRED",
+            errorCategory = "CONFLICT", blockedReason = "CONFLICT_RECOVERY_REQUIRED"))
+        // Hydration precedes outbox drain: an unrelated pending contact must not strand recovery.
+        val other = save(CanonicalContact(ACCOUNT.value, "other-local", displayName = "Other fixture"))
+        val repaired = old.mapIndexed { index, value -> value.copy(id = "new-${value.id}",
+            metadata = mapOf(com.patmanak.contako.data.proton.PROTON_EMAIL_ID_KEY to "service-$index")) }
+        // Same inventory version: only the durable missing-identity obligation forces a read.
+        remote = listOf(original.copy(card = original.card.copy(contact = original.card.contact.copy(values = repaired))))
+        val before = hydrationCount
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertEquals(before + 1, hydrationCount)
+        val pending = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "duplicate-group"))
+        assertEquals("PENDING", pending.state)
+        assertNull(pending.blockedReason)
+        assertTrue(pending.requiresReconciliation)
+        val group = requireNotNull(database.contactGroupDao().get(ACCOUNT.value, "duplicate-group"))
+        assertEquals(repaired.map { it.id }.toSet(), group.memberships.map { it.emailValueId }.toSet())
+        assertTrue(group.group.pendingMutationRevision != null)
+        val otherIntent = requireNotNull(database.outboxDao().get(ACCOUNT.value, "CONTACT", other.id))
+        database.outboxDao().upsert(otherIntent.copy(state = "ACKNOWLEDGED"))
+        database.outboxDao().deleteAcknowledged(ACCOUNT.value, "CONTACT", other.id, otherIntent.revision)
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertEquals(before + 1, hydrationCount)
+    }
+
     private fun stage(): IncrementalRemoteContactStage {
         val inventoryGateway = ProtonContactInventoryGateway { _, cursor ->
             check(cursor == null)

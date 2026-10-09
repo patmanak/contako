@@ -12,6 +12,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CanonicalAndroidContactMapperTest {
+    @Test fun `aggregate photo preference is not a canonical edit or projection obligation`() {
+        val canonical = contact(values = listOf(value("photo", ContactValueKind.PHOTO, binaryReference = "owned-photo")))
+        val baseline = mapper.project(canonical).withProviderIds()
+        val selected = baseline.copy(rows = baseline.rows.map {
+            if (it.kind == AndroidRowKind.PHOTO) it.copy(isSuperPrimary = true) else it
+        })
+        // Durable baselines keep the actual flag and their existing fingerprint format.
+        assertNotEquals(mapper.fingerprint(baseline), mapper.fingerprint(selected))
+        assertEquals(mapper.fingerprint(mapper.projectionComparisonSnapshot(baseline)),
+            mapper.fingerprint(mapper.projectionComparisonSnapshot(selected)))
+        assertTrue(mapper.planProjection(selected, canonical).operations.isEmpty())
+        assertTrue(mapper.applyControlledDelta(canonical, baseline, selected).changedValueIds.isEmpty())
+        val changed = selected.copy(rows = selected.rows.map {
+            if (it.kind == AndroidRowKind.PHOTO) it.copy(binaryReference = "replacement-photo") else it
+        })
+        assertNotEquals(mapper.fingerprint(selected), mapper.fingerprint(changed))
+        val update = mapper.planProjection(changed, canonical).operations.filterIsInstance<AndroidRowOperation.Update>().single()
+        assertTrue(update.desired.isSuperPrimary)
+        assertEquals("owned-photo", update.desired.binaryReference)
+    }
+
     @Test
     fun `generated name decomposition converges but native edits remain observable`() {
         val canonical = contact(values = listOf(value("email", ContactValueKind.EMAIL, "owned@example.test")))

@@ -66,6 +66,22 @@ native intent, stale account/epoch/revision, occupied destination, a still-prese
 old row and forged primary/phonetic claims MUST NOT be accepted as benign
 relocation. Photo recovery requires its own journal and actual byte proof.
 
+SW-07 also covers atomic membership initialization and exact legacy seed recovery
+with AndroidMembershipInitializationSeedTest and
+RoomAndroidMembershipBaselineInitializerDeviceTest. Inject a baseline insertion
+failure: neither half of a new pair may persist. Preserve completed or unmatched
+states, reject stale account/contact context and verify the final projection
+receipt separately from the initial marker. Photo aggregate preference comparison
+MUST retain the actual raw snapshot fingerprint when completing a write.
+
+SW-03/13 also cover repeated identical email occurrences with equal or different
+group assignments. Fresh identity repair MUST reopen a proved assignment intent
+even while an unrelated contact upload is pending; preparation still waits for
+its dependencies. Removing one of two occurrences MUST NOT transfer its pending
+assignments to the survivor without identity proof. Verify unchanged-inventory
+retry after the other upload completes with RepeatedEmailRecoveryTest and
+RoomRemoteCanonicalReconciliationStoreDeviceTest.
+
 Cryptographic layout, provider RCS, aggregation, lost responses and process death
 are scenario state: importing a .vcf alone cannot establish them. The dataset
 catalog links those profiles to controlled setup and the live cases.

@@ -2,6 +2,19 @@
 
 Features and improvements by version.
 
+## 0.10.1
+
+- Preserve separate occurrences of identical email addresses and their individual
+  Proton group assignments during Android edits and remote reconciliation.
+- Recover eligible blocked group assignments from older repeated-email mappings
+  without downloading every full contact during ordinary unchanged synchronization.
+- Initialize Android group-membership baselines atomically and recover verified
+  interrupted initialization while retaining ownership and write-receipt guards.
+- Ignore aggregate photo-selection metadata when checking a source-owned Android
+  photo, while retaining verification of the actual photo and guarded write receipt.
+- Extend regression coverage for rich contacts, repeated fields, distinct and shared
+  email groups, sequential native edits and linked contacts from another account.
+
 ## 0.10.0-RC1
 
 - Record the actual Android photo representation after a guarded synchronous

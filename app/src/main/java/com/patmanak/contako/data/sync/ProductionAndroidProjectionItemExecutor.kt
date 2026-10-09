@@ -54,11 +54,8 @@ import com.patmanak.contako.data.android.provider.RoomAndroidProviderIdentityRes
 import com.patmanak.contako.data.android.provider.RoomAndroidPhotoProviderWriteCoordinator
 import com.patmanak.contako.data.android.AndroidIngestionState
 import com.patmanak.contako.data.android.mapping.AndroidGroupMembershipAvailability
-import com.patmanak.contako.data.local.AndroidGroupMembershipBaselineEntity
-import com.patmanak.contako.data.local.AndroidGroupMembershipProjectionLedgerEntity
 import com.patmanak.contako.data.local.AggregateType
 import com.patmanak.contako.domain.model.CanonicalContact
-import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import com.patmanak.contako.data.local.AndroidProjectionLedgerEntity
 import com.patmanak.contako.data.local.AndroidProviderAccountMutationLocks
 import com.patmanak.contako.data.local.ContakoDatabase
@@ -112,63 +109,6 @@ internal class ProductionAndroidProjectionItemExecutor(
         } catch (_: IllegalStateException) {
             repair(AndroidProjectionRepairCategory.INVARIANT_VIOLATION)
         }
-    }
-
-    /**
-     * Seeds the empty membership ledger and baseline for a contact adopted from Proton.
-     *
-     * Both were created only by the Android-ingestion path, so a Proton-adopted contact reached the
-     * membership checks with nothing durable and stayed repair-required forever. The seed states
-     * "no Android group membership observed yet"; the write planner reconciles it against the
-     * desired canonical membership. Idempotent, and never overwrites existing state.
-     */
-    private suspend fun ensureMembershipLedger(
-        context: AndroidInteroperabilityContext,
-        canonicalContactId: String,
-        rawContactLocator: Long,
-        canonical: CanonicalContact,
-    ) {
-        val groupDao = database.androidGroupProjectionDao()
-        if (groupDao.getMembership(context.account.value, canonicalContactId) != null) return
-
-        val preferredEmailValueId = CanonicalPrimaryValuePolicy.preferredEmail(canonical)?.id
-        val emptyBaseline = AndroidGroupMembershipSnapshot.create(
-            accountId = context.account.value,
-            canonicalContactId = canonicalContactId,
-            preferredEmailValueId = preferredEmailValueId,
-            membershipAvailability = if (preferredEmailValueId == null) {
-                AndroidGroupMembershipAvailability.NO_EMAIL
-            } else {
-                AndroidGroupMembershipAvailability.AVAILABLE
-            },
-            locatorMappings = emptyList(),
-        )
-        val encoded = AndroidGroupMembershipSnapshotBinaryCodec.encode(emptyBaseline)
-
-        groupDao.insertMembership(
-            AndroidGroupMembershipProjectionLedgerEntity(
-                accountId = context.account.value,
-                canonicalContactId = canonicalContactId,
-                revision = 0,
-                providerEpoch = context.providerEpoch,
-                rawContactLocator = rawContactLocator,
-                preferredEmailValueId = preferredEmailValueId,
-                canonicalProjectionFingerprint = null,
-                androidBaselineFingerprint = emptyBaseline.semanticFingerprint().sha256Hex,
-                pendingProjectionFingerprint = null,
-                projectionState = AndroidProjectionWriteState.CLEAN.name,
-                ingestionState = AndroidIngestionState.NONE.name,
-            ),
-        )
-        groupDao.upsertMembershipBaseline(
-            AndroidGroupMembershipBaselineEntity(
-                accountId = context.account.value,
-                canonicalContactId = canonicalContactId,
-                fingerprint = AndroidGroupMembershipSnapshotBinaryCodec
-                    .integrityFingerprint(encoded).sha256Hex,
-                encodedSnapshot = encoded,
-            ),
-        )
     }
 
     private suspend fun projectLocked(
@@ -248,11 +188,6 @@ internal class ProductionAndroidProjectionItemExecutor(
         }
         val rawContactId = ledger.rawContactLocator
             ?: return repair(AndroidProjectionRepairCategory.RAW_CONTACT_ADOPTION)
-        // A contact adopted from Proton has no membership ledger yet: only the Android-ingestion
-        // path created one. Both it and its baseline are required further down, and
-        // RoomAndroidProjectionWriteLedger.prepare requires the ledger too, so a Proton-adopted
-        // contact could never be projected. Seed the empty starting state here.
-        ensureMembershipLedger(context, ledger.canonicalContactId, rawContactId, canonical)
         val currentObservation = try {
             readExact(accountName, rawContactId)
         } catch (_: IllegalArgumentException) {
@@ -295,9 +230,24 @@ internal class ProductionAndroidProjectionItemExecutor(
             return repair(AndroidProjectionRepairCategory.CONTACT_PLANNING)
         }
 
+        // Initialize only after the clean owned observation, and revalidate durable context in
+        // the transaction. This also finishes an exact legacy initial marker left by interruption.
+        if (!RoomAndroidMembershipBaselineInitializer(database).ensure(context, ledger, canonical)) {
+            return replan(AndroidProjectionReplanCategory.LEDGER_CONTEXT)
+        }
+
         val membershipBaselineEntity = database.androidGroupProjectionDao().getMembershipBaseline(
             context.account.value, ledger.canonicalContactId,
-        ) ?: return repair(AndroidProjectionRepairCategory.MEMBERSHIP_BASELINE_MISSING)
+        ) ?: run {
+            val missing = database.androidGroupProjectionDao().getMembership(context.account.value, ledger.canonicalContactId)
+            return repair(when {
+                missing == null -> AndroidProjectionRepairCategory.MEMBERSHIP_LEDGER_MISSING
+                missing.projectionState == AndroidProjectionWriteState.DETACHED.name ->
+                    AndroidProjectionRepairCategory.MEMBERSHIP_BASELINE_MISSING_DETACHED
+                missing.revision == 0L -> AndroidProjectionRepairCategory.MEMBERSHIP_BASELINE_MISSING_INITIAL
+                else -> AndroidProjectionRepairCategory.MEMBERSHIP_BASELINE_MISSING
+            })
+        }
         if (AndroidGroupMembershipSnapshotBinaryCodec.integrityFingerprint(
                 membershipBaselineEntity.encodedSnapshot,
             ).sha256Hex != membershipBaselineEntity.fingerprint
@@ -309,7 +259,7 @@ internal class ProductionAndroidProjectionItemExecutor(
         }
         val membershipLedger = database.androidGroupProjectionDao().getMembership(
             context.account.value, ledger.canonicalContactId,
-        ) ?: return repair(AndroidProjectionRepairCategory.MEMBERSHIP_BASELINE_MISSING)
+        ) ?: return repair(AndroidProjectionRepairCategory.MEMBERSHIP_LEDGER_MISSING)
         if (membershipBaseline.semanticFingerprint().sha256Hex != membershipLedger.androidBaselineFingerprint) {
             return repair(AndroidProjectionRepairCategory.MEMBERSHIP_LEDGER_FINGERPRINT)
         }
@@ -544,7 +494,7 @@ internal class ProductionAndroidProjectionItemExecutor(
             return repair(AndroidProjectionRepairCategory.POST_WRITE_CONTACT_DECODING)
         } ?: return repair(AndroidProjectionRepairCategory.POST_WRITE_CONTACT_VERIFICATION)
         val postFingerprint = try {
-            mapper.fingerprint(mapper.normalizeGeneratedName(postContact, contactPlan.desired))
+            mapper.fingerprint(mapper.projectionComparisonSnapshot(mapper.normalizeGeneratedName(postContact, contactPlan.desired)))
         } catch (_: IllegalArgumentException) {
             return repair(AndroidProjectionRepairCategory.POST_WRITE_FINGERPRINT)
         }
@@ -876,6 +826,12 @@ private fun AndroidPhotoProviderStaleCategory.toProjectionReplanCategory(): Andr
             AndroidProjectionReplanCategory.PHOTO_PRE_WRITE_VERSION
         AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_UPDATE ->
             AndroidProjectionReplanCategory.PHOTO_PRE_WRITE_UPDATE
+        AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_IDENTITY ->
+            AndroidProjectionReplanCategory.PHOTO_PRE_WRITE_IDENTITY
+        AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_ORDER ->
+            AndroidProjectionReplanCategory.PHOTO_PRE_WRITE_ORDER
+        AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_PRIMARY ->
+            AndroidProjectionReplanCategory.PHOTO_PRE_WRITE_PRIMARY
         AndroidPhotoProviderStaleCategory.PRE_WRITE_INLINE_BLOB ->
             AndroidProjectionReplanCategory.PHOTO_PRE_WRITE_INLINE_BLOB
         AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_PAYLOAD ->

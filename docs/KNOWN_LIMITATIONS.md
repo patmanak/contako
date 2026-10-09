@@ -19,6 +19,7 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
 | Missing owned Android copy | Normal sync checks metadata before skipping a stored clean copy. A missing or rebound source delegates to guarded retry/repair; it does not authorize blind recreation, rebinding or adoption of a linked foreign contact. |
 | Yearless birthday edited on Web | An unrelated Proton Web save has removed a yearless date. Contako MUST NOT invent a year or silently restore a remote omission. |
 | Custom dates and unsupported field types | Some values remain local/Android-only with an explicit indicator. Android exposes only representable fields and selected primary occurrences; see [mapping](CONTACTS.md). |
+| Labels on newly created URLs | Proton serialization omits unsupported URL types. A later remote adoption can currently remove URL labels retained locally, even when synchronization reports success. URL values and labels MUST be checked separately; successful email-group synchronization does not qualify URL-label preservation. |
 
 ## Interface and runtime
 

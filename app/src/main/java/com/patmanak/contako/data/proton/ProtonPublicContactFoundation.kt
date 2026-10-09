@@ -336,13 +336,8 @@ internal class ProtonPublicContactGateway(
 
     /** A contact write can replace email identities even when its email text is unchanged. */
     private fun emailIdentityReceipt(contact: com.patmanak.contako.domain.model.CanonicalContact, remote: Contact): Map<String, String> =
-        contact.valuesOf(com.patmanak.contako.domain.model.ContactValueKind.EMAIL)
-            .distinctBy { it.value.trim().lowercase(java.util.Locale.ROOT) }
-            .mapNotNull { value ->
-                remote.contactEmails.singleOrNull {
-                    it.email.trim().equals(value.value.trim(), ignoreCase = true)
-                }?.let { value.id to it.id.id }
-            }.toMap()
+        protonEmailOccurrences(contact.valuesOf(com.patmanak.contako.domain.model.ContactValueKind.EMAIL),
+            remote.contactEmails).mapValues { (_, email) -> email.id.id }
 
     private fun requireUploadable(
         account: AccountScope,

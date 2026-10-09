@@ -30,6 +30,9 @@ internal enum class AndroidPhotoProviderStaleCategory {
     PRE_WRITE_OBSERVATION,
     PRE_WRITE_VERSION,
     PRE_WRITE_PHOTO_UPDATE,
+    PRE_WRITE_PHOTO_IDENTITY,
+    PRE_WRITE_PHOTO_ORDER,
+    PRE_WRITE_PHOTO_PRIMARY,
     PRE_WRITE_INLINE_BLOB,
     PRE_WRITE_PHOTO_PAYLOAD,
     POST_STREAM_OBSERVATION,
@@ -129,10 +132,15 @@ internal class RoomAndroidPhotoProviderWriteCoordinator(
         }
         val row = before.dataRows.singleOrNull { it.isStandardPhoto }
             ?: return stale(AndroidPhotoProviderStaleCategory.POST_STREAM_PHOTO_ROW)
-        if (row.canonicalValueId != photo.identity.canonicalValueId || row.canonicalOrder != photo.order ||
-            row.isPrimary != photo.isPrimary || row.isSuperPrimary != photo.isSuperPrimary) {
-            return stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_UPDATE)
-        }
+        if (row.canonicalValueId != photo.identity.canonicalValueId)
+            return stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_IDENTITY)
+        if (row.canonicalOrder != photo.order)
+            return stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_ORDER)
+        if (row.isPrimary != photo.isPrimary)
+            return stale(AndroidPhotoProviderStaleCategory.PRE_WRITE_PHOTO_PRIMARY)
+        // IS_SUPER_PRIMARY belongs to the aggregate contact across accounts. It is not
+        // proof of payload delivery; identity, order, primary, version and byte receipt
+        // guards still apply to this owned PHOTO row.
         val previous = database.androidGroupProjectionDao().getPhotoProjectionReceipt(
             context.account.value, canonicalContactId)
         if (previous != null && previous.binaryReference == reference &&

@@ -792,6 +792,69 @@ class ContactCryptoFoundationTest {
 }
 
 class ProtonDeleteBaselineTest {
+    @Test fun `hydration binds repeated email rows without losing labels or group identities`() {
+        val plain = ProtonPlainContactCard(ContactCardType.Signed,
+            "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:fixture\r\nFN:Fixture\r\n" +
+                "EMAIL;TYPE=HOME:contact-0@example.test\r\nEMAIL;TYPE=WORK:contact-0@example.test\r\nEND:VCARD\r\n")
+        val decoded = ProtonContactVCardCodec().decode(ACCOUNT.value, contact(0), listOf(plain))
+        val emails = decoded.valuesOf(ContactValueKind.EMAIL)
+        assertEquals(2, emails.size)
+        assertEquals(setOf("HOME", "WORK"), emails.map { it.label }.toSet())
+        assertEquals(2, emails.map { it.id }.distinct().size)
+        assertTrue(emails.all { it.metadata[PROTON_EMAIL_ID_KEY] == "email-0" })
+        assertTrue(emails.all { it.metadata[PROTON_GROUP_IDS_KEY] == "group-0" })
+
+        val ambiguous = contact(0).let { it.copy(contactEmails = it.contactEmails +
+            it.contactEmails.single().copy(id = ContactEmailId("different-identity"))) }
+        val unbound = ProtonContactVCardCodec().decode(ACCOUNT.value, ambiguous, listOf(plain))
+        assertTrue(unbound.valuesOf(ContactValueKind.EMAIL).all { it.metadata[PROTON_EMAIL_ID_KEY] == null })
+
+        val ordered = contact(0).let { it.copy(contactEmails = listOf(
+            it.contactEmails.single().copy(id = ContactEmailId("work-identity"), order = 1, labelIds = listOf("work-group")),
+            it.contactEmails.single().copy(id = ContactEmailId("home-identity"), order = 0, labelIds = listOf("home-group")),
+        )) }
+        val repeated = ProtonContactVCardCodec().decode(ACCOUNT.value, ordered, listOf(plain)).valuesOf(ContactValueKind.EMAIL)
+        assertEquals("home-identity", repeated[0].metadata[PROTON_EMAIL_ID_KEY])
+        assertEquals("home-group", repeated[0].metadata[PROTON_GROUP_IDS_KEY])
+        assertEquals("work-identity", repeated[1].metadata[PROTON_EMAIL_ID_KEY])
+        assertEquals("work-group", repeated[1].metadata[PROTON_GROUP_IDS_KEY])
+
+        val unequal = ordered.copy(contactEmails = ordered.contactEmails +
+            ordered.contactEmails.first().copy(id = ContactEmailId("third-identity"), order = 2))
+        assertTrue(ProtonContactVCardCodec().decode(ACCOUNT.value, unequal, listOf(plain))
+            .valuesOf(ContactValueKind.EMAIL).all { it.metadata[PROTON_EMAIL_ID_KEY] == null })
+
+        val withoutEmails = plain.copy(vCard = "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:fixture\r\nFN:Fixture\r\nEND:VCARD\r\n")
+        val publicOnly = ProtonContactVCardCodec().decode(ACCOUNT.value, ordered, listOf(withoutEmails))
+            .valuesOf(ContactValueKind.EMAIL)
+        assertEquals(2, publicOnly.size)
+        assertEquals(setOf("home-identity", "work-identity"), publicOnly.map { it.metadata[PROTON_EMAIL_ID_KEY] }.toSet())
+        assertEquals(setOf("home-group", "work-group"), publicOnly.map { it.metadata[PROTON_GROUP_IDS_KEY] }.toSet())
+    }
+
+    @Test fun `confirmed write binds every repeated canonical email to the unique service identity`() = runTest {
+        val remote = FakeContactRemote(listOf(contact(0)))
+        val gateway = ProtonPublicContactGateway(ACCOUNT, ProtonReadyUserProvider { USER_ID }, remote,
+            PublicCreateParserFakeCrypto())
+        val desired = CanonicalContact(accountId = ACCOUNT.value, id = "local", remoteContactId = "contact-0",
+            displayName = "Fixture", values = listOf(
+                ContactValue("home-email", ContactValueKind.EMAIL, "contact-0@example.test", order = 0, label = "HOME"),
+                ContactValue("work-email", ContactValueKind.EMAIL, "contact-0@example.test", order = 1, label = "WORK"),
+            ))
+        val result = gateway.apply(ACCOUNT, ContactMutation.Update(RemoteContactId("contact-0"), null, desired))
+        val receipt = (result as GatewayOutcome.Success).value
+        assertEquals(mapOf("home-email" to "email-0", "work-email" to "email-0"), receipt.emailIdsByValueId)
+        assertEquals(1, remote.updateCalls)
+
+        remote.updateResult = contact(0).let { it.copy(contactEmails = listOf(
+            it.contactEmails.single().copy(id = ContactEmailId("second-email"), order = 1),
+            it.contactEmails.single().copy(id = ContactEmailId("first-email"), order = 0),
+        )) }
+        val ordered = gateway.apply(ACCOUNT, ContactMutation.Update(RemoteContactId("contact-0"), null, desired))
+        assertEquals(mapOf("home-email" to "first-email", "work-email" to "second-email"),
+            (ordered as GatewayOutcome.Success).value.emailIdsByValueId)
+    }
+
     @Test fun `uncertain private readback retains retryable intent without replaying a write`() = runTest {
         val remote = FakeContactRemote(listOf(contact(0)))
         val delegate = FakeCardCrypto()

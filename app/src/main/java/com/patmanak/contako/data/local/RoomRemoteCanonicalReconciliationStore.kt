@@ -8,6 +8,8 @@ import com.patmanak.contako.data.proton.ContactInventoryPlan
 import com.patmanak.contako.data.proton.PROTON_GROUP_IDS_KEY
 import com.patmanak.contako.data.sync.CanonicalReconciliationReceipt
 import com.patmanak.contako.data.sync.RemoteCanonicalReconciliationStore
+import com.patmanak.contako.data.sync.LocalReconciliationInvariant
+import com.patmanak.contako.data.sync.checkLocalReconciliationInvariant
 import com.patmanak.contako.data.android.AndroidAdoptionState
 import com.patmanak.contako.data.android.AndroidProjectionWriteState
 import com.patmanak.contako.data.android.AndroidTombstoneState
@@ -20,6 +22,28 @@ import com.patmanak.contako.domain.model.GroupMembership
 internal class RoomRemoteCanonicalReconciliationStore(
     private val database: ContakoDatabase,
 ) : RemoteCanonicalReconciliationStore {
+    override suspend fun identityRepairContacts(account: AccountScope): Set<RemoteContactId> = database.withTransaction {
+        val result = mutableSetOf<RemoteContactId>()
+        recoveryGroups(account.value).forEach { group ->
+            group.memberships.forEach edgeLoop@ { edge ->
+                val stored = database.contactDao().get(account.value, edge.contactId) ?: return@edgeLoop
+                if (stored.contact.isDeleted || stored.contact.pendingMutationRevision != null) return@edgeLoop
+                val emails = stored.toDomain().valuesOf(ContactValueKind.EMAIL)
+                val value = emails.singleOrNull { it.id == edge.emailValueId } ?: return@edgeLoop
+                if (value.metadata[com.patmanak.contako.data.proton.PROTON_EMAIL_ID_KEY].isNullOrBlank() &&
+                    emails.count { it.value.trim().equals(value.value.trim(), ignoreCase = true) } > 1) {
+                    stored.contact.remoteContactId?.let { result += RemoteContactId(it) }
+                }
+            }
+        }
+        result
+    }
+
+    private suspend fun recoveryGroups(accountId: String) = database.contactGroupDao().getAll(accountId).filter { stored ->
+        !stored.group.isDeleted && database.outboxDao().get(accountId, AggregateType.GROUP.name, stored.group.id)
+            ?.isRepeatedEmailRecoveryCandidate(stored.group.revision, stored.group.pendingMutationRevision) == true
+    }
+
     override suspend fun commit(
         account: AccountScope,
         plan: ContactInventoryPlan,
@@ -89,11 +113,14 @@ internal class RoomRemoteCanonicalReconciliationStore(
             adoptRemote(local, remote, verified, remoteModifiedAtEpochSeconds)
             return
         }
-        check(outbox != null && outbox.revision == local.pendingMutationRevision)
+        checkLocalReconciliationInvariant(outbox != null && outbox.revision == local.pendingMutationRevision,
+            LocalReconciliationInvariant.INTENT_REVISION)
+        checkNotNull(outbox)
         if (local.remoteContactId == null) {
             // Recover only the stable vCard UID of an ambiguous creation, never a name match.
-            check(remote.remoteVCardUid != null &&
-                (remote.remoteVCardUid == local.remoteVCardUid || remote.remoteVCardUid == local.id))
+            checkLocalReconciliationInvariant(remote.remoteVCardUid != null &&
+                (remote.remoteVCardUid == local.remoteVCardUid || remote.remoteVCardUid == local.id),
+                LocalReconciliationInvariant.CREATION_UID)
             RoomContactConflictStore(database).capture(local.copy(remoteContactId = verified.id.value),
                 outbox.copy(remoteIdentity = verified.id.value), verified)
             return
@@ -188,16 +215,15 @@ internal class RoomRemoteCanonicalReconciliationStore(
     internal suspend fun canAdoptRemote(contact: CanonicalContact): Boolean = pendingMembershipsFor(contact) != null
 
     private suspend fun pendingMembershipsFor(contact: CanonicalContact): List<GroupMembershipEntity>? {
-        val oldEmails = database.contactDao().get(contact.accountId, contact.id)?.values.orEmpty()
-            .filter { it.kind == ContactValueKind.EMAIL.name }.associateBy { it.id }
+        val oldEmails = database.contactDao().get(contact.accountId, contact.id)?.toDomain()
+            ?.valuesOf(ContactValueKind.EMAIL).orEmpty().associateBy { it.id }
         val newEmails = contact.valuesOf(ContactValueKind.EMAIL)
         return database.contactGroupDao().getAll(contact.accountId)
             .filter { it.group.pendingMutationRevision != null }
             .flatMap { stored -> stored.memberships.filter { it.contactId == contact.id } }
             .map { membership ->
                 val old = oldEmails[membership.emailValueId] ?: return null
-                val replacement = newEmails.singleOrNull { it.id == old.id && it.value == old.value }
-                    ?: newEmails.singleOrNull { it.value.trim().equals(old.value.trim(), ignoreCase = true) }
+                val replacement = repeatedEmailReplacement(old, oldEmails.values.toList(), newEmails)
                 if (replacement == null) return null
                 membership.copy(emailValueId = replacement.id)
             }
@@ -205,9 +231,24 @@ internal class RoomRemoteCanonicalReconciliationStore(
 
     private suspend fun replaceContact(contact: CanonicalContact) {
         val dao = database.contactDao()
+        // Only freshly proved repair of a missing identity on a repeated row can reopen
+        // this legacy preparation failure. Never clear unrelated conflicts or denials.
+        val oldEmails = dao.get(contact.accountId, contact.id)?.toDomain()?.valuesOf(ContactValueKind.EMAIL).orEmpty()
+        val repairedOccurrences = oldEmails.filter { old ->
+            old.metadata[com.patmanak.contako.data.proton.PROTON_EMAIL_ID_KEY].isNullOrBlank() &&
+                oldEmails.count { it.value.trim().equals(old.value.trim(), ignoreCase = true) } > 1 &&
+                !repeatedEmailReplacement(old, oldEmails, contact.valuesOf(ContactValueKind.EMAIL))
+                    ?.metadata?.get(com.patmanak.contako.data.proton.PROTON_EMAIL_ID_KEY).isNullOrBlank()
+        }.map { it.id }.toSet()
+        val repairedGroups = recoveryGroups(contact.accountId).filter { group ->
+            group.memberships.any { it.contactId == contact.id && it.emailValueId in repairedOccurrences }
+        }.map { it.group.id }
         // An acknowledged contact write may need a fresh card while independent group intent
         // is still pending. Preserve those assignments across value-ID replacement/FK cleanup.
-        val pendingMemberships = checkNotNull(pendingMembershipsFor(contact)) { "PENDING_GROUP_EMAIL_RECONCILIATION_REQUIRED" }
+        val pendingMemberships = pendingMembershipsFor(contact)
+        checkLocalReconciliationInvariant(pendingMemberships != null,
+            LocalReconciliationInvariant.PENDING_GROUP_EMAIL_REMAP)
+        checkNotNull(pendingMemberships)
         dao.upsert(contact.toEntity())
         dao.upsertValues(contact.values.map { it.toEntity(contact) })
         val retained = contact.values.map { it.id }
@@ -218,6 +259,21 @@ internal class RoomRemoteCanonicalReconciliationStore(
         }
         reconcileGroupMemberships(contact)
         database.contactGroupDao().insertMemberships(pendingMemberships)
+        repairedGroups.forEach { id ->
+            val group = database.contactGroupDao().get(contact.accountId, id) ?: return@forEach
+            val intent = database.outboxDao().get(contact.accountId, AggregateType.GROUP.name, id) ?: return@forEach
+            if (!intent.isRepeatedEmailRecoveryCandidate(group.group.revision, group.group.pendingMutationRevision)) return@forEach
+            val complete = group.memberships.all { edge ->
+                val row = dao.getValue(contact.accountId, edge.contactId, edge.emailValueId)
+                row != null && !StringMapCodec.decode(row.metadataEncoding)[com.patmanak.contako.data.proton.PROTON_EMAIL_ID_KEY].isNullOrBlank()
+            }
+            // Preparation still waits for contact writes; retaining ACTION_REQUIRED here
+            // would strand the group after the repaired identities have been persisted.
+            if (complete) {
+                database.outboxDao().upsert(intent.copy(state = DurableMutationState.PENDING.name,
+                    blockedReason = null, errorCategory = null, requiresReconciliation = true, nextAttemptAtEpochMillis = 0))
+            }
+        }
         attachToAndroidProjection(contact)
     }
 
@@ -307,21 +363,21 @@ internal class RoomRemoteCanonicalReconciliationStore(
                 AndroidAdoptionState.SOURCE_ID_PENDING.name
             else -> return
         }
-        check(ledgerDao.update(current.copy(
+        checkLocalReconciliationInvariant(ledgerDao.update(current.copy(
             revision = Math.incrementExact(current.revision),
             sourceIdentity = sourceIdentity,
             pendingProjectionFingerprint = null,
             projectionState = AndroidProjectionWriteState.DETACHED.name,
             adoptionState = adoptionState,
-        )) == 1)
+        )) == 1, LocalReconciliationInvariant.CONTACT_PROJECTION_RECEIPT)
 
         val groupDao = database.androidGroupProjectionDao()
         groupDao.getMembership(contact.accountId, contact.id)?.let { membership ->
-            check(groupDao.updateMembership(membership.copy(
+            checkLocalReconciliationInvariant(groupDao.updateMembership(membership.copy(
                 revision = Math.incrementExact(membership.revision),
                 pendingProjectionFingerprint = null,
                 projectionState = AndroidProjectionWriteState.DETACHED.name,
-            )) == 1)
+            )) == 1, LocalReconciliationInvariant.MEMBERSHIP_PROJECTION_RECEIPT)
         }
     }
 
