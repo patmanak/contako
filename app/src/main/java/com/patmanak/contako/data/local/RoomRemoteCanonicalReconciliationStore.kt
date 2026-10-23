@@ -80,14 +80,20 @@ internal class RoomRemoteCanonicalReconciliationStore(
     ) {
         val dao = database.contactDao()
         val remote = verified.contact
+        // Proton IDs are authoritative. A vCard UID can be duplicated by imports;
+        // use it only to recover one explicitly ambiguous, unbound local creation.
         val stored = dao.getByRemoteContactId(account.value, verified.id.value)
-            ?: remote.remoteVCardUid?.let { dao.getByRemoteVCardUid(account.value, it) }
-            ?: remote.remoteVCardUid?.let { dao.get(account.value, it) }
-            ?: dao.get(account.value, remote.id)
+            ?: remote.remoteVCardUid?.let { uid ->
+                dao.getUnboundCreateCandidates(account.value, uid).singleOrNull()
+            }
         if (stored == null) {
             replaceContact(
                 remote.copy(
                     accountId = account.value,
+                    // A remote opaque ID can equal an unrelated local draft ID. Neither
+                    // that coincidence nor a shared UID authorizes replacing the draft.
+                    id = if (dao.get(account.value, remote.id) == null) remote.id
+                        else java.util.UUID.randomUUID().toString(),
                     revision = 1,
                     // No server time available: record observation time so the row is still ordered
                     // locally. It is never presented as server-attested evidence.
@@ -197,7 +203,7 @@ internal class RoomRemoteCanonicalReconciliationStore(
         modifiedAtEpochSeconds: Long?,
     ) {
         replaceContact(
-            remote.copy(
+            retainLocalContactComplements(local, remote).copy(
                 accountId = local.accountId,
                 id = local.id,
                 revision = local.revision + 1,

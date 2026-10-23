@@ -259,7 +259,7 @@ internal class RoomContactRepository(
             requested.remoteContactId == null && existing?.contact?.remoteContactId == null
         val now = clock()
         val nextRevision = (existing?.contact?.revision ?: 0L) + 1L
-        val committed = requested.copy(
+        val committed = markEditedLocalContactLabels(existing?.toDomain(), requested).copy(
             revision = nextRevision,
             updatedAtEpochMillis = now,
             actionRequiredReasons = ContactValidation.actionRequiredReasons(requested, requiresCreateValidation),

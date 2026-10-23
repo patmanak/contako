@@ -84,6 +84,45 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         assertEquals(1, hydrationCount)
     }
 
+    @Test fun remoteAdoptionAndProtonConflictChoiceRetainLocalOnlyDatesAndUrlLabels() = runBlocking {
+        val kind = com.patmanak.contako.domain.model.ContactValueKind.URL
+        val url = com.patmanak.contako.domain.model.ContactValue("remote-url-1", kind,
+            "https://example.test/profile", order = 0)
+        remote = remote.map { it.copy(card = it.card.copy(contact = it.card.contact.copy(values = listOf(url)))) }
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        val imported = requireNotNull(repository.getContact(ACCOUNT.value, "remote"))
+        val date = com.patmanak.contako.domain.model.ContactValue("custom-date",
+            com.patmanak.contako.domain.model.ContactValueKind.CUSTOM_DATE, "--10-23", "Événement", 0)
+        // Local complements have already been acknowledged; Proton cannot represent them.
+        database.contactDao().upsertValues(listOf(date, url.copy(label = "Profile",
+            metadata = mapOf("androidSemanticType" to "PROFILE"))).map { it.toEntity(imported) })
+        val changed = remoteFixture("remote", "Remote note changed", 2, 12_000, "stable-uid")
+        remote = listOf(changed.copy(card = changed.card.copy(contact = changed.card.contact.copy(
+            values = listOf(url.copy(id = "remote-url-2"))))))
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        var adopted = requireNotNull(repository.getContact(ACCOUNT.value, "remote"))
+        assertEquals(date, adopted.valuesOf(com.patmanak.contako.domain.model.ContactValueKind.CUSTOM_DATE).single())
+        assertEquals("Profile", adopted.valuesOf(kind).single().label)
+        assertEquals("remote-url-2", adopted.valuesOf(kind).single().id)
+        assertNull(adopted.pendingMutationRevision)
+
+        save(adopted.copy(displayName = "Concurrent local change"))
+        val newest = remoteFixture("remote", "Remote wins", 3, 13_000, "stable-uid")
+        remote = listOf(newest.copy(card = newest.card.copy(contact = newest.card.contact.copy(values = listOf(url)))))
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        val conflicts = RoomContactConflictStore(database)
+        val detail = requireNotNull(conflicts.detail(ACCOUNT.value, "remote"))
+        assertTrue(conflicts.choose(ACCOUNT.value, detail.summary, com.patmanak.contako.domain.sync.ContactConflictChoice.PROTON))
+        assertEquals(com.patmanak.contako.data.sync.MutationPreparation.ResolvedWithoutUpload,
+            conflicts.prepare(ACCOUNT.value, "remote", detail.summary.localRevision, remote.single().card))
+        adopted = requireNotNull(repository.getContact(ACCOUNT.value, "remote"))
+        assertEquals("Remote wins", adopted.displayName)
+        assertEquals(date, adopted.valuesOf(com.patmanak.contako.domain.model.ContactValueKind.CUSTOM_DATE).single())
+        assertEquals("Profile", adopted.valuesOf(kind).single().label)
+        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+        assertNull(conflicts.detail(ACCOUNT.value, "remote"))
+    }
+
     @Test
     fun remoteHydrationInvalidatesExistingContactAndMembershipProjectionIntents() = runBlocking {
         assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
@@ -254,6 +293,8 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         wallClock = 10_500_000
         elapsedClock = 501_000
         save(CanonicalContact(accountId = ACCOUNT.value, id = "local-uid", displayName = "Pending Create"))
+        val ambiguous = database.outboxDao().getAll(ACCOUNT.value).single()
+        database.outboxDao().upsert(ambiguous.copy(requiresReconciliation = true))
         remote = listOf(remoteFixture("remote-created", "Pending Create", 1, 12_000, "local-uid"))
 
         stage().run(ACCOUNT)
@@ -264,6 +305,65 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         assertNull(repository.getContact(ACCOUNT.value, "remote-created"))
         assertEquals("remote-created", database.outboxDao().getAll(ACCOUNT.value).single().remoteIdentity)
         assertTrue(RoomContactConflictStore(database).detail(ACCOUNT.value, "local-uid") != null)
+    }
+
+    @Test fun sharedUidDoesNotMergeDistinctRemoteIdsInEitherImportOrder() = runBlocking {
+        for (reverse in listOf(false, true)) {
+            val prefix = if (reverse) "reverse" else "forward"
+            val first = "$prefix-first"
+            val second = "$prefix-second"
+            val pair = listOf(remoteFixture(first, "First fixture", 1, 12_000, "shared-$prefix"),
+                remoteFixture(second, "Second fixture", 1, 12_000, "shared-$prefix"))
+            remote = remote + if (reverse) pair.reversed() else pair
+            assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+            assertEquals(first, repository.getContact(ACCOUNT.value, first)?.remoteContactId)
+            assertEquals(second, repository.getContact(ACCOUNT.value, second)?.remoteContactId)
+            assertEquals(first, database.androidProjectionLedgerDao().get(ACCOUNT.value, first)?.sourceIdentity)
+            assertEquals(second, database.androidProjectionLedgerDao().get(ACCOUNT.value, second)?.sourceIdentity)
+            val hydrated = hydrationCount
+            assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+            assertEquals(hydrated, hydrationCount)
+            save(requireNotNull(repository.getContact(ACCOUNT.value, first)).copy(displayName = "Edited first"))
+            assertEquals("Second fixture", repository.getContact(ACCOUNT.value, second)?.displayName)
+            assertNull(repository.getContact(ACCOUNT.value, second)?.pendingMutationRevision)
+            repository.deleteContact(ACCOUNT.value, first)
+            assertFalse(requireNotNull(repository.getContact(ACCOUNT.value, second)).isDeleted)
+        }
+    }
+
+    @Test fun uidMatchWithoutAmbiguousCreateDoesNotAdoptAnUnsentDraft() = runBlocking {
+        save(CanonicalContact(ACCOUNT.value, "not-sent", displayName = "Local draft"))
+        remote = listOf(remoteFixture("remote-imported", "Remote import", 1, 12_000, "not-sent"))
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertNull(repository.getContact(ACCOUNT.value, "not-sent")?.remoteContactId)
+        assertEquals("Local draft", repository.getContact(ACCOUNT.value, "not-sent")?.displayName)
+        assertEquals("remote-imported", repository.getContact(ACCOUNT.value, "remote-imported")?.remoteContactId)
+    }
+
+    @Test fun multipleAmbiguousLocalCreatesWithSharedUidAreNotGuessed() = runBlocking {
+        for (id in listOf("draft-one", "draft-two")) {
+            save(CanonicalContact(ACCOUNT.value, id, displayName = "Local draft", remoteVCardUid = "duplicate-uid"))
+            val intent = requireNotNull(database.outboxDao().get(ACCOUNT.value, "CONTACT", id))
+            database.outboxDao().upsert(intent.copy(requiresReconciliation = true))
+        }
+        remote = listOf(remoteFixture("remote-imported", "Remote import", 1, 12_000, "duplicate-uid"))
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        for (id in listOf("draft-one", "draft-two")) {
+            assertNull(repository.getContact(ACCOUNT.value, id)?.remoteContactId)
+            assertTrue(database.outboxDao().get(ACCOUNT.value, "CONTACT", id)?.requiresReconciliation == true)
+        }
+        assertEquals("remote-imported", repository.getContact(ACCOUNT.value, "remote-imported")?.remoteContactId)
+    }
+
+    @Test fun remoteIdCollisionDoesNotOverwriteAnUnrelatedLocalDraft() = runBlocking {
+        save(CanonicalContact(ACCOUNT.value, "remote-collision", displayName = "Local draft"))
+        remote = listOf(remoteFixture("remote-collision", "Remote import", 1, 12_000, "another-uid"))
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertEquals("Local draft", repository.getContact(ACCOUNT.value, "remote-collision")?.displayName)
+        assertNull(repository.getContact(ACCOUNT.value, "remote-collision")?.remoteContactId)
+        val imported = requireNotNull(database.contactDao().getByRemoteContactId(ACCOUNT.value, "remote-collision"))
+        assertEquals("Remote import", imported.contact.displayName)
+        assertTrue(imported.contact.id != "remote-collision")
     }
 
     @Test

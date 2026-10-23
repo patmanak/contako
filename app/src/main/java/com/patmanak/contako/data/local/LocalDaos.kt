@@ -48,6 +48,21 @@ internal interface ContactDao {
     @Query("SELECT * FROM contacts WHERE account_id = :accountId AND remote_vcard_uid = :remoteVCardUid LIMIT 1")
     suspend fun getByRemoteVCardUid(accountId: String, remoteVCardUid: String): ContactWithValues?
 
+    /** UID matching is restricted to an ambiguous, still-unbound creation at its exact revision. */
+    @Transaction
+    @Query(
+        """
+        SELECT c.* FROM contacts c JOIN outbox_mutations o
+        ON o.account_id = c.account_id AND o.aggregate_id = c.id
+        WHERE c.account_id = :accountId AND c.remote_contact_id IS NULL AND c.is_deleted = 0
+        AND o.aggregate_type = 'CONTACT' AND o.operation = 'UPSERT'
+        AND o.remote_identity IS NULL AND o.requires_reconciliation = 1
+        AND c.pending_mutation_revision = o.revision AND c.revision = o.revision
+        AND (c.remote_vcard_uid = :uid OR c.id = :uid)
+        """,
+    )
+    suspend fun getUnboundCreateCandidates(accountId: String, uid: String): List<ContactWithValues>
+
     @Upsert
     suspend fun upsert(contact: ContactEntity)
 
