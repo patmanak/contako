@@ -60,6 +60,25 @@ real notification taps and authenticated navigation remain FT-17 variants.
 
 ## Recovery and negative variants
 
+Room upgrade coverage MUST include the additive hydration-obligation schema.
+Seed an obligation, reopen the database, verify the retry and remove the account;
+neither upgrade nor failed sign-out may discard unresolved intent.
+
+Remote reconciliation MUST distinguish two Proton IDs with the same vCard UID.
+Test both arrival orders, unrelated edits and a targeted deletion. UID matching
+may attach only a unique unbound creation with durable ambiguity at its exact
+revision. A generic DELETE 404 MUST retain intent until a targeted absence check
+confirms convergence.
+
+For Android preferred-email transitions, cover first-email addition, last-email
+removal, preferred removal and primary selection, with and without groups. The
+new preferred email may already have different groups. Verify the canonical
+contact, every email membership, outbox, native observation baseline, retry after
+lost acknowledgement, database reopen and a second ordinary edit. After proven
+scope/epoch/ownership, an interrupted baseline/photo failure affects only that
+contact; later contacts and pages MUST still progress without acknowledging the
+unverified row.
+
 For SW-01/03/07/09 stop before and after each relevant durable boundary, repeat the
 operation and verify canonical/outbox/provider state. Different names, DIRTY
 native intent, stale account/epoch/revision, occupied destination, a still-present
@@ -80,6 +99,13 @@ even while an unrelated contact upload is pending; preparation still waits for
 its dependencies. Removing one of two occurrences MUST NOT transfer its pending
 assignments to the survivor without identity proof. Verify unchanged-inventory
 retry after the other upload completes with RepeatedEmailRecoveryTest and
+RoomRemoteCanonicalReconciliationStoreDeviceTest.
+
+After an unavailable group catalog returns, verify that retained per-email
+metadata selects only contacts with missing known memberships for hydration.
+Check restored edges, untouched pending group intent and unknown references,
+then a no-change pass without repeated hydration. An extra canonical edge alone
+MUST NOT trigger repair from stale metadata. Anchor:
 RoomRemoteCanonicalReconciliationStoreDeviceTest.
 
 Cryptographic layout, provider RCS, aggregation, lost responses and process death

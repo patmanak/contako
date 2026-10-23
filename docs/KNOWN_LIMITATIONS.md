@@ -19,7 +19,7 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
 | Missing owned Android copy | Normal sync checks metadata before skipping a stored clean copy. A missing or rebound source delegates to guarded retry/repair; it does not authorize blind recreation, rebinding or adoption of a linked foreign contact. |
 | Yearless birthday edited on Web | An unrelated Proton Web save has removed a yearless date. Contako MUST NOT invent a year or silently restore a remote omission. |
 | Custom dates and unsupported field types | Some values remain local/Android-only with an explicit indicator. Android exposes only representable fields and selected primary occurrences; see [mapping](CONTACTS.md). |
-| Labels on newly created URLs | Proton serialization omits unsupported URL types. A later remote adoption can currently remove URL labels retained locally, even when synchronization reports success. URL values and labels MUST be checked separately; successful email-group synchronization does not qualify URL-label preservation. |
+| Local labels on unsupported field types | Remote adoption retains labels with explicit local provenance and an unambiguous unchanged value occurrence. Historical labels without that proof, or repeated identical values with ambiguous mappings, cannot safely be restored. Remote deletions and explicit remote labels remain authoritative. URL values and labels require separate checks. |
 
 ## Interface and runtime
 
@@ -43,6 +43,11 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
   or vector master. See [licensing](LICENSING.md).
 
 ## Security and qualification
+
+The durable local owner protects retained data after session revocation. Legacy
+nonempty data without an owner marker or retained session cannot be assigned to
+a fresh login safely and remains quarantined. Do not remove application data to
+dismiss this state without preserving needed local changes.
 
 Contact/label HTTP responses and aggregate directory acquisition are bounded.
 Accumulated decrypted contact bytes are bounded by the maintained streaming

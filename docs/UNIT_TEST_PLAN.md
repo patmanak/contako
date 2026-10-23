@@ -7,9 +7,9 @@ test does not establish interoperability with a real Proton account or OEM.
 
 From app/, use the verified JDK and wrapper:
 ```powershell
-.\gradlew.bat --offline --no-daemon --max-workers=2 -PcontakoTestBuildType=debug :testDebugUnitTest --tests '*RegressionDatasetTest'
+.\gradlew.bat --no-daemon --max-workers=2 -PcontakoTestBuildType=debug :testDebugUnitTest --tests '*RegressionDatasetTest'
 ```
-Omit --offline only to resolve missing verified dependencies. To run the complete
+Add --offline only when the verified dependency cache is complete. To run the complete
 JVM suite, remove --tests. XML/HTML results stay under app/build/, never in Git.
 
 ## Coverage
@@ -33,3 +33,23 @@ The shared [dataset](../app/qa/dataset/README.md) provides concrete contact inpu
 and independent expected values. Small existing inline fixtures remain appropriate
 for one invariant. Do not replace meaningful tests with file-existence assertions,
 invented campaign totals or identical copies at every layer.
+
+## Recovery boundary variants
+
+- `IncrementalRemoteHydrationIsolationTest`: 51 cards with a rejected card at
+  each batch boundary, durable cursor coverage, targeted retry, interruption,
+  failed storage and disappearance before the first checkpoint.
+- `ContakoSyncPassExecutorTest`, `SyncCompletionClassificationTest`: unavailable
+  catalog, remote authentication during a pass, scoped projection/validation
+  errors and fresh completion causes on the next pass.
+- `DurableMutationOrchestratorTest` and the Room execution-store integration
+  cases: existing ineligible intent remains part of completion; a new session or
+  capability generation permits one guarded recheck of an earlier denial,
+  preserving validation/conflict blocks, revisions and idempotency keys.
+- `ProtonAccountOwnerIsolationTest`: revoke A with retained mutations, reject B,
+  restart and reconnect A; legacy ownership without proof remains quarantined.
+- `PreferredEmailTransitionTest`: first/last/preferred email changes and a new
+  preferred email with distinct existing memberships.
+- `ProtonVCardUnfoldingTest`, `ProtonVCardOpaquePreservationTest`,
+  `LocalContactComplementsTest`: bounded linear work, opaque phonetic properties,
+  custom dates and unambiguous local-label preservation.

@@ -267,6 +267,21 @@ A successful status MUST NOT hide lost labels; see [known limitations](KNOWN_LIM
 Extend FT-14/FT-17 with the rich and imported fixtures, comparing changed and
 untouched values independently on each peer:
 
+- Revoke an active session while changes are pending, then sign in as the same
+  owner without discarding data. A different owner MUST NOT see or upload the
+  retained partition. Repeat after restart and after Android provisioning fails.
+- Include a single unreadable remote card among healthy cards. Healthy cards
+  MUST reach Room and Android; the failed import MUST remain visible and retry
+  without rehydrating all unchanged healthy cards. A later repair or deletion
+  MUST resolve only the corresponding obligation.
+- Change the preferred email in the native editor while its two email
+  occurrences have different groups. Check both memberships independently on
+  Proton, repeat a second edit and restart. A preference change MUST NOT copy
+  one email's entire group set to another.
+- Temporarily deny or fail group-catalog access. Independent contacts MUST
+  continue; no group may be deleted from an unavailable catalog. Restore access,
+  refresh and verify that retained group intent resumes without reinstallation.
+
 - Change only a Web note/photo/unknown field, then another local field; public
   directory equality MUST NOT permit a stale upload. Both snapshots survive restart.
 - Choose Contako and Proton separately. No second choice while an upload is in

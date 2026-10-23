@@ -23,6 +23,34 @@ This conservative ordering retains group intent without consuming retry attempts
 
 ## Triggers and cost
 
+A rejected individual full card MUST NOT block verified independent cards.
+Before acknowledging its event cursor, the engine MUST persist either the
+verified canonical card or an account-scoped hydration obligation. Ordinary
+retries MUST include outstanding obligations even when public metadata is
+unchanged. Failed verification MUST NOT produce a canonical card, deletion or
+upload permission. An interrupted obligation absent from the next inventory
+MUST still receive targeted absence verification. Session, ownership and local
+durability failures remain pass-wide boundaries.
+
+An unavailable group catalog MUST NOT be treated as an empty catalog. Retain its
+existing groups and defer dependent group writes while independent contact work
+continues. A resumed repair MUST refresh catalog availability before draining
+group intent. Authentication failures MUST stop subsequent remote writes.
+When a catalog becomes available, missing known per-email memberships MUST
+trigger targeted verified hydration. Unknown labels, ambiguous group identities
+and pending local intent MUST NOT authorize reconstruction from stale metadata.
+After a new authenticated/capability generation, previously denied writes MAY
+become eligible for fresh verification at their exact retained revision. This
+MUST NOT acknowledge them or reopen validation, cryptographic or conflict failures.
+Completion MUST account for durable blocked and pending work even when no new
+command was eligible during the pass.
+
+When Android changes the preferred email, contact intent, membership context and
+the observed baseline MUST commit atomically. Preserve assignments of surviving
+email occurrences; only the proven native membership delta applies to the new
+preferred occurrence. A changed preference alone MUST NOT transfer all groups
+from the previous preferred email.
+
 Durable mutations and connectivity return schedule best-effort foreground work
 and an Android background fallback. Respect master/account automatic-sync switches,
 debounce, rate spacing and engine backoff. The periodic request is approximately
@@ -44,7 +72,8 @@ ambiguous items only. The authenticated contacts-only Proton v6 event feed MUST
 supplement public-directory fingerprints, including for private-only edits.
 Capture the latest event position before the first complete hydration; persist
 the account-scoped cursor with the inventory checkpoint only after all planned
-canonical reconciliations are durable. Drain all event pages before advancing it.
+canonical reconciliations or explicit hydration obligations are durable. Drain
+all event pages before advancing it.
 A failed read, cancellation or failed checkpoint transaction MUST retain the old
 position for replay. Resolve email events through current/previous opaque email
 identities in the directory checkpoint. A server-requested refresh or an unresolved

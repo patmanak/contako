@@ -4,6 +4,20 @@ Features and improvements by version.
 
 ## Unreleased
 
+- Keep verified contacts progressing when another remote card cannot be read;
+  retain the rejected card as a durable, visible retry item.
+- Preserve distinct Proton contacts sharing a vCard UID, local custom dates,
+  proven local field labels and opaque phonetic-name properties.
+- Handle changes to the preferred Android email without repeatedly replanning
+  or transferring unrelated per-email group assignments.
+- Bind retained local data to its Proton owner, allow same-account sign-in
+  recovery without discarding pending edits, and import independently of Android provisioning.
+- Retry unavailable group catalogs without freezing independent contact work;
+  refresh cached capabilities after session changes and explicit refresh.
+- Require targeted absence proof after an ambiguous remote deletion; distinguish
+  authentication, storage, validation and Android projection failures.
+- Bound vCard unfolding work and retain terminal diagnostic context after rotation.
+
 - Include a rotating, persistent local sync history in manually exported
   diagnostics: UTC/process-relative timings, request triggers, execution stages,
   known error/field categories, Android-copy backlog and retained failure context.
