@@ -38,6 +38,32 @@ class AuthenticationViewModelTest {
         Dispatchers.resetMain()
     }
 
+    @Test fun `session loss leaves ready without destructive signout and reauthentication preserves intent`() = runTest(dispatcher) {
+        var restored: AuthenticationStep = AuthenticationStep.Ready
+        val delegate = FakeAuthenticationFlowPort()
+        val port = object : AuthenticationFlowPort by delegate {
+            override suspend fun restore() = restored
+        }
+        val viewModel = AuthenticationViewModel(port)
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.READY, viewModel.state.value.destination)
+        restored = AuthenticationStep.SignIn
+        viewModel.onSessionChanged()
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.SIGN_IN, viewModel.state.value.destination)
+        assertEquals(0, delegate.cancelCalls)
+        val pending = mutableListOf("pending-create", "pending-delete")
+        var sessionCleared = false
+        viewModel.reauthenticate { sessionCleared = true }
+        advanceUntilIdle()
+        assertTrue(sessionCleared)
+        assertEquals(listOf("pending-create", "pending-delete"), pending)
+        assertEquals(0, delegate.cancelCalls)
+        viewModel.submitSignIn("owner".toCharArray(), "synthetic-password".toCharArray())
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.READY, viewModel.state.value.destination)
+    }
+
     @Test
     fun `double submit is ignored and cancellation cannot be overwritten by stale success`() =
         runTest(dispatcher) {

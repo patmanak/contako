@@ -4,17 +4,32 @@ import androidx.room.withTransaction
 import com.patmanak.contako.data.gateway.GatewayFailureCategory
 import com.patmanak.contako.data.sync.DurableMutationCommand
 import com.patmanak.contako.data.sync.MutationExecutionStore
+import com.patmanak.contako.data.sync.MutationRemainingWork
 import com.patmanak.contako.data.sync.RemoteMutationAcknowledgement
 import com.patmanak.contako.data.sync.RetryDecision
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal class RoomMutationExecutionStore(
     private val database: ContakoDatabase,
     private val existence: com.patmanak.contako.data.gateway.ProtonContactExistenceGateway? = null,
+    private val recoveryGeneration: () -> Long = { 0 },
 ) : MutationExecutionStore {
     private val store = RoomOutboxStore(database)
+    private val recoveryLock = Mutex()
+    private val lastRecoveredGenerations = mutableMapOf<String, Long>()
+
+    override suspend fun remaining(accountId: String): MutationRemainingWork {
+        val rows = database.outboxDao().getAll(accountId)
+        val blocked = rows.filter { it.state == DurableMutationState.ACTION_REQUIRED.name || it.blockedReason != null }
+        return MutationRemainingWork(blocked.size, rows.size - blocked.size, blocked.map { row ->
+            GatewayFailureCategory.entries.firstOrNull { it.name == row.errorCategory } ?: GatewayFailureCategory.UNKNOWN
+        }.toSet())
+    }
 
     override suspend fun recoverInterrupted(accountId: String, nowEpochMillis: Long): Int {
         var recovered = store.recoverInterrupted(accountId, nowEpochMillis)
+        recovered += recoverSessionAndCapabilityBlocks(accountId, nowEpochMillis)
         val reader = existence ?: return recovered
         // Older blocked deletes remain durable but are not eligible for a normal retry.
         // Reopen only a matching delete whose remote absence has just been confirmed.
@@ -40,6 +55,56 @@ internal class RoomMutationExecutionStore(
         }
         return recovered
     }
+
+    /**
+     * Called by the serialized engine after current remote prerequisites/catalog acquisition.
+     * A new authenticated/capability generation permits one fresh attempt, never acknowledgement.
+     */
+    private suspend fun recoverSessionAndCapabilityBlocks(accountId: String, nowEpochMillis: Long): Int =
+        recoveryLock.withLock {
+            val generation = recoveryGeneration()
+            if (lastRecoveredGenerations[accountId] == generation) return@withLock 0
+            val recovered = try {
+                database.withTransaction {
+                    if (recoveryGeneration() != generation) throw ChangedRecoveryGeneration()
+                    var count = 0
+                    for (intent in database.outboxDao().getAll(accountId)) {
+                        if (!intent.isSessionOrCapabilityBlock()) continue
+                        val sameCanonicalIntent = when (intent.aggregateType) {
+                            AggregateType.CONTACT.name -> database.contactDao().get(accountId, intent.aggregateId)?.contact?.let {
+                                it.revision == intent.revision && it.pendingMutationRevision == intent.revision &&
+                                    it.remoteContactId == intent.remoteIdentity && it.remoteVersion == intent.remoteVersion &&
+                                    it.conflictState == null &&
+                                    ((intent.operation == MutationOperation.DELETE.name && it.isDeleted) ||
+                                        (intent.operation == MutationOperation.UPSERT.name && !it.isDeleted))
+                            } == true
+                            AggregateType.GROUP.name -> database.contactGroupDao().get(accountId, intent.aggregateId)?.group?.let {
+                                it.revision == intent.revision && it.pendingMutationRevision == intent.revision &&
+                                    it.remoteLabelId == intent.remoteIdentity && it.remoteVersion == intent.remoteVersion &&
+                                    it.conflictState == null &&
+                                    ((intent.operation == MutationOperation.DELETE.name && it.isDeleted) ||
+                                        (intent.operation in setOf(MutationOperation.UPSERT.name, MutationOperation.ASSIGNMENTS.name) && !it.isDeleted))
+                            } == true
+                            else -> false
+                        }
+                        if (!sameCanonicalIntent) continue
+                        // Idempotency, attempt history, remote baseline and ambiguous-delivery
+                        // reconciliation are deliberately retained from this exact durable row.
+                        database.outboxDao().upsert(intent.copy(state = DurableMutationState.PENDING.name,
+                            blockedReason = null, errorCategory = null, nextAttemptAtEpochMillis = nowEpochMillis))
+                        count++
+                    }
+                    if (recoveryGeneration() != generation) throw ChangedRecoveryGeneration()
+                    count
+                }
+            } catch (_: ChangedRecoveryGeneration) {
+                return@withLock 0
+            }
+            // Remember only a committed stable generation. A concurrent invalidation remains
+            // eligible for a new probe on the next pass rather than being consumed here.
+            if (recoveryGeneration() == generation) lastRecoveredGenerations[accountId] = generation
+            recovered
+        }
 
     override suspend fun eligible(
         accountId: String,
@@ -197,6 +262,23 @@ internal class RoomMutationExecutionStore(
         database.outboxDao().get(command.accountId, command.aggregateType, command.aggregateId)
             ?.takeIf { it.revision == command.revision }
 }
+
+private fun OutboxMutationEntity.isSessionOrCapabilityBlock(): Boolean {
+    if (state != DurableMutationState.ACTION_REQUIRED.name) return false
+    return when (errorCategory) {
+        GatewayFailureCategory.AUTHENTICATION_REQUIRED.name -> blockedReason == "AUTHENTICATION_REQUIRED"
+        GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED.name -> blockedReason == "INTERACTIVE_AUTHENTICATION_REQUIRED"
+        GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED.name -> when (aggregateType) {
+            AggregateType.GROUP.name -> blockedReason == "GROUP_CAPABILITY_REQUIRED"
+            // Older builds incorrectly used the group capability wording for contact writes.
+            AggregateType.CONTACT.name -> blockedReason in setOf("REMOTE_PERMISSION_REQUIRED", "GROUP_CAPABILITY_REQUIRED")
+            else -> false
+        }
+        else -> false
+    }
+}
+
+private class ChangedRecoveryGeneration : RuntimeException(null, null, false, false)
 
 private fun OutboxMutationEntity.toCommand() = DurableMutationCommand(
     accountId = accountId,

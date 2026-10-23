@@ -90,6 +90,7 @@ fun interface MutationActionRequiredObserver {
 
 /** Durable local lifecycle seam; its Room implementation uses revision compare-and-set. */
 interface MutationExecutionStore {
+    suspend fun remaining(accountId: String): MutationRemainingWork = MutationRemainingWork()
     suspend fun recoverInterrupted(accountId: String, nowEpochMillis: Long): Int
     suspend fun eligible(accountId: String, nowEpochMillis: Long, limit: Int): List<DurableMutationCommand>
     suspend fun claim(command: DurableMutationCommand, nowEpochMillis: Long): Boolean
@@ -110,6 +111,11 @@ interface MutationExecutionStore {
         acknowledgement: RemoteMutationAcknowledgement,
         nowEpochMillis: Long,
     ): Boolean
+}
+
+data class MutationRemainingWork(val actionsRequired: Int = 0, val pending: Int = 0,
+    val failureCategories: Set<GatewayFailureCategory> = emptySet()) {
+    init { require(actionsRequired >= 0 && pending >= 0) }
 }
 
 /**
@@ -133,6 +139,7 @@ data class MutationDrainResult(
     val actionRequired: Int,
     val progressPending: Int,
     val cancelled: Boolean,
+    val failureCategories: Set<GatewayFailureCategory> = emptySet(),
 )
 
 /** Serial, bounded durable mutation drain used by every synchronization entry point. */
@@ -162,20 +169,28 @@ class DurableMutationOrchestrator(
         var retryWaiting = 0
         var actionRequired = 0
         var progressPending = 0
+        val failureCategories = mutableSetOf<GatewayFailureCategory>()
+        suspend fun result(cancelled: Boolean = false): MutationDrainResult {
+            val remaining = if (cancelled) MutationRemainingWork() else store.remaining(accountId)
+            return MutationDrainResult(examined, uploaded, reconciled, retryWaiting,
+                maxOf(actionRequired, remaining.actionsRequired), maxOf(progressPending, remaining.pending),
+                cancelled, failureCategories + remaining.failureCategories)
+        }
 
         for (command in eligible) {
             if (isCancellationRequested()) {
-                return MutationDrainResult(examined, uploaded, reconciled, retryWaiting, actionRequired, progressPending, true)
+                return result(cancelled = true)
             }
             if (!store.claim(command, nowEpochMillis)) continue
             examined++
             if (isCancellationRequested()) {
                 store.recordFailure(command, GatewayFailureCategory.CANCELLED, RetryDecision.Cancelled)
-                return MutationDrainResult(examined, uploaded, reconciled, retryWaiting, actionRequired, progressPending, true)
+                return result(cancelled = true)
             }
 
             when (val preparation = preparationGateway.prepare(command)) {
                 is GatewayOutcome.Failure -> {
+                    failureCategories += preparation.category
                     val decision = retryPolicy.decide(
                         preparation.category,
                         command.operation,
@@ -194,19 +209,18 @@ class DurableMutationOrchestrator(
                                 failureCategory = preparation.category,
                             )
                         }
-                        RetryDecision.Cancelled -> return MutationDrainResult(
-                            examined, uploaded, reconciled, retryWaiting, actionRequired, progressPending, true,
-                        )
+                        RetryDecision.Cancelled -> return result(cancelled = true)
                         RetryDecision.DeleteConverged -> reconciled++
                     }
+                    // Once the account/session is rejected, no later account write is safe.
+                    // Its intent remains untouched; the failed command was already persisted.
+                    if (preparation.category in ACCOUNT_REAUTHENTICATION_FAILURES) return result()
                 }
                 is GatewayOutcome.Success -> when (val decision = preparation.value) {
                     MutationPreparation.UploadAllowed -> {
                         if (isCancellationRequested()) {
                             store.recordFailure(command, GatewayFailureCategory.CANCELLED, RetryDecision.Cancelled)
-                            return MutationDrainResult(
-                                examined, uploaded, reconciled, retryWaiting, actionRequired, progressPending, true,
-                            )
+                            return result(cancelled = true)
                         }
                         when (val upload = uploadGateway.upload(command)) {
                             is GatewayOutcome.Success -> {
@@ -217,6 +231,7 @@ class DurableMutationOrchestrator(
                                 }
                             }
                             is GatewayOutcome.Failure -> {
+                                failureCategories += upload.category
                                 val retry = retryPolicy.decide(
                                     upload.category,
                                     command.operation,
@@ -235,11 +250,10 @@ class DurableMutationOrchestrator(
                                             failureCategory = upload.category,
                                         )
                                     }
-                                    RetryDecision.Cancelled -> return MutationDrainResult(
-                                        examined, uploaded, reconciled, retryWaiting, actionRequired, progressPending, true,
-                                    )
+                                    RetryDecision.Cancelled -> return result(cancelled = true)
                                     RetryDecision.DeleteConverged -> reconciled++
                                 }
+                                if (upload.category in ACCOUNT_REAUTHENTICATION_FAILURES) return result()
                             }
                         }
                     }
@@ -263,6 +277,7 @@ class DurableMutationOrchestrator(
                         progressPending++
                     }
                     is MutationPreparation.ActionRequired -> {
+                        failureCategories += GatewayFailureCategory.CONFLICT
                         store.recordFailure(
                             command,
                             GatewayFailureCategory.CONFLICT,
@@ -278,9 +293,7 @@ class DurableMutationOrchestrator(
                 }
             }
         }
-        return MutationDrainResult(
-            examined, uploaded, reconciled, retryWaiting, actionRequired, progressPending, false,
-        )
+        return result()
     }
 
     private fun observeActionRequired(
@@ -300,5 +313,11 @@ class DurableMutationOrchestrator(
                 ),
             )
         }
+    }
+
+    private companion object {
+        val ACCOUNT_REAUTHENTICATION_FAILURES = setOf(GatewayFailureCategory.AUTHENTICATION_REQUIRED,
+            GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED, GatewayFailureCategory.UNSUPPORTED_AUTHENTICATION,
+            GatewayFailureCategory.CLIENT_IDENTITY_REJECTED, GatewayFailureCategory.ACCOUNT_ALREADY_CONNECTED)
     }
 }

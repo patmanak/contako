@@ -170,6 +170,7 @@ fun ContakoApp(
     language: AppLanguage = AppLanguage.SYSTEM,
     onLanguageChange: (AppLanguage) -> Unit = {},
     onConfigureSyncNotifications: () -> Unit = {},
+    onReauthenticate: () -> Unit = {},
     onSignOut: suspend (SignOutChoice) -> SignOutResult = { SignOutResult.CleanupFailed },
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -364,7 +365,7 @@ fun ContakoApp(
                         } ?: when (state.navigation.destination) {
                             RootDestination.CONTACTS -> ContactsDestination(state, viewModel, expanded)
                             RootDestination.GROUPS -> GroupsDestination(state, viewModel, expanded)
-                            RootDestination.SYNC -> SyncDashboard(state, viewModel, onConfigureSyncNotifications)
+                            RootDestination.SYNC -> SyncDashboard(state, viewModel, onConfigureSyncNotifications, onReauthenticate)
                         }
                     }
                 }
@@ -906,7 +907,8 @@ private fun EmptyDirectory(title: String, body: String) {
 }
 
 @Composable
-private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, onConfigureNotifications: () -> Unit) {
+private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, onConfigureNotifications: () -> Unit,
+    onReauthenticate: () -> Unit) {
     val conflicts by viewModel.conflicts.collectAsState()
     val semanticColors = LocalContakoColors.current
     val syncing = state.syncActivity != SyncActivity.IDLE
@@ -939,6 +941,13 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
             }
         }
 
+        if (state.syncDashboard.state == SyncDashboardState.AUTHENTICATION_REQUIRED) {
+            item {
+                Button(onClick = onReauthenticate, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.auth_sign_in))
+                }
+            }
+        }
         if (state.syncDashboard.actionRequiredCount > 0) {
             item {
                 Card(
@@ -2879,6 +2888,13 @@ private fun SecondaryScreen(
             }
             SecondaryDestination.ACTIONS -> {
                 val contacts = state.actionContacts
+                items(state.syncDashboard.importProblems, key = { "import:${it.remoteId}" }) { failure ->
+                    InfoCard(failure.displayName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.nav_contacts)) {
+                        Text(stringResource(syncProblemBody(
+                            state.syncDashboard.copy(problem = failure.problem))))
+                        TextButton(onClick = viewModel::syncNow) { Text(stringResource(R.string.sync_now)) }
+                    }
+                }
                 if (state.syncDashboard.actionRequiredCount > 0) {
                     item {
                         InfoCard(stringResource(syncStateTitle(state.syncDashboard))) {

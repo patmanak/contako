@@ -200,8 +200,11 @@ internal class RoomSyncPassStatusPublisher(
     override suspend fun publish(outcome: SyncPassOutcome) {
         val all = database.outboxDao().getAll(accountId)
         val blocked = database.outboxDao().getActionRequired(accountId)
-        val reason = blocked.outboxActionReason() ?: if (outcome == SyncPassOutcome.ACTION_REQUIRED) {
-            externalActionReason() ?: SyncActionReason.INTERNAL_FAILURE
+        val failedImports = database.remoteHydrationObligationDao().getAll(accountId)
+        val external = externalActionReason()
+        val reason = blocked.outboxActionReason() ?: if (outcome == SyncPassOutcome.ACTION_REQUIRED || failedImports.isNotEmpty()) {
+            external ?: if (failedImports.any { it.category == "CRYPTOGRAPHIC_VERIFICATION_FAILED" })
+                SyncActionReason.CRYPTOGRAPHIC_VERIFICATION_FAILED else SyncActionReason.INTERNAL_FAILURE
         } else {
             null
         }
@@ -211,7 +214,7 @@ internal class RoomSyncPassStatusPublisher(
             SyncStatusUpdate(
                 outcome = outcome,
                 pendingMutationCount = all.size,
-                actionRequiredCount = if (reason == null) 0 else maxOf(1, blocked.size),
+                actionRequiredCount = if (reason == null) 0 else maxOf(1, blocked.size + failedImports.size),
                 actionReason = reason,
                 offline = outcome == SyncPassOutcome.RETRY_WAITING && isOffline(),
             ),

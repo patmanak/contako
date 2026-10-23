@@ -10,6 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         ContactEntity::class,
+        RemoteHydrationObligationEntity::class,
         ContactConflictEntity::class,
         ContactConflictChunk::class,
         ContactValueEntity::class,
@@ -40,11 +41,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AndroidPhotoProviderWriteJournalEntity::class,
         AndroidPhotoProjectionReceiptEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = true,
 )
 internal abstract class ContakoDatabase : RoomDatabase() {
     abstract fun contactDao(): ContactDao
+    abstract fun remoteHydrationObligationDao(): RemoteHydrationObligationDao
     abstract fun contactConflictDao(): ContactConflictDao
     abstract fun contactGroupDao(): ContactGroupDao
     abstract fun contactPayloadDao(): ContactPayloadDao
@@ -82,8 +84,21 @@ internal abstract class ContakoDatabase : RoomDatabase() {
                     MIGRATION_16_17,
                     MIGRATION_17_18,
                     MIGRATION_18_19,
+                    MIGRATION_19_20,
                 )
                 .build()
+
+        val MIGRATION_19_20: Migration = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `remote_hydration_obligations` (
+                        `account_id` TEXT NOT NULL, `remote_contact_id` TEXT NOT NULL,
+                        `display_name` TEXT, `category` TEXT NOT NULL, `hydration_category` TEXT,
+                        PRIMARY KEY(`account_id`, `remote_contact_id`)
+                    )
+                """.trimIndent())
+            }
+        }
 
         val MIGRATION_18_19: Migration = object : Migration(18, 19) {
             override fun migrate(db: SupportSQLiteDatabase) {

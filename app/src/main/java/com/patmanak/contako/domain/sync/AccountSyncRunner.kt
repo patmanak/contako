@@ -50,11 +50,22 @@ class SyncPassRequest internal constructor(
 
 enum class SyncPassOutcome { SUCCESS, RETRY_WAITING, ACTION_REQUIRED, CANCELLED, FAILED }
 
+/** Closed cause metadata; an action-required result alone is not an authentication failure. */
+enum class SyncCompletionCause {
+    AUTHENTICATION, STORAGE, TRANSIENT_IO, VALIDATION, ANDROID_PERMISSION, CONFLICT, PROJECTION, UNKNOWN,
+}
+
+/** Implemented by production executors that can attribute their result to a known boundary. */
+interface SyncPassCompletionDetailsSource {
+    val completionCause: SyncCompletionCause?
+}
+
 sealed interface SyncRunState {
     data object Idle : SyncRunState
     data class Scheduled(val scope: SyncScope) : SyncRunState
     data class Running(val scope: SyncScope, val passNumber: Long) : SyncRunState
-    data class Completed(val outcome: SyncPassOutcome, val passNumber: Long) : SyncRunState
+    data class Completed(val outcome: SyncPassOutcome, val passNumber: Long,
+        val cause: SyncCompletionCause? = null) : SyncRunState
 }
 
 enum class SyncRequestDisposition { STARTED, COALESCED, ACCOUNT_INVALIDATED }
@@ -178,17 +189,27 @@ class AccountSyncRunner(
             }
 
             runCatching { observer.onStart(request.scope) }
+            var cause: SyncCompletionCause? = null
             val outcome = try {
-                executor.execute(request)
+                executor.execute(request).also { result ->
+                    if (result != SyncPassOutcome.SUCCESS && result != SyncPassOutcome.CANCELLED) {
+                        cause = runCatching { (executor as? SyncPassCompletionDetailsSource)?.completionCause }
+                            .getOrNull() ?: SyncCompletionCause.UNKNOWN
+                    }
+                }
             } catch (_: CancellationException) {
                 SyncPassOutcome.CANCELLED
+            } catch (_: java.io.IOException) {
+                cause = SyncCompletionCause.TRANSIENT_IO
+                SyncPassOutcome.RETRY_WAITING
             } catch (_: Throwable) {
+                cause = SyncCompletionCause.UNKNOWN
                 SyncPassOutcome.FAILED
             }
 
             runCatching { observer.onFinish(outcome) }
             val continueWithFollowUp = mutex.withLock {
-                val completed = SyncRunState.Completed(outcome, passNumber)
+                val completed = SyncRunState.Completed(outcome, passNumber, cause)
                 mutableLastCompletion.value = completed
                 mutableState.value = completed
                 if (invalidated || pendingTriggers.isEmpty()) {

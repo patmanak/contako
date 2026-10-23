@@ -1,6 +1,7 @@
 package com.patmanak.contako.data.local
 
 import androidx.room.Dao
+import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -20,8 +21,28 @@ internal data class ContactWithValues(
     val values: List<ContactValueEntity>,
 )
 
+internal data class EmailMembershipRepairCandidate(
+    @ColumnInfo(name = "contact_id") val contactId: String,
+    @ColumnInfo(name = "remote_contact_id") val remoteContactId: String,
+    @ColumnInfo(name = "value_id") val valueId: String,
+    @ColumnInfo(name = "metadata_encoding") val metadataEncoding: String,
+) {
+    override fun toString() = "EmailMembershipRepairCandidate(REDACTED)"
+}
+
 @Dao
 internal interface ContactDao {
+    @Query("""
+        SELECT c.id AS contact_id, c.remote_contact_id, v.id AS value_id, v.metadata_encoding
+        FROM contacts c JOIN contact_values v ON v.account_id = c.account_id AND v.contact_id = c.id
+        WHERE c.account_id = :accountId AND c.is_deleted = 0 AND c.remote_contact_id IS NOT NULL
+          AND c.pending_mutation_revision IS NULL AND c.conflict_state IS NULL AND v.kind = 'EMAIL'
+          AND NOT EXISTS (
+              SELECT 1 FROM outbox_mutations o WHERE o.account_id = c.account_id
+                AND o.aggregate_type = 'CONTACT' AND o.aggregate_id = c.id
+          )
+    """)
+    suspend fun getEmailMembershipRepairCandidates(accountId: String): List<EmailMembershipRepairCandidate>
     @Transaction
     @Query(
         """
@@ -773,6 +794,8 @@ internal interface AndroidProjectionLedgerDao {
 
 @Dao
 internal interface AccountRemovalDao {
+    @Query("DELETE FROM remote_hydration_obligations WHERE account_id = :accountId")
+    suspend fun deleteHydrationObligations(accountId: String)
     @Query("SELECT COUNT(*) FROM outbox_mutations WHERE account_id = :accountId")
     suspend fun countPending(accountId: String): Int
 
@@ -801,6 +824,7 @@ internal interface AccountRemovalDao {
     suspend fun deleteAccount(accountId: String) {
         require(accountId.isNotBlank())
         deleteOutbox(accountId)
+        deleteHydrationObligations(accountId)
         deleteSyncStatus(accountId)
         deleteFullRepair(accountId)
         deleteInventory(accountId)

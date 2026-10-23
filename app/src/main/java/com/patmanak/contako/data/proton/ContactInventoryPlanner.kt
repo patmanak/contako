@@ -115,9 +115,11 @@ internal class ContactInventoryPlan private constructor(
         labelReconciled: Set<RemoteContactId>,
         deletionsReconciled: Set<RemoteContactId>,
         canonicalPersistenceCommitted: Boolean,
+        deferredDurableHydrations: Set<RemoteContactId> = emptySet(),
     ): ContactInventoryPlan {
         require(completedSource == null)
-        require(hydrated == hydrate)
+        require(hydrated.intersect(deferredDurableHydrations).isEmpty())
+        require(hydrated + deferredDurableHydrations == hydrate)
         require(labelReconciled == labelOnly)
         require(deletionsReconciled == deleted)
         require(canonicalPersistenceCommitted)
@@ -216,7 +218,9 @@ internal class PersistentContactInventoryPlanner(
             val before = previous[id]
             before != null && id !in hydrate && now.membershipsChangedFrom(before)
         }.keys
-        val deleted = previous.keys - current.keys
+        // An interrupted initial import can leave a deferred card before the first inventory
+        // checkpoint. Its later deletion still needs the normal targeted absence proof.
+        val deleted = (previous.keys + identityRepairContacts) - current.keys
         val checkpoint = ContactInventoryCheckpoint(current.values.toList(), events?.nextCursor ?: loadedCheckpoint?.checkpoint?.eventCursor)
         return ContactInventoryPlan.pending(
             account,

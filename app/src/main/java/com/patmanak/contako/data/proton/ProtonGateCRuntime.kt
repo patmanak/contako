@@ -1,6 +1,7 @@
 package com.patmanak.contako.data.proton
 
 import android.content.Context
+import com.patmanak.contako.data.local.hasAccountScopedData
 import android.database.SQLException
 import com.patmanak.contako.data.gateway.AccountScope
 import com.patmanak.contako.data.gateway.AuthenticationState
@@ -20,6 +21,7 @@ import kotlin.math.ceil
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.StateFlow
 import me.proton.core.account.data.repository.AccountRepositoryImpl
 import me.proton.core.accountrecovery.domain.repository.AccountRecoveryRepository
 import me.proton.core.auth.data.repository.AuthRepositoryImpl
@@ -490,7 +492,8 @@ internal class ProtonCoreSessionAdapter(
                     null
                 }
                 when (restored) {
-                    UserManager.UnlockResult.Success -> SessionState.READY
+                    UserManager.UnlockResult.Success -> if (sessions.state() == GateCStoredSessionState.READY &&
+                        sessions.currentUserId() == userId) SessionState.READY else SessionState.AUTHENTICATION_REQUIRED
                     else -> SessionState.INTERACTIVE_KEY_UNLOCK_REQUIRED
                 }
             }
@@ -654,6 +657,13 @@ internal class ProtonGateCRuntime private constructor(
      * session-lifecycle surface. Used as the Android account name under `D-081`.
      */
     val currentAccountAddress: suspend () -> String?,
+    val sessionRevision: StateFlow<Long>,
+    val releaseOwnerAfterLocalDataCleared: suspend () -> Unit,
+    val invalidateGroupCapabilities: (ContactGroupCapabilityInvalidationReason) -> Unit,
+    val readyOwnerUserId: suspend () -> UserId?,
+    val prepareReauthentication: suspend () -> Unit,
+    val canCleanOwnedScope: suspend () -> Boolean,
+    val capabilityInvalidationGeneration: () -> Long,
 ) {
     companion object {
         @Volatile
@@ -667,6 +677,7 @@ internal class ProtonGateCRuntime private constructor(
             humanVerification: GateCHumanVerificationHooks = GateCHumanVerificationHooks.FailClosed,
             authDiagnostic: GateCAuthDiagnostic = GateCAuthDiagnostic.Disabled,
             updateFailureObserver: ProtonContactUpdateFailureObserver = ProtonContactUpdateFailureObserver { _, _, _, _ -> },
+            hasLocalAccountData: suspend () -> Boolean = { true },
         ): ProtonGateCRuntime = instance ?: synchronized(this) {
             instance ?: build(
                 context.applicationContext,
@@ -674,6 +685,7 @@ internal class ProtonGateCRuntime private constructor(
                 GateCRequestAudit.Disabled,
                 authDiagnostic,
                 updateFailureObserver,
+                hasLocalAccountData,
             ).also { instance = it }
         }
 
@@ -687,6 +699,11 @@ internal class ProtonGateCRuntime private constructor(
             requestAudit: GateCRequestAudit,
             authDiagnostic: GateCAuthDiagnostic,
             humanVerification: GateCHumanVerificationHooks = GateCHumanVerificationHooks.FailClosed,
+            hasLocalAccountData: suspend () -> Boolean = {
+                // The isolated harness needs the same evidence as production, never an assumed empty scope.
+                val local = com.patmanak.contako.data.local.ContakoDatabase.create(context)
+                try { local.hasAccountScopedData() } finally { local.close() }
+            },
         ): ProtonGateCRuntime = synchronized(this) {
             check(instance == null) { "GATE_C_RUNTIME_ALREADY_INITIALIZED" }
             check(requestAudit !== GateCRequestAudit.Disabled) { "GATE_C_REQUEST_AUDIT_REQUIRED" }
@@ -696,6 +713,7 @@ internal class ProtonGateCRuntime private constructor(
                 humanVerification,
                 requestAudit,
                 authDiagnostic,
+                hasLocalAccountData = hasLocalAccountData,
             ).also { instance = it }
         }
 
@@ -705,14 +723,20 @@ internal class ProtonGateCRuntime private constructor(
             requestAudit: GateCRequestAudit,
             authDiagnostic: GateCAuthDiagnostic = GateCAuthDiagnostic.Disabled,
             updateFailureObserver: ProtonContactUpdateFailureObserver = ProtonContactUpdateFailureObserver { _, _, _, _ -> },
+            hasLocalAccountData: suspend () -> Boolean = { true },
         ): ProtonGateCRuntime {
             val cryptoContext = AndroidCryptoContext()
             val protectedStorage = GateCProtectedStorageGuard.requireAvailable(cryptoContext.keyStoreCrypto)
             val database = ProtonGateCDatabase.build(context, protectedStorage)
             val accountRepository = AccountRepositoryImpl(PRODUCT_IDENTITY, database, cryptoContext.keyStoreCrypto)
+            val owner = DurableAccountOwner(
+                FileAccountOwnerStorage(java.io.File(context.noBackupFilesDir, "account-owner/primary")),
+                hasLocalAccountData,
+            )
             val sessionCoordinator = ProtonCoreSessionCoordinator(
                 accountRepository = accountRepository,
                 addressDao = database.addressDao(),
+                owner = owner,
             )
             val network = ProtonGateCNetworkFactory.build(
                 context,
@@ -829,6 +853,9 @@ internal class ProtonGateCRuntime private constructor(
                 expectedAccount = accountScope,
                 delegate = ProtonPublicContactGroupGateway(accountScope, readyUserProvider, LabelRemoteDataSourceImpl(network.apiProvider)),
             )
+            sessionCoordinator.bindSessionChanged {
+                groupCapabilities.invalidate(accountScope, ContactGroupCapabilityInvalidationReason.SESSION_CHANGED)
+            }
             val gateD = ProtonGateDComposition(
                 events = ProtonContactEventReader(rawGateDWire),
                 existence = publicContactGateway,
@@ -859,6 +886,17 @@ internal class ProtonGateCRuntime private constructor(
                 session = ProtonCoreSessionAdapter(accountScope, operations, sessionCoordinator),
                 gateD = gateD,
                 currentAccountAddress = sessionCoordinator::currentAccountAddress,
+                sessionRevision = sessionCoordinator.sessionRevision,
+                releaseOwnerAfterLocalDataCleared = owner::releaseAfterLocalDataCleared,
+                invalidateGroupCapabilities = { groupCapabilities.invalidate(accountScope, it) },
+                readyOwnerUserId = { readyUserProvider.currentUserId() },
+                prepareReauthentication = {
+                    check(cleanupGateCSession(operations, sessionCoordinator,
+                        sessionCoordinator.currentUserId(), sessionCoordinator.currentSessionId(),
+                        revokeRemote = false) == null)
+                },
+                canCleanOwnedScope = { owner.canClean(sessionCoordinator.currentUserId()) },
+                capabilityInvalidationGeneration = groupCapabilities::invalidationGeneration,
             )
         }
     }
@@ -1014,6 +1052,7 @@ private fun classifyGateCFailure(error: Throwable): GatewayFailureCategory =
                 else -> GatewayFailureCategory.UNKNOWN
             }
         }
+        is LocalAccountOwnerMismatch -> GatewayFailureCategory.ACCOUNT_ALREADY_CONNECTED
         is IOException -> GatewayFailureCategory.NETWORK_UNAVAILABLE
         is IllegalArgumentException -> GatewayFailureCategory.VALIDATION_REJECTED
         else -> GatewayFailureCategory.UNKNOWN

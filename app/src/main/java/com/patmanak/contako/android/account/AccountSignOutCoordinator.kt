@@ -34,6 +34,7 @@ internal class AccountSignOutCoordinator(
     private val accountReader: BoundAndroidAccountReader,
     private val runner: AccountSyncRunner,
     private val removal: InAppAccountRemoval,
+    private val noAndroidRemoval: suspend (discardPendingChanges: Boolean) -> Boolean = { false },
 ) {
     suspend fun pendingCount(): Int = pendingMutations.count(accountScope)
 
@@ -56,8 +57,16 @@ internal class AccountSignOutCoordinator(
                 return SignOutResult.SyncFailed
             }
         }
-        val account = accountReader.read(accountScope) ?: return SignOutResult.CleanupFailed
-        return if (removal.remove(account, choice == SignOutChoice.DISCARD)) {
+        val account = try { accountReader.read(accountScope) } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) { return SignOutResult.CleanupFailed }
+        val removed = try {
+            if (account != null) removal.remove(account, choice == SignOutChoice.DISCARD)
+            else noAndroidRemoval(choice == SignOutChoice.DISCARD)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) { return SignOutResult.CleanupFailed }
+        return if (removed) {
             SignOutResult.SignedOut
         } else SignOutResult.CleanupFailed
     }

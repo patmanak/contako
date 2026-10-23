@@ -36,6 +36,36 @@ internal class RoomRemoteCanonicalReconciliationStore(
                 }
             }
         }
+        // An import may have preceded group-catalog availability. Its per-email remote
+        // metadata survives, but a later catalog-only refresh cannot create the missing
+        // canonical edges without a targeted contact reconciliation.
+        val knownGroups = database.contactGroupDao().getAll(account.value)
+            .filter { !it.group.isDeleted && it.group.remoteLabelId != null }
+            .groupBy { requireNotNull(it.group.remoteLabelId) }.values.mapNotNull { it.singleOrNull() }.filter {
+            it.group.pendingMutationRevision == null && it.group.conflictState == null &&
+                database.outboxDao().get(account.value, AggregateType.GROUP.name, it.group.id) == null
+        }
+        if (knownGroups.isNotEmpty()) {
+            val groupIdsByRemoteLabel = knownGroups.groupBy { requireNotNull(it.group.remoteLabelId) }
+                .mapValues { (_, groups) -> groups.map { it.group.id }.toSet() }
+            val actualByContact = knownGroups.flatMap { group -> group.memberships.map { edge ->
+                edge.contactId to (group.group.id to edge.emailValueId)
+            } }.groupBy({ it.first }, { it.second }).mapValues { (_, edges) -> edges.toSet() }
+            database.contactDao().getEmailMembershipRepairCandidates(account.value).groupBy { it.contactId }
+                .forEach { (contactId, emails) ->
+                    val desired = emails.flatMap { email ->
+                        StringMapCodec.decode(email.metadataEncoding)[PROTON_GROUP_IDS_KEY].orEmpty()
+                            .split(',').map(String::trim).filter(String::isNotEmpty)
+                            .flatMap { groupIdsByRemoteLabel[it].orEmpty() }
+                            .map { groupId -> groupId to email.valueId }
+                    }.toSet()
+                    // Extra canonical edges can reflect a more recent acknowledged assignment
+                    // than this card's metadata. Only missing proved known edges need a GET.
+                    if (!actualByContact[contactId].orEmpty().containsAll(desired)) {
+                        result += RemoteContactId(emails.first().remoteContactId)
+                    }
+                }
+        }
         result
     }
 

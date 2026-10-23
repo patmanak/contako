@@ -9,6 +9,65 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DurableMutationOrchestratorTest {
+    @Test fun ineligibleDurableObligationsStillDetermineTheDrainResult() = runTest {
+        for (remaining in listOf(MutationRemainingWork(actionsRequired = 2),
+            MutationRemainingWork(pending = 3), MutationRemainingWork(),
+            MutationRemainingWork(actionsRequired = 1,
+                failureCategories = setOf(GatewayFailureCategory.AUTHENTICATION_REQUIRED)))) {
+            val store = object : MutationExecutionStore by FakeMutationStore() {
+                override suspend fun remaining(accountId: String) = remaining
+            }
+            val result = DurableMutationOrchestrator(store,
+                MutationPreparationGateway { error("NO_ELIGIBLE_COMMAND") },
+                MutationUploadGateway { error("NO_ELIGIBLE_COMMAND") }).drain(ACCOUNT, 1_000)
+            assertEquals(0, result.examined)
+            assertEquals(remaining.actionsRequired, result.actionRequired)
+            assertEquals(remaining.pending, result.progressPending)
+            assertEquals(0, result.uploaded)
+            assertEquals(remaining.failureCategories, result.failureCategories)
+        }
+    }
+
+    @Test fun accountAuthenticationFailureIsDurableAndStopsLaterAccountWrites() = runTest {
+        val categories = listOf(GatewayFailureCategory.AUTHENTICATION_REQUIRED,
+            GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED, GatewayFailureCategory.UNSUPPORTED_AUTHENTICATION,
+            GatewayFailureCategory.CLIENT_IDENTITY_REJECTED, GatewayFailureCategory.ACCOUNT_ALREADY_CONNECTED)
+        for (category in categories) for (duringPreparation in listOf(false, true)) {
+            val store = FakeMutationStore(command(id = "first"), command(id = "rejected"), command(id = "later"))
+            val prepared = mutableListOf<String>()
+            val uploaded = mutableListOf<String>()
+            val result = orchestrator(store, prepare = { command ->
+                prepared += command.aggregateId
+                if (duringPreparation && command.aggregateId == "rejected") failure(category)
+                else success(MutationPreparation.UploadAllowed)
+            }, upload = { command ->
+                uploaded += command.aggregateId
+                if (!duringPreparation && command.aggregateId == "rejected") failure(category) else success(ack())
+            }).drain(ACCOUNT, 1_000)
+            assertEquals(category.name, setOf(category), result.failureCategories)
+            assertEquals(listOf("first", "rejected"), prepared)
+            assertEquals(if (duringPreparation) listOf("first") else listOf("first", "rejected"), uploaded)
+            assertEquals(1, result.uploaded)
+            assertEquals(1, result.actionRequired)
+            assertEquals(2, store.remaining)
+            assertTrue(store.actionRequired)
+        }
+    }
+
+    @Test fun validationFailureRetainsItsCauseWhileOtherIndependentMutationsSucceed() = runTest {
+        val store = FakeMutationStore(command(id = "first"), command(id = "invalid"), command(id = "later"))
+        val uploaded = mutableListOf<String>()
+        val result = orchestrator(store, prepare = { success(MutationPreparation.UploadAllowed) }, upload = { command ->
+            uploaded += command.aggregateId
+            if (command.aggregateId == "invalid") failure(GatewayFailureCategory.VALIDATION_REJECTED) else success(ack())
+        }).drain(ACCOUNT, 1_000)
+        assertEquals(listOf("first", "invalid", "later"), uploaded)
+        assertEquals(setOf(GatewayFailureCategory.VALIDATION_REJECTED), result.failureCategories)
+        assertEquals(2, result.uploaded)
+        assertEquals(1, result.actionRequired)
+        assertEquals(1, store.remaining)
+    }
+
     @Test
     fun `03-FAULT lost acknowledgement reconciles before replay and never duplicates upload`() = runTest {
         val store = FakeMutationStore(command())
@@ -69,12 +128,16 @@ class DurableMutationOrchestratorTest {
     }
 
     @Test
-    fun `03-DELETE remote absence converges without a retry`() = runTest {
+    fun `03-DELETE generic 404 preserves intent until fresh structured absence proof`() = runTest {
         val store = FakeMutationStore(command(operation = RemoteMutationOperation.DELETE))
         var uploads = 0
+        var confirmedAbsent = false
         val orchestrator = orchestrator(
             store,
-            prepare = { success(MutationPreparation.UploadAllowed) },
+            prepare = {
+                success(if (confirmedAbsent) MutationPreparation.AlreadyApplied(ack())
+                    else MutationPreparation.UploadAllowed)
+            },
             upload = {
                 uploads++
                 failure(GatewayFailureCategory.NOT_FOUND)
@@ -83,7 +146,14 @@ class DurableMutationOrchestratorTest {
 
         val result = orchestrator.drain(ACCOUNT, 1_000)
 
-        assertEquals(1, result.reconciledWithoutUpload)
+        assertEquals(0, result.reconciledWithoutUpload)
+        assertEquals(1, result.retryWaiting)
+        assertEquals(1, uploads)
+        assertEquals(1L, store.current?.revision)
+        assertEquals(RemoteMutationOperation.DELETE, store.current?.operation)
+        assertTrue(requireNotNull(store.current).requiresReconciliation)
+        confirmedAbsent = true
+        assertEquals(1, orchestrator.drain(ACCOUNT, 2_000).reconciledWithoutUpload)
         assertEquals(1, uploads)
         assertEquals(null, store.current)
     }

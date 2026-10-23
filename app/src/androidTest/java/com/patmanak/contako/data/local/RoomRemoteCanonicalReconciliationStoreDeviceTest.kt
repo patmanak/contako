@@ -21,6 +21,7 @@ import com.patmanak.contako.data.proton.PersistentContactInventoryPlanner
 import com.patmanak.contako.data.sync.IncrementalRemoteContactStage
 import com.patmanak.contako.data.sync.RemoteContactStageResult
 import com.patmanak.contako.domain.model.CanonicalContact
+import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.PreservationEnvelope
 import com.patmanak.contako.domain.repository.SaveResult
 import com.patmanak.contako.domain.sync.ServerClockCalibration
@@ -402,6 +403,48 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         assertEquals(listOf("email-new"), pending.memberships.map { it.emailValueId })
         assertTrue(pending.group.pendingMutationRevision != null)
         assertEquals(1, database.outboxDao().getAll(ACCOUNT.value).size)
+    }
+
+    @Test fun recoveredGroupCatalogTargetsOnlyMissingKnownEmailMembershipsAndThenConverges() = runBlocking {
+        val email = com.patmanak.contako.domain.model.ContactValue("email-fixture", ContactValueKind.EMAIL,
+            "fixture@example.test", order = 0, metadata = mapOf(
+                com.patmanak.contako.data.proton.PROTON_GROUP_IDS_KEY to "label-later,label-pending,label-unknown"))
+        val original = remote.single()
+        val target = original.copy(card = original.card.copy(contact = original.card.contact.copy(values = listOf(email))))
+        val other = remoteFixture("unaffected", "Other fixture", 1, 10_000, "other-uid")
+        remote = listOf(target, other)
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertEquals(2, hydrationCount)
+        val imported = requireNotNull(repository.getContact(ACCOUNT.value, "remote"))
+        assertEquals(email.metadata, imported.valuesOf(ContactValueKind.EMAIL).single().metadata)
+        val reconciler = RoomRemoteCanonicalReconciliationStore(database)
+        assertTrue(reconciler.identityRepairContacts(ACCOUNT).isEmpty())
+
+        val groups = database.contactGroupDao()
+        val later = com.patmanak.contako.domain.model.ContactGroup(ACCOUNT.value, "known-group", "Later group",
+            revision = 1, remoteLabelId = "label-later")
+        groups.upsert(later.toEntity())
+        assertTrue(repository.saveGroup(com.patmanak.contako.domain.model.ContactGroup(ACCOUNT.value,
+            "pending-group", "Pending group", remoteLabelId = "label-pending")) is SaveResult.Saved)
+        val pending = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "pending-group"))
+        assertEquals(setOf(RemoteContactId("remote")), reconciler.identityRepairContacts(ACCOUNT))
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertEquals(3, hydrationCount)
+        assertEquals(listOf("email-fixture"), requireNotNull(groups.get(ACCOUNT.value, "known-group"))
+            .memberships.map { it.emailValueId })
+        assertTrue(requireNotNull(groups.get(ACCOUNT.value, "pending-group")).memberships.isEmpty())
+        assertEquals(pending, database.outboxDao().get(ACCOUNT.value, "GROUP", "pending-group"))
+        assertEquals(email.metadata, repository.getContact(ACCOUNT.value, "remote")?.valuesOf(ContactValueKind.EMAIL)?.single()?.metadata)
+        assertTrue(reconciler.identityRepairContacts(ACCOUNT).isEmpty())
+        assertTrue(stage().run(ACCOUNT) is RemoteContactStageResult.Success)
+        assertEquals(3, hydrationCount)
+
+        // An extra canonical edge may be a newer acknowledged local assignment. Stale
+        // remote metadata must not trigger a repair merely to remove that edge.
+        val extra = later.copy(id = "extra-group", name = "Extra group", remoteLabelId = "label-extra")
+        groups.upsert(extra.toEntity())
+        groups.insertMemberships(listOf(com.patmanak.contako.domain.model.GroupMembership("remote", email.id).toEntity(extra)))
+        assertTrue(reconciler.identityRepairContacts(ACCOUNT).isEmpty())
     }
 
     @Test

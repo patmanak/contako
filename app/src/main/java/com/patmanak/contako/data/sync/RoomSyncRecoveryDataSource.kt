@@ -29,6 +29,7 @@ internal class RoomSyncRecoveryDataSource(
     private val repairStore = RoomFullRepairProgressStore(database)
     private val projectionDao = database.androidProjectionLedgerDao()
     private val outboxDao = database.outboxDao()
+    private val hydrationDao = database.remoteHydrationObligationDao()
     private val conflicts = com.patmanak.contako.data.local.RoomContactConflictStore(database)
 
     override fun observeConflicts(accountId: String) = conflicts.observe(boundAccount(accountId).value)
@@ -46,12 +47,24 @@ internal class RoomSyncRecoveryDataSource(
             statusStore.observe(boundAccount(accountId).value),
             projectionDao.observePendingContactIds(boundAccount(accountId).value),
             outboxDao.observeBlockedContactIds(boundAccount(accountId).value),
-        ) { status, pendingIds, blockedIds ->
+            hydrationDao.observe(boundAccount(accountId).value),
+        ) { status, pendingIds, blockedIds, importFailures ->
             val snapshot = status?.toDomain() ?: SyncDashboardSnapshot(SyncDashboardState.CURRENT)
             snapshot.copy(
                 // A completed older pass cannot qualify a newly outstanding native copy.
-                state = if (snapshot.state == SyncDashboardState.CURRENT && pendingIds.isNotEmpty())
+                state = if (importFailures.isNotEmpty() && snapshot.state != SyncDashboardState.AUTHENTICATION_REQUIRED)
+                    SyncDashboardState.BLOCKED
+                    else if (snapshot.state == SyncDashboardState.CURRENT && pendingIds.isNotEmpty())
                     SyncDashboardState.PENDING else snapshot.state,
+                actionRequiredCount = maxOf(snapshot.actionRequiredCount, importFailures.size),
+                importProblems = importFailures.map {
+                    com.patmanak.contako.domain.sync.SyncImportProblem(it.remoteContactId, it.displayName,
+                        when (it.category) {
+                            "CRYPTOGRAPHIC_VERIFICATION_FAILED" -> SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED
+                            "VALIDATION_REJECTED" -> SyncProblem.VALIDATION_REJECTED
+                            else -> SyncProblem.INTERNAL_FAILURE
+                        })
+                },
                 androidPendingContactIds = pendingIds.toSet(), blockedMutationContactIds = blockedIds.toSet(),
             )
         }

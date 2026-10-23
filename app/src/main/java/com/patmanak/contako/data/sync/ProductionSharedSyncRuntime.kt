@@ -2,6 +2,7 @@ package com.patmanak.contako.data.sync
 
 import android.accounts.Account
 import android.content.Context
+import androidx.room.withTransaction
 import com.patmanak.contako.android.account.ContakoAndroidAccountContract
 import com.patmanak.contako.android.account.AccountRemovalCoordinator
 import com.patmanak.contako.android.account.AndroidAccountRemovalCoordinator
@@ -85,6 +86,10 @@ internal data class ProductionSyncDependencies(
     val existence: com.patmanak.contako.data.gateway.ProtonContactExistenceGateway =
         com.patmanak.contako.data.gateway.ProtonContactExistenceGateway { _, _ -> GatewayOutcome.Failure(GatewayFailureCategory.UNKNOWN) },
     val events: com.patmanak.contako.data.proton.ProtonContactEventsGateway? = null,
+    val releaseOwnerAfterLocalDataCleared: suspend () -> Unit = {},
+    val invalidateGroupCapabilities: () -> Unit = {},
+    val canCleanOwnedScope: suspend () -> Boolean = { false },
+    val capabilityInvalidationGeneration: () -> Long = { 0 },
 )
 
 /** Production composition only wires dormant gateways; I/O starts when the shared runner executes. */
@@ -139,6 +144,11 @@ internal fun composeProductionSharedSyncRuntime(
             proton.session as ProtonLocalSessionCleanupGateway,
             events = gateD.events,
             existence = gateD.existence,
+            releaseOwnerAfterLocalDataCleared = proton.releaseOwnerAfterLocalDataCleared,
+            invalidateGroupCapabilities = { proton.invalidateGroupCapabilities(
+                com.patmanak.contako.data.proton.ContactGroupCapabilityInvalidationReason.MANUAL_REFRESH) },
+            canCleanOwnedScope = proton.canCleanOwnedScope,
+            capabilityInvalidationGeneration = proton.capabilityInvalidationGeneration,
         ),
         runnerScope,
         stopScheduling,
@@ -267,10 +277,17 @@ internal fun composeProductionSharedSyncRuntime(
         actionRequiredObserver = androidIngestActionRequiredObserver,
         replanObserver = androidIngestReplanObserver,
     )
+    val groupCatalogAvailable = java.util.concurrent.atomic.AtomicBoolean(false)
+    val mutationPreparation = RoomBackedMutationPreparationGateway(account, database, dependencies.membershipReader,
+        dependencies.verifiedCards, dependencies.existence)
     val mutationOrchestrator = DurableMutationOrchestrator(
-        RoomMutationExecutionStore(database, dependencies.existence),
-        RoomBackedMutationPreparationGateway(account, database, dependencies.membershipReader,
-            dependencies.verifiedCards, dependencies.existence),
+        RoomMutationExecutionStore(database, dependencies.existence,
+            recoveryGeneration = dependencies.capabilityInvalidationGeneration),
+        MutationPreparationGateway { command ->
+            if (command.aggregateType == com.patmanak.contako.data.local.AggregateType.GROUP.name &&
+                !groupCatalogAvailable.get()) GatewayOutcome.Success(MutationPreparation.WaitingForDependencies)
+            else mutationPreparation.prepare(command)
+        },
         RoomBackedMutationUploadGateway(
             account,
             database,
@@ -284,7 +301,17 @@ internal fun composeProductionSharedSyncRuntime(
     // Reset per pass by the publisher below, so a recovered pass stops reporting degradation.
     val androidDegradation = java.util.concurrent.atomic.AtomicReference<SyncActionReason?>(null)
     val remoteFailure = java.util.concurrent.atomic.AtomicReference<SyncActionReason?>(null)
+    var completionDetails: com.patmanak.contako.domain.sync.SyncPassCompletionDetailsSource? = null
     val executor = ContakoSyncPassExecutor(
+        onPassStarted = { request ->
+            androidDegradation.set(null)
+            remoteFailure.set(null)
+            skippedProjections.set(0)
+            projectionRepairs.snapshotAndReset()
+            if (com.patmanak.contako.domain.sync.SyncTrigger.MANUAL in request.triggers)
+                dependencies.invalidateGroupCapabilities()
+        },
+        onGroupCatalogAvailability = groupCatalogAvailable::set,
         account = account,
         prerequisites = SyncPrerequisiteChecker {
             when (val restored = dependencies.session.restore(account)) {
@@ -314,6 +341,7 @@ internal fun composeProductionSharedSyncRuntime(
             // Remote image references remain canonical references. Synchronization MUST NOT make
             // automatic requests to arbitrary contact-controlled hosts.
             RoomRemoteCanonicalReconciliationStore(database),
+            obligations = com.patmanak.contako.data.local.RoomRemoteHydrationObligationStore(database),
             existenceGateway = dependencies.existence,
             eventsGateway = dependencies.events,
             hydrationBatchSize = 25,
@@ -333,7 +361,12 @@ internal fun composeProductionSharedSyncRuntime(
         groupStage = IncrementalRemoteGroupStage(
             dependencies.groups,
             RoomRemoteGroupReconciliationStore(database),
-            remoteGroupFailureObserver,
+            { category ->
+                if (category == GatewayFailureCategory.MALFORMED_RESPONSE ||
+                    category == GatewayFailureCategory.VALIDATION_REJECTED)
+                    remoteFailure.set(SyncActionReason.GROUP_CAPABILITY_REQUIRED)
+                remoteGroupFailureObserver(category)
+            },
             exceptionObserver = passStageObserver::onException,
         ),
         statusPublisher = RoomSyncPassStatusPublisher(
@@ -355,6 +388,8 @@ internal fun composeProductionSharedSyncRuntime(
                 // Skipped contacts are the more precise diagnosis: Android access works, only
                 // some contacts are missing, so it takes precedence over the blanket reason.
                 when {
+                    completionDetails?.completionCause == com.patmanak.contako.domain.sync.SyncCompletionCause.AUTHENTICATION ->
+                        SyncActionReason.AUTHENTICATION_REQUIRED
                     remote != null -> remote
                     skipped > 0 -> SyncActionReason.ANDROID_CONTACTS_PARTIALLY_PROJECTED
                     else -> degraded
@@ -382,6 +417,7 @@ internal fun composeProductionSharedSyncRuntime(
         ),
         fullRepairCoordinator = RoomFullRepairExecutionCoordinator(account, fullRepairStore),
     )
+    completionDetails = executor
     val runner = AccountSyncRunner(runnerScope, syncRunnerObserver, executor)
     runnerScope.launch {
         if (fullRepairStore.load(account) != null) {
@@ -400,7 +436,29 @@ internal fun composeProductionSharedSyncRuntime(
             runner,
             FrameworkAccountPlatformCleanup(applicationContext, stopScheduling),
             SharedPreferencesAccountRemovalCheckpointStore(applicationContext),
+            releaseOwnerAfterLocalDataCleared = dependencies.releaseOwnerAfterLocalDataCleared,
         )
+    val noAndroidBinding: suspend () -> Boolean = {
+        database.androidProjectionLedgerDao().getAccount(account.value)?.androidAccountName == null
+    }
+    val unprovisionedSignOut = com.patmanak.contako.android.account.UnprovisionedAccountSignOut(
+        account, runner,
+        ownerIsVerified = dependencies.canCleanOwnedScope,
+        hasNoAndroidBinding = noAndroidBinding,
+        pendingMutations = PendingMutationReader { database.accountRemovalDao().countPending(it.value) },
+        revokeSession = { dependencies.localSessionCleanup.clearAfterBestEffortRevocation(account) is GatewayOutcome.Success },
+        clearLocalData = { discard ->
+            database.withTransaction {
+                if (!noAndroidBinding() || (!discard && database.accountRemovalDao().countPending(account.value) != 0)) false
+                else {
+                    database.accountRemovalDao().deleteAccount(account.value)
+                    true
+                }
+            }
+        },
+        releaseOwner = dependencies.releaseOwnerAfterLocalDataCleared,
+        stopScheduling = stopScheduling,
+    )
     return ProductionSharedSyncRuntime(
         runner,
         resolver,
@@ -414,9 +472,10 @@ internal fun composeProductionSharedSyncRuntime(
             PendingMutationReader { scope ->
                 withContext(Dispatchers.IO) {
                     val binding = RoomAndroidDurableAccountContextReader(database).load(scope)
-                    check(binding != null && !binding.hasCrossAccountBinding)
-                    val name = checkNotNull(binding.androidAccountName)
-                    database.accountRemovalDao().countPending(scope.value) +
+                    check(binding == null || !binding.hasCrossAccountBinding)
+                    val roomPending = database.accountRemovalDao().countPending(scope.value)
+                    val name = binding?.androidAccountName
+                    roomPending + if (name == null) 0 else
                         FrameworkAndroidAccountProjectionCleaner(applicationContext.contentResolver)
                             .pendingChanges(name, ContakoAndroidAccountContract.ACCOUNT_TYPE)
                 }
@@ -428,6 +487,7 @@ internal fun composeProductionSharedSyncRuntime(
             },
             runner,
             InAppAccountRemoval(removal::removeFromApp),
+            noAndroidRemoval = unprovisionedSignOut::remove,
         ),
     )
 }

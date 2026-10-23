@@ -142,7 +142,8 @@ class AndroidContactsSchemaSourceContractTest {
         ).readText()
         assertTrue(source.contains("runner.request("))
         assertTrue(source.contains("runner.awaitIdle()"))
-        assertTrue(source.contains("SyncPassOutcome.RETRY_WAITING"))
+        assertTrue(source.contains("classifyAndroidSyncCompletion(runner.lastCompletion.value)"))
+        assertTrue(source.contains("AndroidSyncCompletionClassification.RETRYABLE_IO"))
         listOf(
             "com.patmanak.contako.data.local",
             "com.patmanak.contako.data.proton",

@@ -14,6 +14,7 @@ import com.patmanak.contako.data.gateway.AccountScope
 import com.patmanak.contako.data.gateway.GatewayOutcome
 import com.patmanak.contako.data.gateway.ProtonLocalSessionCleanupGateway
 import com.patmanak.contako.data.android.provider.FrameworkAndroidAccountProjectionCleaner
+import com.patmanak.contako.data.android.provider.AndroidAccountProjectionCleaner
 import com.patmanak.contako.data.local.ContakoDatabase
 import com.patmanak.contako.domain.sync.AccountSyncRunner
 import com.patmanak.contako.domain.sync.SyncPassOutcome
@@ -92,15 +93,22 @@ class AndroidAccountRemovalCoordinatorDeviceTest {
             GatewayOutcome.Success(Unit)
         } as ProtonLocalSessionCleanupGateway
         val runner = AccountSyncRunner(scope) { SyncPassOutcome.SUCCESS }
+        var ownerReleased = false
         val coordinator = AndroidAccountRemovalCoordinator(
             FrameworkAndroidAccountProjectionCleaner(context.contentResolver),
             database,
             targetScope,
             session,
             runner,
+            releaseOwnerAfterLocalDataCleared = {
+                assertFalse("Owner release must follow the Room commit", database.inTransaction())
+                accountScopedTables().forEach { table -> assertEquals(0L, countRows(table, targetScope.value)) }
+                ownerReleased = true
+            },
         )
 
         assertTrue(coordinator.remove(target))
+        assertTrue(ownerReleased)
 
         assertNull(database.androidProjectionLedgerDao().getAccount(targetScope.value))
         assertEquals(other.name, database.androidProjectionLedgerDao().getAccount(otherScope.value)?.androidAccountName)
@@ -121,6 +129,29 @@ class AndroidAccountRemovalCoordinatorDeviceTest {
         assertTrue(rawContactExists(foreignRaw))
         assertEquals(listOf("clearLocal"), calls)
         assertEquals(SyncRequestDisposition.ACCOUNT_INVALIDATED, runner.request(SyncTrigger.RETRY))
+    }
+
+    @Test fun cleanSignOutReleasesOwnerOnlyAfterGuardedRoomTransactionCommits() = runBlocking {
+        val targetScope = AccountScope("clean-owner-release")
+        val target = Account("clean-owner@example.test", ContakoAndroidAccountContract.ACCOUNT_TYPE)
+        val ledger = RoomAndroidProjectionLedger(database)
+        ledger.ensureAccount(targetScope).also { ledger.bindAndroidAccountName(targetScope, it.revision, target.name) }
+        var releases = 0
+        val cleaner = object : AndroidAccountProjectionCleaner {
+            override fun delete(accountName: String, accountType: String) = true
+            override fun deleteIfClean(accountName: String, accountType: String) = true
+            override fun hasPendingChanges(accountName: String, accountType: String) = false
+        }
+        val coordinator = AndroidAccountRemovalCoordinator(cleaner, database, targetScope,
+            ProtonLocalSessionCleanupGateway { GatewayOutcome.Success(Unit) },
+            AccountSyncRunner(scope) { SyncPassOutcome.SUCCESS },
+            releaseOwnerAfterLocalDataCleared = {
+                assertFalse(database.inTransaction())
+                assertNull(database.androidProjectionLedgerDao().getAccount(targetScope.value))
+                releases++
+            })
+        assertTrue(coordinator.removeFromApp(target))
+        assertEquals(1, releases)
     }
 
     @Test fun mismatchedAndroidAccountFailsClosedAndPreservesEverything() = runBlocking {

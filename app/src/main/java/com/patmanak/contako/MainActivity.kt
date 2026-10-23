@@ -32,6 +32,7 @@ import com.patmanak.contako.ui.ContactsViewModel
 import com.patmanak.contako.ui.ContactsPermissionBoundary
 import com.patmanak.contako.ui.ContactsPermissionAction
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.drop
 import com.patmanak.contako.ui.auth.AuthenticationDestination
 import com.patmanak.contako.ui.auth.AuthenticationScreen
 import com.patmanak.contako.ui.auth.AuthenticationViewModel
@@ -40,7 +41,6 @@ import com.patmanak.contako.ui.locale.AndroidLanguagePreferenceStore
 import com.patmanak.contako.ui.theme.ContakoTheme
 import com.patmanak.contako.ui.theme.resolveDarkTheme
 import com.patmanak.contako.android.account.SignOutResult
-import com.patmanak.contako.android.account.AccountProvisioningResult
 import com.patmanak.contako.android.account.ContakoAndroidAccountContract
 import com.patmanak.contako.data.sync.AuthenticatedSyncLifecycle
 
@@ -65,7 +65,10 @@ class MainActivity : ComponentActivity() {
         val contakoApplication = application as ContakoApplication
         authenticatedSyncLifecycle = AuthenticatedSyncLifecycle(
             onAccountReady = contakoApplication.syncSchedulingPolicy::onAccountReady,
-            onAuthenticatedStartup = contakoApplication.syncSchedulingPolicy::onAppStartup,
+            onAuthenticatedStartup = {
+                contakoApplication.retryMissingAndroidProvisioning()
+                contakoApplication.syncSchedulingPolicy.onAppStartup()
+            },
         )
         enableEdgeToEdge()
         setContent {
@@ -142,6 +145,11 @@ class MainActivity : ComponentActivity() {
                     factory = AuthenticationViewModel.factory(authenticationPort),
                 )
                 val authenticationState by authenticationViewModel.state.collectAsState()
+                LaunchedEffect(application.protonGateCRuntime, authenticationViewModel) {
+                    application.protonGateCRuntime.sessionRevision.drop(1).collect {
+                        authenticationViewModel.onSessionChanged()
+                    }
+                }
                 val openSync by openSyncRequested.collectAsState()
                 LaunchedEffect(openSync, authenticationState.destination) {
                     if (openSync && authenticationState.destination == AuthenticationDestination.READY) {
@@ -156,19 +164,18 @@ class MainActivity : ComponentActivity() {
                 // D-062 keeps local and Proton work usable when Android interoperability degrades.
                 LaunchedEffect(authenticationState.destination, hasContactAccess) {
                     if (authenticationState.destination == AuthenticationDestination.READY) {
+                        // A prior sign-out invalidates the process-scoped runner. Reopen it from
+                        // validated Proton ownership before scheduling, independently of Android.
+                        application.reactivateAuthenticatedProtonAccount()
+                        authenticatedSyncLifecycle.onAuthenticationReady()
                         val address = application.protonGateCRuntime.currentAccountAddress()
                             ?: AccountManager.get(this@MainActivity)
                                 .getAccountsByType(ContakoAndroidAccountContract.ACCOUNT_TYPE)
                                 .singleOrNull()
                                 ?.name
                         signedInAddress = address
-                        if (address != null &&
-                            application.provisionAndroidAccount(address) == AccountProvisioningResult.READY
-                        ) {
-                            authenticatedSyncLifecycle.onAccountProvisioned()
-                        } else {
-                            authenticatedSyncLifecycle.onAuthenticationUnavailable()
-                        }
+                        // Proton readiness opens remote work even if Android provisioning fails.
+                        if (address != null) application.provisionAndroidAccount(address)
                     } else {
                         signedInAddress = null
                         authenticatedSyncLifecycle.onAuthenticationUnavailable()
@@ -194,6 +201,9 @@ class MainActivity : ComponentActivity() {
                             application.accountSignOutCoordinator.signOut(choice).also {
                                 if (it == SignOutResult.SignedOut) authenticationViewModel.signOut()
                             }
+                        },
+                        onReauthenticate = {
+                            authenticationViewModel.reauthenticate(application.protonGateCRuntime.prepareReauthentication)
                         },
                         onConfigureSyncNotifications = {
                             val preferences = getPreferences(Context.MODE_PRIVATE)

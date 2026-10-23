@@ -27,6 +27,7 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
     private val delegate: ProtonContactGroupGateway,
 ) : ProtonContactGroupGateway {
     private val lock = Any()
+    private var generation = 0L
     private val availability = ContactGroupCapability.entries.associateWith {
         ContactGroupCapabilityAvailability.UNKNOWN
     }.toMutableMap()
@@ -43,6 +44,9 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
     fun state(): StateFlow<ContactGroupCapabilitySnapshot> = state.asStateFlow()
 
     fun snapshot(): ContactGroupCapabilitySnapshot = state.value
+
+    /** Changes only when cached evidence is invalidated, not on an ordinary catalog read. */
+    fun invalidationGeneration(): Long = synchronized(lock) { generation }
 
     override fun capabilities(): ContactGroupCapabilities = synchronized(lock) {
         ContactGroupCapabilities(
@@ -71,6 +75,7 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
     ) {
         requireExpected(account)
         synchronized(lock) {
+            generation = Math.incrementExact(generation)
             availability.keys.forEach { availability[it] = ContactGroupCapabilityAvailability.UNKNOWN }
             denied.value = emptySet()
             state.value = state.value.copy(
@@ -119,10 +124,11 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
         if (account != expectedAccount) {
             return GatewayOutcome.Failure(GatewayFailureCategory.AUTHENTICATION_REQUIRED)
         }
+        val operationGeneration = synchronized(lock) { generation }
         val outcome = try {
             operation()
         } catch (cancellation: CancellationException) {
-            record(capability, ContactGroupCapabilityAvailability.UNKNOWN, ContactGroupCapabilityEvidence.NONE)
+            record(capability, ContactGroupCapabilityAvailability.UNKNOWN, ContactGroupCapabilityEvidence.NONE, operationGeneration)
             throw cancellation
         }
         when (outcome) {
@@ -130,6 +136,7 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
                 capability,
                 ContactGroupCapabilityAvailability.AVAILABLE,
                 ContactGroupCapabilityEvidence.AUTHORITATIVE_GROUP_SUCCESS,
+                operationGeneration,
             )
 
             is GatewayOutcome.Failure -> if (
@@ -139,12 +146,14 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
                     capability,
                     ContactGroupCapabilityAvailability.DENIED,
                     ContactGroupCapabilityEvidence.EXPLICIT_PERMISSION_OR_PLAN_DENIAL,
+                    operationGeneration,
                 )
             } else {
                 record(
                     capability,
                     ContactGroupCapabilityAvailability.UNKNOWN,
                     ContactGroupCapabilityEvidence.NONE,
+                    operationGeneration,
                 )
             }
         }
@@ -155,8 +164,10 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
         capability: ContactGroupCapability,
         resolved: ContactGroupCapabilityAvailability,
         evidence: ContactGroupCapabilityEvidence,
+        operationGeneration: Long,
     ) {
         synchronized(lock) {
+            if (generation != operationGeneration) return
             availability[capability] = resolved
             denied.value = com.patmanak.contako.domain.model.GroupOperation.entries.filterTo(mutableSetOf()) {
                 availability[ContactGroupCapability.valueOf(it.name)] == ContactGroupCapabilityAvailability.DENIED

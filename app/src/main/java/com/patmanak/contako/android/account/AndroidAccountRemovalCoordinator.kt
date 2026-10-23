@@ -34,6 +34,7 @@ internal class AndroidAccountRemovalCoordinator(
     private val runner: AccountSyncRunner,
     private val platformCleanup: AccountPlatformCleanup = AccountPlatformCleanup.None,
     private val checkpoints: AccountRemovalCheckpointStore = AccountRemovalCheckpointStore.Memory(),
+    private val releaseOwnerAfterLocalDataCleared: suspend () -> Unit = {},
 ) : AccountRemovalCoordinator {
     private val removalMutex = Mutex()
     constructor(
@@ -44,6 +45,7 @@ internal class AndroidAccountRemovalCoordinator(
         runner: AccountSyncRunner,
         platformCleanup: AccountPlatformCleanup = AccountPlatformCleanup.None,
         checkpoints: AccountRemovalCheckpointStore = AccountRemovalCheckpointStore.Memory(),
+        releaseOwnerAfterLocalDataCleared: suspend () -> Unit = {},
     ) : this(
         providerCleaner,
         RoomAccountRemovalLocalStore(database),
@@ -52,6 +54,7 @@ internal class AndroidAccountRemovalCoordinator(
         runner,
         platformCleanup,
         checkpoints,
+        releaseOwnerAfterLocalDataCleared,
     )
 
     override suspend fun remove(account: Account): Boolean =
@@ -147,6 +150,9 @@ internal class AndroidAccountRemovalCoordinator(
             phase = AccountRemovalPhase.LOCAL_CLEARED.also { checkpoints.save(accountScope, account, it) }
         }
         if (phase == AccountRemovalPhase.LOCAL_CLEARED) {
+            // Both deletion paths reach this phase only after Room's deletion transaction commits.
+            // This callback rechecks emptiness and is idempotent when platform removal is retried.
+            releaseOwnerAfterLocalDataCleared()
             platformCleanup.clearNotifications()
             if (removeAndroidAccount) {
                 if (!platformCleanup.removeAndroidAccount(account)) return false

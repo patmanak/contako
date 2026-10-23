@@ -25,14 +25,21 @@ internal class IncrementalRemoteGroupStage(
     private val failureObserver: (GatewayFailureCategory) -> Unit = {},
     private val exceptionObserver: (SyncPassExceptionCategory) -> Unit = {},
 ) {
+    var lastFailureCategory: GatewayFailureCategory? = null
+        private set
+    var lastExceptionCategory: SyncPassExceptionCategory? = null
+        private set
     suspend fun run(
         account: AccountScope,
         isCancellationRequested: () -> Boolean = { false },
     ): RemoteGroupStageResult {
+        lastFailureCategory = null
+        lastExceptionCategory = null
         if (isCancellationRequested()) return RemoteGroupStageResult.Cancelled
         val groups = when (val result = gateway.list(account)) {
             is GatewayOutcome.Success -> result.value
             is GatewayOutcome.Failure -> {
+                lastFailureCategory = result.category
                 runCatching { failureObserver(result.category) }
                 return result.category.toGroupStageResult()
             }
@@ -42,6 +49,7 @@ internal class IncrementalRemoteGroupStage(
             store.commit(account, groups)
             RemoteGroupStageResult.Success(groups.groups.size)
         } catch (error: Throwable) {
+            lastExceptionCategory = syncPassExceptionCategory(error)
             runCatching { exceptionObserver(syncPassExceptionCategory(error)) }
             RemoteGroupStageResult.LocalPersistenceFailure
         }

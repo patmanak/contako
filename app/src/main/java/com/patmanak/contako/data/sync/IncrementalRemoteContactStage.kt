@@ -59,6 +59,8 @@ internal fun interface RemoteContactActionRequiredObserver {
 }
 
 internal sealed interface RemoteContactStageResult {
+    /** Healthy cards and the inventory cursor are durable; rejected cards remain durable obligations. */
+    data class Partial(val deferredCount: Int) : RemoteContactStageResult
     data class Success(
         val inventoryCount: Int,
         val hydratedCount: Int,
@@ -153,13 +155,19 @@ internal class IncrementalRemoteContactStage(
     private val hydrationBatchSize: Int = HYDRATION_BATCH_SIZE,
     private val hydrationReadConcurrency: Int = HYDRATION_READ_CONCURRENCY,
     private val importObserver: SyncPassStageObserver = SyncPassStageObserver { },
+    private val obligations: RemoteHydrationObligationStore? = null,
 ) {
+    var lastFailureCategory: GatewayFailureCategory? = null
+        private set
+    var lastExceptionCategory: SyncPassExceptionCategory? = null
+        private set
     init {
         require(hydrationBatchSize in 1..HYDRATION_BATCH_SIZE)
         require(hydrationReadConcurrency in 1..HYDRATION_READ_CONCURRENCY)
     }
     private fun observe(phase: RemoteImportPhase) = runCatching { importObserver.onImportPhase(phase) }.let { }
     private fun observeFailure(error: Throwable) = runCatching {
+        lastExceptionCategory = syncPassExceptionCategory(error)
         if (error is LocalReconciliationInvariantFailure) importObserver.onImportPhase(error.invariant.phase)
         importObserver.onException(syncPassExceptionCategory(error))
     }.let { }
@@ -170,6 +178,8 @@ internal class IncrementalRemoteContactStage(
         forceHydration: Boolean = false,
         isCancellationRequested: () -> Boolean = { false },
     ): RemoteContactStageResult {
+        lastFailureCategory = null
+        lastExceptionCategory = null
         val cursor = try { planner.eventCursor(account) } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -193,7 +203,8 @@ internal class IncrementalRemoteContactStage(
         if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
         observe(RemoteImportPhase.PLAN_START)
         val plan = try {
-            planner.plan(account, inventory, forceHydration, events, canonicalStore.identityRepairContacts(account))
+            planner.plan(account, inventory, forceHydration, events,
+                canonicalStore.identityRepairContacts(account) + obligations?.pending(account).orEmpty())
         } catch (_: StaleContactInventoryPlan) {
             return RemoteContactStageResult.StalePlan
         } catch (_: IllegalArgumentException) {
@@ -213,6 +224,8 @@ internal class IncrementalRemoteContactStage(
         }
         val hydrationBatches = plan.hydrate.sortedBy { it.value }.chunked(hydrationBatchSize)
         val durableHydrations = mutableSetOf<RemoteContactId>()
+        val deferredHydrations = mutableSetOf<RemoteContactId>()
+        val baselines = plan.nextCheckpoint.entries.associateBy { it.id }
         val durableLabels = mutableSetOf<RemoteContactId>()
         val durableDeletions = mutableSetOf<RemoteContactId>()
         val batchCount = maxOf(1, hydrationBatches.size)
@@ -237,15 +250,25 @@ internal class IncrementalRemoteContactStage(
                 if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
                 hydratedWindow.forEach { (contactId, hydrated) ->
                     when (hydrated) {
-                        is GatewayOutcome.Failure -> return mapFailure(
-                            RemoteContactActionRequiredBoundary.HYDRATION,
-                            hydrated,
-                        )
+                        is GatewayOutcome.Failure -> {
+                            if (obligations == null || hydrated.category !in ISOLATABLE_CARD_FAILURES) {
+                                return mapFailure(RemoteContactActionRequiredBoundary.HYDRATION, hydrated)
+                            }
+                            // The obligation MUST precede cursor acknowledgement. Never import an unverified card.
+                            obligations.defer(account, baselines.getValue(contactId), hydrated)
+                            deferredHydrations += contactId
+                            mapFailure(RemoteContactActionRequiredBoundary.HYDRATION, hydrated)
+                        }
                         is GatewayOutcome.Success -> {
                             if (hydrated.value.id != contactId) {
-                                return actionRequired(RemoteContactActionRequiredBoundary.HYDRATED_IDENTITY)
+                                if (obligations == null) return actionRequired(RemoteContactActionRequiredBoundary.HYDRATED_IDENTITY)
+                                obligations.defer(account, baselines.getValue(contactId),
+                                    GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE))
+                                deferredHydrations += contactId
+                                actionRequired(RemoteContactActionRequiredBoundary.HYDRATED_IDENTITY)
+                            } else {
+                                cards += hydrated.value
                             }
-                            cards += hydrated.value
                         }
                     }
                 }
@@ -270,6 +293,7 @@ internal class IncrementalRemoteContactStage(
                 return RemoteContactStageResult.LocalPersistenceFailure
             }
             durableHydrations += receipt.hydrated
+            obligations?.resolved(account, receipt.hydrated + receipt.deletionsReconciled)
             durableLabels += receipt.labelsReconciled
             durableDeletions += receipt.deletionsReconciled
             batchObserver.afterDurableBatch(cards.size, labels.size, deletions.size)
@@ -280,6 +304,7 @@ internal class IncrementalRemoteContactStage(
                 labelReconciled = durableLabels,
                 deletionsReconciled = durableDeletions,
                 canonicalPersistenceCommitted = true,
+                deferredDurableHydrations = deferredHydrations,
             )
         } catch (_: IllegalArgumentException) {
             return RemoteContactStageResult.LocalPersistenceFailure
@@ -296,6 +321,7 @@ internal class IncrementalRemoteContactStage(
             return RemoteContactStageResult.LocalPersistenceFailure
         }
         observe(RemoteImportPhase.CHECKPOINT_COMMIT_DONE)
+        if (deferredHydrations.isNotEmpty()) return RemoteContactStageResult.Partial(deferredHydrations.size)
         return RemoteContactStageResult.Success(
             inventoryCount = inventory.totalCount,
             hydratedCount = plan.hydrate.size,
@@ -307,12 +333,16 @@ internal class IncrementalRemoteContactStage(
     private companion object {
         const val HYDRATION_BATCH_SIZE = 25
         const val HYDRATION_READ_CONCURRENCY = 10
+        val ISOLATABLE_CARD_FAILURES = setOf(GatewayFailureCategory.MALFORMED_RESPONSE,
+            GatewayFailureCategory.VALIDATION_REJECTED, GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED,
+            GatewayFailureCategory.NOT_FOUND, GatewayFailureCategory.CONFLICT)
     }
 
     private fun mapFailure(
         boundary: RemoteContactActionRequiredBoundary,
         failure: GatewayOutcome.Failure,
     ): RemoteContactStageResult = failure.category.toStageResult().also { result ->
+        lastFailureCategory = failure.category
         if (result == RemoteContactStageResult.ActionRequired) {
             runCatching {
                 actionRequiredObserver.onActionRequired(

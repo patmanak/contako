@@ -25,6 +25,7 @@ import com.patmanak.contako.android.account.ContakoAccountRemovalRuntime
 import com.patmanak.contako.android.account.AccountProvisioningResult
 import com.patmanak.contako.android.account.AccountSignOutCoordinator
 import com.patmanak.contako.data.local.ContakoDatabase
+import com.patmanak.contako.data.local.hasAccountScopedData
 import com.patmanak.contako.data.local.RoomContactRepository
 import com.patmanak.contako.data.proton.ProtonGateCRuntime
 import com.patmanak.contako.data.proton.GateCInteractiveHumanVerification
@@ -97,6 +98,10 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
             }
         } else GateCAuthDiagnostic.Disabled, updateFailureObserver = { stage, category, encoding, field ->
             syncDiagnostic { SanitizedDiagnosticEvent.ContactUpdateFailure(stage, category, encoding, field) }
+        }, hasLocalAccountData = {
+            // Inspect every account-scoped table, including durable receipts and import obligations.
+            // A legacy database with unprovable ownership must never be adopted by a fresh login.
+            database.hasAccountScopedData()
         })
     }
 
@@ -232,6 +237,9 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
             foregroundFirstImport = { sharedSyncRuntime.runner.request(SyncTrigger.FIRST_IMPORT) },
             foregroundSync = { triggers -> triggers.forEach { sharedSyncRuntime.runner.request(it) } },
             hasPendingMutations = { database.outboxDao().observePendingCount(protonGateCRuntime.accountScope.value).first() > 0 },
+            isProtonSessionReady = { protonGateCRuntime.readyOwnerUserId() != null },
+            onCapabilitiesStale = { protonGateCRuntime.invalidateGroupCapabilities(
+                com.patmanak.contako.data.proton.ContactGroupCapabilityInvalidationReason.STALE_FOREGROUND_CHECK) },
             hasPendingAndroidChanges = { accountName ->
                 com.patmanak.contako.data.android.provider.AndroidContactsProviderReader(contentResolver)
                     .hasDirtyRawContacts(com.patmanak.contako.data.android.provider.AndroidProviderAccountName(accountName))
@@ -289,6 +297,26 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
 
     internal val accountSignOutCoordinator: AccountSignOutCoordinator
         get() = sharedSyncRuntime.accountSignOutCoordinator
+
+    internal suspend fun reactivateAuthenticatedProtonAccount() {
+        check(protonGateCRuntime.readyOwnerUserId() != null)
+        sharedSyncRuntime.runner.reactivateAfterAccountProvisioning()
+    }
+
+    /** Retry only the missing Android prerequisite; the remote import has its own checkpoint. */
+    internal fun retryMissingAndroidProvisioning() {
+        applicationScope.launch {
+            runCatching {
+                if (protonGateCRuntime.readyOwnerUserId() == null) return@launch
+                if (database.androidProjectionLedgerDao().getAccount(protonGateCRuntime.accountScope.value)
+                        ?.androidAccountName != null) return@launch
+                val address = protonGateCRuntime.currentAccountAddress() ?: return@launch
+                if (provisionAndroidAccount(address) == AccountProvisioningResult.READY) {
+                    sharedSyncRuntime.runner.request(SyncTrigger.STARTUP_STALE_CHECK)
+                }
+            }
+        }
+    }
 
     /**
      * Creates the Android account and its durable binding for the connected Proton account.

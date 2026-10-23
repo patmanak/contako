@@ -25,11 +25,14 @@ class FoundationI18nContractTest {
                 // Stable navigation/test keys, vCard types, locale pattern and visual flags;
                 // none is untranslated prose presented as a user instruction.
                 "conflict:\${it.contactId}", "blocked:\${it.id}", "pending:\${it.id}", "android:\${it.id}", "local-diagnostics", "contact-editor-save-error",
+                "import:\${it.remoteId}",
                 "__custom__", "", "home", "work", "cell", "other", "mobile",
                 "contact_editor_top_save", "contact_editor_bottom_save", "group_editor_top_save", "group_editor_bottom_save",
                 "contact_editor_fields", "contact_editor_field_picker", "contact_value_options_\${value.id}",
                 "information_content", "brand", "project", "https://github.com/patmanak/contako", "credits", "privacy", "licenses",
                 "https://github.com/patmanak/contako/blob/main/docs/LICENSING.md",
+                // Exact project privacy-policy destination; technical URI, not untranslated copy.
+                "https://github.com/patmanak/contako/blob/main/docs/PRIVACY_POLICY.md",
                 "MMMMd", "\$label, \$selectedLabel", "🌐", "🇬🇧", "🇫🇷", "🇩🇪", "🇪🇸", "🇮🇹", "🇳🇱", "🇵🇱", "🇵🇹", "  ",
             ),
             "ContactsViewModel.kt" to setOf(

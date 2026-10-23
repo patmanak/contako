@@ -17,6 +17,33 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SyncSchedulingPolicyTest {
+    @Test fun `first Proton import does not depend on Android account provisioning`() = runTest {
+        var imports = 0
+        val fixture = fixture(eligibility = { null }, foregroundFirstImport = { imports++ })
+        fixture.policy.onAccountReady()
+        advanceUntilIdle()
+        assertEquals(1, imports)
+        assertTrue(fixture.scheduler.requests.isEmpty())
+        assertTrue(fixture.scheduler.periodic.isEmpty())
+    }
+
+    @Test fun `foreign or revoked Proton session cannot start remote import`() = runTest {
+        var imports = 0
+        val fixture = fixture(isProtonSessionReady = { false }, foregroundFirstImport = { imports++ })
+        fixture.policy.onAccountReady()
+        advanceUntilIdle()
+        assertEquals(0, imports)
+    }
+
+    @Test fun `stale foreground refresh invalidates capability evidence before dispatch`() = runTest {
+        var invalidations = 0
+        val fixture = fixture(lastSuccess = 1, onCapabilitiesStale = { invalidations++ })
+        fixture.policy.onAppStartup()
+        advanceUntilIdle()
+        assertEquals(1, invalidations)
+        assertEquals(setOf(SyncTrigger.STARTUP_STALE_CHECK), fixture.scheduler.requests.single().second)
+    }
+
     @Test
     fun failedPeriodicRegistrationIsRetriedOnResume() = runTest {
         val fixture = fixture(lastSuccess = 1_000_000)
@@ -364,6 +391,8 @@ class SyncSchedulingPolicyTest {
         foregroundSync: (suspend (Set<SyncTrigger>) -> Unit)? = null,
         hasPendingMutations: suspend () -> Boolean = { false },
         hasPendingAndroidChanges: suspend (String) -> Boolean = { false },
+        isProtonSessionReady: suspend () -> Boolean = { true },
+        onCapabilitiesStale: () -> Unit = {},
     ): Fixture {
         val clock = FakeClock(now)
         val scheduler = FakeScheduler()
@@ -380,6 +409,8 @@ class SyncSchedulingPolicyTest {
                 foregroundSync = foregroundSync,
                 hasPendingMutations = hasPendingMutations,
                 hasPendingAndroidChanges = hasPendingAndroidChanges,
+                isProtonSessionReady = isProtonSessionReady,
+                onCapabilitiesStale = onCapabilitiesStale,
                 delayMillis = {
                     kotlinx.coroutines.delay(it)
                     clock.now += it

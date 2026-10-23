@@ -208,6 +208,20 @@ internal class AuthenticationViewModel(
 
     fun signOut() = cancelAuthentication()
 
+    /** Re-evaluate revocation/key-lock changes without deleting canonical data or durable intent. */
+    fun onSessionChanged() {
+        if (mutableState.value.destination == AuthenticationDestination.READY) {
+            launchOperation(AuthenticationDestination.RESTORING) { port.restore() }
+        }
+    }
+
+    fun reauthenticate(clearSession: suspend () -> Unit) {
+        launchOperation(AuthenticationDestination.RESTORING) {
+            clearSession()
+            port.restore()
+        }
+    }
+
     fun dismissMessage() {
         mutableState.value = mutableState.value.copy(message = null)
     }

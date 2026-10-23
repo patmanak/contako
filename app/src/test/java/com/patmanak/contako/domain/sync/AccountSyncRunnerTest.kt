@@ -13,6 +13,52 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AccountSyncRunnerTest {
+    @Test fun completionRetainsClosedFailureCauseAndSuccessClearsIt() = runTest {
+        var outcome = SyncPassOutcome.ACTION_REQUIRED
+        val executor = object : SyncPassExecutor, SyncPassCompletionDetailsSource {
+            override var completionCause: SyncCompletionCause? = SyncCompletionCause.VALIDATION
+            override suspend fun execute(request: SyncPassRequest) = outcome
+        }
+        val runner = AccountSyncRunner(backgroundScope, executor)
+        for (cause in SyncCompletionCause.entries) {
+            executor.completionCause = cause
+            runner.request(SyncTrigger.MANUAL)
+            runner.awaitIdle()
+            assertEquals(cause, runner.lastCompletion.value?.cause)
+        }
+        outcome = SyncPassOutcome.SUCCESS
+        // Even a defective executor retaining old metadata cannot contaminate success.
+        runner.request(SyncTrigger.MANUAL)
+        runner.awaitIdle()
+        assertEquals(null, runner.lastCompletion.value?.cause)
+    }
+
+    @Test fun thrownIoIsRetryableButUnknownExceptionsAreNotClaimedToBeDatabaseFailures() = runTest {
+        for (io in listOf(false, true)) {
+            val runner = AccountSyncRunner(backgroundScope) {
+                if (io) throw java.io.IOException("PRIVATE_NETWORK_TEXT")
+                else error("PRIVATE_UNCLASSIFIED_TEXT")
+            }
+            runner.request(SyncTrigger.MANUAL)
+            runner.awaitIdle()
+            val completed = requireNotNull(runner.lastCompletion.value)
+            assertEquals(if (io) SyncPassOutcome.RETRY_WAITING else SyncPassOutcome.FAILED, completed.outcome)
+            assertEquals(if (io) SyncCompletionCause.TRANSIENT_IO else SyncCompletionCause.UNKNOWN, completed.cause)
+            assertFalse(completed.toString().contains("PRIVATE"))
+        }
+    }
+
+    @Test fun completionDetailsFailureCannotBreakTheRunner() = runTest {
+        val runner = AccountSyncRunner(backgroundScope, object : SyncPassExecutor, SyncPassCompletionDetailsSource {
+            override val completionCause: SyncCompletionCause? get() = error("PRIVATE")
+            override suspend fun execute(request: SyncPassRequest) = SyncPassOutcome.ACTION_REQUIRED
+        })
+        runner.request(SyncTrigger.MANUAL)
+        runner.awaitIdle()
+        assertEquals(SyncCompletionCause.UNKNOWN, runner.lastCompletion.value?.cause)
+        assertEquals(SyncPassOutcome.ACTION_REQUIRED, runner.lastCompletion.value?.outcome)
+    }
+
     @Test fun diagnosticObserversDescribeRequestsAndCannotChangeScheduling() = runTest {
         val events = mutableListOf<String>()
         val observer = object : SyncRunnerObserver {

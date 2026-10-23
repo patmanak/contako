@@ -6,6 +6,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -88,6 +90,7 @@ internal interface GateCSessionLifecycle {
 internal class ProtonCoreSessionCoordinator(
     private val accountRepository: AccountRepository,
     private val addressDao: AddressDao? = null,
+    private val owner: DurableAccountOwner? = null,
 ) : SessionProvider, SessionListener, GateCSessionLifecycle {
     private val locks = ConcurrentHashMap<String, Mutex>()
     private val transientSessions = ConcurrentHashMap<String, Session>()
@@ -95,9 +98,20 @@ internal class ProtonCoreSessionCoordinator(
     private val sessionStateLock = Mutex()
     private var sessionGeneration = 0L
     private val invalidatedSessionIds = mutableSetOf<String>()
+    private val sessionCleanupGenerations = mutableSetOf<Long>()
     private val refreshFlightsLock = Mutex()
     private val refreshFlights = mutableMapOf<String, CompletableDeferred<Boolean>>()
     private val loginAttemptLock = Mutex()
+    private val mutableSessionRevision = MutableStateFlow(0L)
+    val sessionRevision = mutableSessionRevision.asStateFlow()
+    private var sessionChanged: (() -> Unit)? = null
+
+    fun bindSessionChanged(listener: () -> Unit) { check(sessionChanged == null); sessionChanged = listener }
+
+    private fun publishSessionChanged() {
+        mutableSessionRevision.value = Math.incrementExact(mutableSessionRevision.value)
+        sessionChanged?.invoke()
+    }
 
     @Volatile
     private var authRepository: AuthRepository? = null
@@ -118,7 +132,9 @@ internal class ProtonCoreSessionCoordinator(
     override suspend fun beginLoginAttempt(): Boolean {
         if (!loginAttemptLock.tryLock()) return false
         return try {
-            if (accountRepository.getAccounts().first().isEmpty()) {
+            if (sessionStateLock.withLock {
+                    sessionCleanupGenerations.isEmpty() && accountRepository.getAccounts().first().isEmpty()
+                }) {
                 true
             } else {
                 loginAttemptLock.unlock()
@@ -135,9 +151,11 @@ internal class ProtonCoreSessionCoordinator(
     }
 
     override suspend fun persistLogin(sessionInfo: SessionInfo) = sessionStateLock.withLock {
+        check(sessionCleanupGenerations.isEmpty())
         require(sessionInfo.sessionId.id !in invalidatedSessionIds)
         val existing = accountRepository.getAccounts().first()
         require(existing.isEmpty() || existing.single().userId == sessionInfo.userId)
+        owner?.requireOwner(sessionInfo.userId, existingSession = existing.singleOrNull()?.userId == sessionInfo.userId)
         val secondFactorRequired = sessionInfo.secondFactor is SecondFactor.Enabled
         val account = Account(
             userId = sessionInfo.userId,
@@ -172,6 +190,7 @@ internal class ProtonCoreSessionCoordinator(
         )
         accountRepository.createOrUpdateAccountSession(account, session)
         transientSessions[session.sessionId.id] = session
+        publishSessionChanged()
     }
 
     override suspend fun completeSecondFactor(
@@ -189,14 +208,22 @@ internal class ProtonCoreSessionCoordinator(
     }
 
     override suspend fun activate(userId: UserId) {
-        accountRepository.updateSessionState(userId, SessionState.Authenticated)
-        accountRepository.updateAccountState(userId, AccountState.Ready)
+        sessionStateLock.withLock {
+            val account = accountRepository.getAccounts().first().singleOrNull()
+            check(account != null && account.userId == userId && account.sessionId?.id !in invalidatedSessionIds)
+            owner?.requireOwner(userId, existingSession = true)
+            accountRepository.updateSessionState(userId, SessionState.Authenticated)
+            accountRepository.updateAccountState(userId, AccountState.Ready)
+            publishSessionChanged()
+        }
     }
 
-    override suspend fun state(): GateCStoredSessionState {
+    override suspend fun state(): GateCStoredSessionState = sessionStateLock.withLock {
         val account = accountRepository.getAccounts().first().singleOrNull()
-            ?: return GateCStoredSessionState.ABSENT
-        return when {
+            ?: return@withLock GateCStoredSessionState.ABSENT
+        if (account.sessionId?.id in invalidatedSessionIds) return@withLock GateCStoredSessionState.ABSENT
+        owner?.requireOwner(account.userId, existingSession = true)
+        when {
             account.sessionState == SessionState.SecondFactorNeeded -> GateCStoredSessionState.SECOND_FACTOR_REQUIRED
             account.state == AccountState.TwoPassModeNeeded && account.sessionState == SessionState.Authenticated ->
                 GateCStoredSessionState.MAILBOX_PASSWORD_REQUIRED
@@ -206,10 +233,13 @@ internal class ProtonCoreSessionCoordinator(
         }
     }
 
-    override suspend fun currentUserId(): UserId? = accountRepository.getAccounts().first().singleOrNull()?.userId
+    override suspend fun currentUserId(): UserId? = accountRepository.getAccounts().first().singleOrNull()?.userId?.also {
+        owner?.requireOwner(it, existingSession = true)
+    }
 
     override suspend fun currentAccountAddress(): String? {
         val account = accountRepository.getAccounts().first().singleOrNull() ?: return null
+        owner?.requireOwner(account.userId, existingSession = true)
         val addresses = addressDao
             ?.getByUserId(account.userId)
             ?.map { GateCDisplayAddress(it.email, it.enabled, it.order) }
@@ -280,26 +310,25 @@ internal class ProtonCoreSessionCoordinator(
     }
 
     private suspend fun cleanupRejectedSession(session: Session) {
-        val userId = (session as? Session.Authenticated)?.userId ?: getUserId(session.sessionId)
-        try {
-            forcedLogoutCleanup?.invoke(userId)
-        } finally {
-            clearLocal(userId)
-        }
+        invalidateAndCleanupSession(session)
     }
 
     override suspend fun clearLocal(userId: UserId?) = sessionStateLock.withLock {
         sessionGeneration++
-        invalidatedSessionIds += transientSessions.keys
+        fun belongsToTarget(session: Session) = userId == null ||
+            (session as? Session.Authenticated)?.userId == userId
+        val transientTargets = transientSessions.values.filter(::belongsToTarget).map { it.sessionId.id }
+        invalidatedSessionIds += transientTargets
         try {
-            invalidatedSessionIds += accountRepository.getSessions().first().map { it.sessionId.id }
+            invalidatedSessionIds += accountRepository.getSessions().first().filter(::belongsToTarget).map { it.sessionId.id }
             if (userId != null) {
                 accountRepository.deleteAccount(userId)
             } else {
                 accountRepository.getAccounts().first().forEach { accountRepository.deleteAccount(it.userId) }
             }
         } finally {
-            transientSessions.clear()
+            transientTargets.forEach { transientSessions.remove(it) }
+            publishSessionChanged()
         }
     }
 
@@ -370,38 +399,71 @@ internal class ProtonCoreSessionCoordinator(
     }
 
     override suspend fun onSessionForceLogout(session: Session, httpCode: Int) {
-        if (getSession(session.sessionId) == null) return
-        val userId = (session as? Session.Authenticated)?.userId ?: getUserId(session.sessionId)
+        invalidateAndCleanupSession(session)
+    }
+
+    /**
+     * Claim the exact failing session before yielding to key cleanup. Login admission stays closed
+     * until that cleanup finishes, even if an explicit reauthentication clears Core records first.
+     * No repository/session mutex is held while the cleanup callback runs.
+     */
+    private suspend fun invalidateAndCleanupSession(failed: Session) = withContext(NonCancellable) {
+        val cleanup = sessionStateLock.withLock {
+            if (failed.sessionId.id in invalidatedSessionIds) return@withLock null
+            val current = accountRepository.getSessionOrNull(failed.sessionId)
+                ?: transientSessions[failed.sessionId.id] ?: return@withLock null
+            // A delayed callback for an older token must not revoke a refreshed session.
+            if (current.accessToken != failed.accessToken || current.refreshToken != failed.refreshToken) return@withLock null
+            validateSessionIdentity(current, failed)
+            sessionGeneration = Math.incrementExact(sessionGeneration)
+            val generation = sessionGeneration
+            sessionCleanupGenerations += generation
+            invalidatedSessionIds += failed.sessionId.id
+            transientSessions.remove(failed.sessionId.id)
+            publishSessionChanged()
+            generation to (current as? Session.Authenticated)?.userId
+        } ?: return@withContext
         try {
-            forcedLogoutCleanup?.invoke(userId)
+            forcedLogoutCleanup?.invoke(cleanup.second)
         } finally {
-            clearLocal(userId)
+            sessionStateLock.withLock {
+                try {
+                    // clearLocal/reauthentication may already have removed it. Never delete a
+                    // replacement account session or invalidate its tokens from this callback.
+                    val currentAccount = accountRepository.getAccounts().first().singleOrNull()
+                    if (currentAccount?.sessionId == failed.sessionId && currentAccount.userId == cleanup.second) {
+                        accountRepository.deleteAccount(currentAccount.userId)
+                    }
+                } finally {
+                    sessionCleanupGenerations -= cleanup.first
+                    transientSessions.remove(failed.sessionId.id)
+                    publishSessionChanged()
+                }
+            }
         }
     }
 
     private suspend fun refreshPersistedSession(session: Session, generation: Long? = null): Boolean {
+        var identityFailureTarget: Session? = null
         try {
             return sessionStateLock.withLock {
                 if ((generation != null && generation != sessionGeneration) ||
                     session.sessionId.id in invalidatedSessionIds) return@withLock false
                 val persisted = accountRepository.getSessionOrNull(session.sessionId)
                 val previous = persisted ?: transientSessions[session.sessionId.id] ?: return@withLock false
+                identityFailureTarget = previous
                 validateSessionIdentity(previous, session)
                 if (persisted != null) {
                     accountRepository.updateSessionToken(session.sessionId, session.accessToken, session.refreshToken)
                     accountRepository.updateSessionScopes(session.sessionId, session.scopes)
                 }
                 transientSessions[session.sessionId.id] = session
+                publishSessionChanged()
                 true
             }
         } catch (error: ProtonSessionIdentityMismatch) {
             // Cleanup may itself call session APIs; it must run outside sessionStateLock.
-            val userId = getUserId(session.sessionId)
-            try {
-                forcedLogoutCleanup?.invoke(userId)
-            } finally {
-                clearLocal(userId)
-            }
+            identityFailureTarget?.let { invalidateAndCleanupSession(it) }
             throw error
         }
     }

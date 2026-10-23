@@ -64,6 +64,8 @@ internal class SyncSchedulingPolicy(
     private val foregroundSync: (suspend (Set<SyncTrigger>) -> Unit)? = null,
     private val hasPendingMutations: suspend () -> Boolean = { false },
     private val hasPendingAndroidChanges: suspend (String) -> Boolean = { false },
+    private val isProtonSessionReady: suspend () -> Boolean = { true },
+    private val onCapabilitiesStale: () -> Unit = {},
 ) : Closeable {
     private val guard = Any()
     private val pendingTriggers = linkedSetOf<SyncTrigger>()
@@ -113,17 +115,18 @@ internal class SyncSchedulingPolicy(
             val lastSuccess = lastSuccessfulSyncReader.lastSuccessAtEpochMillis()
             val now = clock.nowEpochMillis()
             if (lastSuccess == null || now < lastSuccess || now - lastSuccess > STARTUP_STALE_MILLIS) {
+                onCapabilitiesStale()
                 enqueue(SyncTrigger.STARTUP_STALE_CHECK, 0L, generation)
             }
         }
     }
 
     /**
-     * Re-evaluates automatic work after authentication and Android-account provisioning complete.
+     * Re-evaluates work after Proton authentication and durable ownership validation complete.
      *
      * Activity startup happens before an interactive sign-in can create the Android account. Any
      * startup request made at that point is correctly rejected by [SyncAccountEligibility], but it
-     * must be reconsidered once the account becomes eligible. Repeated ready notifications are
+     * must be reconsidered once the session becomes eligible. Repeated ready notifications are
      * harmless: [enqueue] coalesces the same trigger while it is pending and revalidates Android's
      * automatic-sync switch immediately before submitting work.
      */
@@ -133,6 +136,7 @@ internal class SyncSchedulingPolicy(
         initialize()
         val generation = activeGeneration() ?: return
         launchScheduling {
+            if (!isProtonSessionReady() || activeGeneration() != generation) return@launchScheduling
             ensurePeriodic(generation)
             val lastSuccess = lastSuccessfulSyncReader.lastSuccessAtEpochMillis()
             val now = clock.nowEpochMillis()
@@ -274,17 +278,26 @@ internal class SyncSchedulingPolicy(
     }
 
     private suspend fun dispatchPending(generation: Long, triggers: Set<SyncTrigger>) {
-        val account = accountEligibility.current()
+        if (!isProtonSessionReady() || !isActiveGeneration(generation)) return
+        val account = try {
+            accountEligibility.current()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
         val dispatchForeground = synchronized(guard) {
-            if (!active || lifecycleGeneration != generation || account?.automaticSyncEnabled != true) {
+            if (!active || lifecycleGeneration != generation || account?.automaticSyncEnabled == false) {
                 return@synchronized false
             }
-            scheduler.request(account.androidAccountName, triggers)
+            if (account != null) {
+                scheduler.request(account.androidAccountName, triggers)
+                oneShotWorkRequests++
+            }
             lastOneShotAt = clock.nowEpochMillis()
-            oneShotWorkRequests++
             foreground && networkState == SchedulingNetworkState.ONLINE &&
                 (SyncTrigger.MUTATION_COMMITTED in triggers || SyncTrigger.CONNECTIVITY_RETURNED in triggers ||
-                    SyncTrigger.ANDROID_UPLOAD in triggers)
+                    SyncTrigger.ANDROID_UPLOAD in triggers || SyncTrigger.STARTUP_STALE_CHECK in triggers)
         }
         if (dispatchForeground && synchronized(guard) { active && lifecycleGeneration == generation && foreground }) {
             // Keep the platform request for process death/background recovery. The same runner

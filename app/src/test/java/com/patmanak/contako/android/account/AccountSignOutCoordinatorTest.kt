@@ -14,6 +14,36 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AccountSignOutCoordinatorTest {
+    @Test fun `unprovisioned account signs out only through explicitly supplied safe cleanup`() = runTest {
+        val account = AccountScope("scope")
+        var cleaned = false
+        val coordinator = AccountSignOutCoordinator(account, PendingMutationReader { 0 },
+            BoundAndroidAccountReader { null }, AccountSyncRunner(backgroundScope) { SyncPassOutcome.SUCCESS },
+            InAppAccountRemoval { _, _ -> error("No Android account may be touched") },
+            noAndroidRemoval = { discard -> assertFalse(discard); cleaned = true; true })
+        assertEquals(SignOutResult.SignedOut, coordinator.signOut(SignOutChoice.CONFIRM))
+        assertTrue(cleaned)
+    }
+
+    @Test fun `missing safe unprovisioned cleanup remains fail closed`() = runTest {
+        val coordinator = AccountSignOutCoordinator(AccountScope("scope"), PendingMutationReader { 0 },
+            BoundAndroidAccountReader { null }, AccountSyncRunner(backgroundScope) { SyncPassOutcome.SUCCESS },
+            InAppAccountRemoval { _, _ -> error("No Android account may be touched") })
+        assertEquals(SignOutResult.CleanupFailed, coordinator.signOut(SignOutChoice.CONFIRM))
+    }
+
+    @Test fun `unprovisioned pending changes still require explicit discard`() = runTest {
+        var discardReceived = false
+        val coordinator = AccountSignOutCoordinator(AccountScope("scope"), PendingMutationReader { 2 },
+            BoundAndroidAccountReader { null }, AccountSyncRunner(backgroundScope) { SyncPassOutcome.SUCCESS },
+            InAppAccountRemoval { _, _ -> error("No Android account may be touched") },
+            noAndroidRemoval = { discard -> discardReceived = discard; true })
+        assertEquals(SignOutResult.PendingChanges, coordinator.signOut(SignOutChoice.CONFIRM))
+        assertFalse(discardReceived)
+        assertEquals(SignOutResult.SignedOut, coordinator.signOut(SignOutChoice.DISCARD))
+        assertTrue(discardReceived)
+    }
+
     @Test fun `sync now observes native work even when the initial count is zero`() = runTest {
         val fixture = fixture(pending = 0)
         assertEquals(SignOutResult.SignedOut, fixture.coordinator.signOut(SignOutChoice.SYNC_NOW))

@@ -12,7 +12,6 @@ import android.os.IBinder
 import com.patmanak.contako.android.account.ContakoAndroidAccountContract
 import com.patmanak.contako.data.sync.AndroidSyncWorkScheduler
 import com.patmanak.contako.domain.sync.AccountSyncRunner
-import com.patmanak.contako.domain.sync.SyncPassOutcome
 import com.patmanak.contako.domain.sync.SyncRequestDisposition
 import com.patmanak.contako.domain.sync.SyncTrigger
 
@@ -72,12 +71,13 @@ internal class ContakoContactsSyncAdapter(
                 return@runSyncAdapterBlocking
             }
             runner.awaitIdle()
-            when (runner.lastCompletion.value?.outcome) {
-                SyncPassOutcome.SUCCESS -> syncResult.stats.numEntries++
-                SyncPassOutcome.RETRY_WAITING -> syncResult.stats.numIoExceptions++
-                SyncPassOutcome.ACTION_REQUIRED -> syncResult.stats.numAuthExceptions++
-                SyncPassOutcome.FAILED -> syncResult.databaseError = true
-                SyncPassOutcome.CANCELLED, null -> Unit
+            when (classifyAndroidSyncCompletion(runner.lastCompletion.value)) {
+                AndroidSyncCompletionClassification.SUCCESS -> syncResult.stats.numEntries++
+                AndroidSyncCompletionClassification.RETRYABLE_IO -> syncResult.stats.numIoExceptions++
+                AndroidSyncCompletionClassification.AUTHENTICATION -> syncResult.stats.numAuthExceptions++
+                AndroidSyncCompletionClassification.STORAGE -> syncResult.databaseError = true
+                AndroidSyncCompletionClassification.ACTION_REQUIRED -> syncResult.stats.numParseExceptions++
+                AndroidSyncCompletionClassification.NONE -> Unit
             }
         }
         com.patmanak.contako.diagnostics.SanitizedDiagnosticLog.write(

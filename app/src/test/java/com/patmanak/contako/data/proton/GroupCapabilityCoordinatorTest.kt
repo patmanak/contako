@@ -16,6 +16,9 @@ import com.patmanak.contako.data.gateway.ProtonContactInventoryGateway
 import com.patmanak.contako.data.gateway.RemoteContactGroup
 import com.patmanak.contako.data.gateway.RemoteGroupId
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -24,6 +27,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GroupCapabilityCoordinatorTest {
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun lateDenialCannotReinstallEvidenceFromRevokedSessionGeneration() = runTest {
+        val release = CompletableDeferred<Unit>()
+        val fake = FakeGroupGateway()
+        val delayed = object : ProtonContactGroupGateway by fake {
+            override suspend fun create(account: AccountScope, mutation: ContactGroupMutation.Create): GatewayOutcome<RemoteContactGroup> {
+                release.await()
+                return GatewayOutcome.Failure(GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED)
+            }
+        }
+        val coordinator = AccountScopedContactGroupCapabilityCoordinator(ACCOUNT, delayed)
+        val pending = async { coordinator.create(ACCOUNT, ContactGroupMutation.Create("Fixture", null)) }
+        runCurrent()
+        val beforeInvalidation = coordinator.invalidationGeneration()
+        coordinator.invalidate(ACCOUNT, ContactGroupCapabilityInvalidationReason.SESSION_CHANGED)
+        assertEquals(beforeInvalidation + 1, coordinator.invalidationGeneration())
+        release.complete(Unit)
+        pending.await()
+        assertTrue(coordinator.deniedOperations.value.isEmpty())
+        assertAvailability(coordinator, ContactGroupCapability.CREATE, ContactGroupCapabilityAvailability.UNKNOWN)
+        coordinator.list(ACCOUNT)
+        assertEquals(beforeInvalidation + 1, coordinator.invalidationGeneration())
+        assertAvailability(coordinator, ContactGroupCapability.LIST, ContactGroupCapabilityAvailability.AVAILABLE)
+    }
+
     @Test fun uiDenialsRemainOperationScopedIncludingEmailAssignments() = runTest {
         val fake = FakeGroupGateway()
         val coordinator = AccountScopedContactGroupCapabilityCoordinator(ACCOUNT, fake)

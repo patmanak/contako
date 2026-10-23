@@ -27,6 +27,7 @@ import com.patmanak.contako.domain.sync.SyncPassOutcome
 import com.patmanak.contako.domain.sync.SyncPassRequest
 import com.patmanak.contako.domain.sync.SyncScope
 import com.patmanak.contako.domain.sync.SyncTrigger
+import com.patmanak.contako.domain.sync.SyncCompletionCause
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -530,6 +531,209 @@ class ContakoSyncPassExecutorTest {
 
         assertEquals(SyncPassOutcome.SUCCESS, executor.execute(request()))
         assertEquals(1, contactCalls)
+    }
+
+    @Test fun groupListFailuresPreserveCatalogAndDoNotStarveHealthyContactsOrFinalProjection() = runTest {
+        for (category in listOf(GatewayFailureCategory.TIMEOUT, GatewayFailureCategory.RATE_LIMITED,
+            GatewayFailureCategory.REMOTE_SERVICE_FAILURE, GatewayFailureCategory.UNKNOWN,
+            GatewayFailureCategory.MALFORMED_RESPONSE)) {
+            val catalog = mutableListOf(RemoteContactGroup(com.patmanak.contako.data.gateway.RemoteGroupId("existing-group"),
+                "Existing fixture", "#8080FF"))
+            val order = mutableListOf<String>()
+            val stages = mutableListOf<SyncPassStage>()
+            val publications = mutableListOf<SyncPassOutcome>()
+            val availability = mutableListOf<Boolean>()
+            val stage = IncrementalRemoteGroupStage(failingGroups(category), RemoteGroupReconciliationStore { _, groups ->
+                catalog.clear()
+                catalog.addAll(groups.groups)
+            })
+            val executor = executor(prerequisite = { SyncPrerequisiteState.READY },
+                inventory = { order += "contacts" }, canonical = { order += "canonical" },
+                store = SingleCommandStore(command()), prepare = { order += "prepare" }, upload = { order += "upload" },
+                groupStage = stage, publish = { publications += it },
+                stageObserver = SyncPassStageObserver { stages += it },
+                onGroupCatalogAvailability = { availability += it })
+            val expected = if (category == GatewayFailureCategory.MALFORMED_RESPONSE)
+                SyncPassOutcome.ACTION_REQUIRED else SyncPassOutcome.RETRY_WAITING
+            assertEquals(category.name, expected, executor.execute(request()))
+            assertEquals(category.name, listOf("contacts", "canonical", "prepare", "upload"), order)
+            assertEquals(category.name, listOf("existing-group"), catalog.map { it.id.value })
+            assertTrue(category.name, SyncPassStage.ANDROID_FINAL_PROJECTION in stages)
+            assertEquals(category.name, listOf(expected), publications)
+            assertEquals(category.name, listOf(false), availability)
+            assertEquals(category, stage.lastFailureCategory)
+            if (category == GatewayFailureCategory.MALFORMED_RESPONSE)
+                assertEquals(SyncCompletionCause.VALIDATION, executor.completionCause)
+        }
+    }
+
+    @Test fun groupAuthenticationFailureStopsIndependentRemoteWorkWithAnAuthenticationCause() = runTest {
+        var contactCalls = 0
+        val executor = executor(prerequisite = { SyncPrerequisiteState.READY },
+            inventory = { contactCalls++ }, canonical = { contactCalls++ },
+            store = SingleCommandStore(command()), prepare = { contactCalls++ }, upload = { contactCalls++ },
+            groupStage = IncrementalRemoteGroupStage(failingGroups(GatewayFailureCategory.AUTHENTICATION_REQUIRED),
+                RemoteGroupReconciliationStore { _, _ -> error("NO_CATALOG_COMMIT") }))
+        assertEquals(SyncPassOutcome.ACTION_REQUIRED, executor.execute(request()))
+        assertEquals(0, contactCalls)
+        assertEquals(SyncCompletionCause.AUTHENTICATION, executor.completionCause)
+    }
+
+    @Test fun contactReadAuthenticationFailureAfterReadyPrerequisitesStopsUploadsWithAuthCause() = runTest {
+        for (boundary in listOf("events", "inventory", "hydration")) {
+            var uploads = 0
+            var canonicalCommits = 0
+            val executor = executor(prerequisite = { SyncPrerequisiteState.READY }, inventory = {},
+                canonical = { canonicalCommits++ }, store = SingleCommandStore(command()), prepare = {},
+                upload = { uploads++ }, eventFailure = GatewayFailureCategory.AUTHENTICATION_REQUIRED.takeIf { boundary == "events" },
+                inventoryFailure = GatewayFailureCategory.AUTHENTICATION_REQUIRED.takeIf { boundary == "inventory" },
+                cardFailure = GatewayFailureCategory.AUTHENTICATION_REQUIRED.takeIf { boundary == "hydration" })
+            assertEquals(boundary, SyncPassOutcome.ACTION_REQUIRED, executor.execute(request()))
+            assertEquals(boundary, SyncCompletionCause.AUTHENTICATION, executor.completionCause)
+            assertEquals(boundary, 0, uploads)
+            assertEquals(boundary, 0, canonicalCommits)
+        }
+    }
+
+    @Test fun canonicalStorageAndIoExceptionsRetainDistinctCompletionCauses() = runTest {
+        for (storage in listOf(false, true)) {
+            var uploads = 0
+            val executor = executor(prerequisite = { SyncPrerequisiteState.READY }, inventory = {},
+                canonical = {
+                    if (storage) throw android.database.sqlite.SQLiteException("PRIVATE_DATABASE_DETAIL")
+                    else throw java.io.IOException("PRIVATE_IO_DETAIL")
+                }, store = SingleCommandStore(command()), prepare = {}, upload = { uploads++ })
+            assertEquals(SyncPassOutcome.FAILED, executor.execute(request()))
+            assertEquals(if (storage) SyncCompletionCause.STORAGE else SyncCompletionCause.TRANSIENT_IO,
+                executor.completionCause)
+            assertEquals(0, uploads)
+        }
+    }
+
+    @Test fun resumedRepairRefreshesGroupCatalogBeforeDrainingPendingGroupIntent() = runTest {
+        val events = mutableListOf<String>()
+        val repair = MemoryFullRepair(events).apply {
+            progress = progress.copy(revision = 3, phase = FullRepairPhase.CANONICAL_RECONCILIATION,
+                completedUnits = 1, totalUnits = 1)
+        }
+        val gateway = object : ProtonContactGroupGateway by failingGroups(GatewayFailureCategory.UNKNOWN) {
+            override suspend fun list(account: AccountScope): GatewayOutcome<AvailableContactGroups> {
+                events += "groups-read"
+                return GatewayOutcome.Success(AvailableContactGroups(listOf(RemoteContactGroup(
+                    com.patmanak.contako.data.gateway.RemoteGroupId("fixture-group"), "Fixture", "#8080FF"))))
+            }
+        }
+        var available = false
+        val groupCommand = DurableMutationCommand("account", "GROUP", "pending-group", 1,
+            RemoteMutationOperation.UPDATE, 0, 0, false)
+        val executor = executor(prerequisite = { SyncPrerequisiteState.READY },
+            inventory = { error("COMPLETED_CONTACT_INVENTORY_MUST_NOT_REPEAT") }, canonical = {},
+            store = SingleCommandStore(groupCommand), prepare = {
+                assertTrue(available)
+                events += "group-prepare"
+            }, upload = { events += "group-upload" },
+            groupStage = IncrementalRemoteGroupStage(gateway, RemoteGroupReconciliationStore { _, groups ->
+                assertEquals(listOf("fixture-group"), groups.groups.map { it.id.value })
+                events += "groups-commit"
+            }), onGroupCatalogAvailability = { available = it },
+            fullRepairCoordinator = FullRepairExecutionCoordinator { repair })
+        assertEquals(SyncPassOutcome.SUCCESS, executor.execute(fullRepairRequest()))
+        assertTrue(available)
+        assertTrue(repair.cleared)
+        assertTrue(events.indexOf("groups-read") < events.indexOf("groups-commit"))
+        assertTrue(events.indexOf("groups-commit") < events.indexOf("group-prepare"))
+        assertTrue(events.indexOf("group-prepare") < events.indexOf("group-upload"))
+    }
+
+    @Test fun partialFullRepairKeepsItsPhaseAndRetriesOnlyTheDurablyDeferredCard() = runTest {
+        val account = AccountScope("account")
+        val pending = mutableSetOf<RemoteContactId>()
+        val reads = mutableListOf<String>()
+        val committed = mutableSetOf<String>()
+        val checkpoint = MemoryCheckpointStore()
+        var rejected = true
+        val metadata = listOf("healthy", "rejected").map { id -> ContactInventoryMetadata(
+            RemoteContactId(id), "Fixture $id", RemoteVersion("v1"), 1, 1, emptyList(), emptyList(),
+            ContactInventoryVersionProvenance.REMOTE_SERVER, ContactInventoryCoverage.AUTHORITATIVE_REMOTE_REVISION) }
+        val remoteStage = IncrementalRemoteContactStage(ProtonContactInventoryGateway { _, _ -> GatewayOutcome.Success(
+            ContactInventoryPage(metadata, null, null, metadata.size,
+                ContactInventorySnapshotAuthority.AUTHORITATIVE_REMOTE_REVISION)) },
+            ProtonVerifiedContactCardGateway { _, id ->
+                reads += id.value
+                if (id.value == "rejected" && rejected) GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE)
+                else GatewayOutcome.Success(VerifiedContactCard(id, RemoteVersion("v1"),
+                    CanonicalContact(account.value, id.value, displayName = "Fixture ${id.value}")))
+            }, PersistentContactInventoryPlanner(checkpoint),
+            RemoteCanonicalReconciliationStore { _, _, cards, labels, deletions ->
+                committed += cards.map { it.id.value }
+                CanonicalReconciliationReceipt(cards.map { it.id }.toSet(), labels, deletions)
+            }, obligations = object : RemoteHydrationObligationStore {
+                override suspend fun pending(account: AccountScope) = pending.toSet()
+                override suspend fun defer(account: AccountScope,
+                    baseline: com.patmanak.contako.data.proton.ContactInventoryBaseline, failure: GatewayOutcome.Failure) {
+                    pending += baseline.id
+                }
+                override suspend fun resolved(account: AccountScope, ids: Set<RemoteContactId>) { pending -= ids }
+            })
+        val events = mutableListOf<String>()
+        val repair = MemoryFullRepair(events)
+        var uploads = 0
+        var projections = 0
+        val executor = executor(prerequisite = { SyncPrerequisiteState.READY },
+            inventory = { error("OVERRIDDEN_STAGE") }, canonical = {}, store = SingleCommandStore(command()),
+            prepare = {}, upload = { uploads++ }, remoteStageOverride = remoteStage,
+            android = object : AndroidInteroperabilityStage {
+                override suspend fun ingest(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) =
+                    AndroidInteroperabilityStageResult.Success
+                override suspend fun project(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) =
+                    AndroidInteroperabilityStageResult.Success.also { projections++ }
+            }, fullRepairCoordinator = FullRepairExecutionCoordinator { repair })
+        assertEquals(SyncPassOutcome.ACTION_REQUIRED, executor.execute(fullRepairRequest()))
+        assertEquals(setOf("healthy"), committed)
+        assertEquals(setOf(RemoteContactId("rejected")), pending)
+        assertEquals(FullRepairPhase.REMOTE_ENUMERATION, repair.progress.phase)
+        assertTrue(repair.progress.phase.ordinal < FullRepairPhase.CANONICAL_RECONCILIATION.ordinal)
+        assertFalse(repair.cleared)
+        assertEquals(1, uploads)
+        assertEquals(1, projections)
+
+        rejected = false
+        assertEquals(SyncPassOutcome.SUCCESS, executor.execute(fullRepairRequest()))
+        assertEquals(1, reads.count { it == "healthy" })
+        assertEquals(2, reads.count { it == "rejected" })
+        assertEquals(setOf("healthy", "rejected"), committed)
+        assertTrue(pending.isEmpty())
+        assertTrue(repair.cleared)
+        assertEquals(1, uploads)
+        assertEquals(2, projections)
+    }
+
+    @Test fun productionCompletionCauseDistinguishesAuthenticationFromProjectionAndClearsOnSuccess() = runTest {
+        var prerequisite = SyncPrerequisiteState.AUTHENTICATION_REQUIRED
+        var projection = AndroidInteroperabilityStageResult.Success as AndroidInteroperabilityStageResult
+        val executor = executor(prerequisite = { prerequisite }, inventory = {}, canonical = {},
+            store = SingleCommandStore(null), prepare = {}, upload = {}, android = object : AndroidInteroperabilityStage {
+                override suspend fun ingest(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) =
+                    AndroidInteroperabilityStageResult.Success
+                override suspend fun project(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) = projection
+            })
+        assertEquals(SyncPassOutcome.ACTION_REQUIRED, executor.execute(request()))
+        assertEquals(SyncCompletionCause.AUTHENTICATION, executor.completionCause)
+        prerequisite = SyncPrerequisiteState.READY
+        projection = AndroidInteroperabilityStageResult.ActionRequired
+        assertEquals(SyncPassOutcome.ACTION_REQUIRED, executor.execute(request()))
+        assertEquals(SyncCompletionCause.PROJECTION, executor.completionCause)
+        projection = AndroidInteroperabilityStageResult.Success
+        assertEquals(SyncPassOutcome.SUCCESS, executor.execute(request()))
+        assertEquals(null, executor.completionCause)
+    }
+
+    private fun failingGroups(category: GatewayFailureCategory) = object : ProtonContactGroupGateway {
+        override fun capabilities() = ContactGroupCapabilities.PROTON_CORE_36_6_2_SURFACE
+        override suspend fun list(account: AccountScope) = GatewayOutcome.Failure(category)
+        override suspend fun create(account: AccountScope, mutation: ContactGroupMutation.Create): GatewayOutcome<RemoteContactGroup> = error("UNUSED")
+        override suspend fun update(account: AccountScope, mutation: ContactGroupMutation.Update): GatewayOutcome<RemoteContactGroup> = error("UNUSED")
+        override suspend fun delete(account: AccountScope, mutation: ContactGroupMutation.Delete): GatewayOutcome<Unit> = error("UNUSED")
     }
 
     @Test
@@ -1163,6 +1367,11 @@ class ContakoSyncPassExecutorTest {
         uploadOutcome: () -> GatewayOutcome<RemoteMutationAcknowledgement> = {
             GatewayOutcome.Success(RemoteMutationAcknowledgement("remote", "version"))
         },
+        onGroupCatalogAvailability: (Boolean) -> Unit = {},
+        eventFailure: GatewayFailureCategory? = null,
+        inventoryFailure: GatewayFailureCategory? = null,
+        cardFailure: GatewayFailureCategory? = null,
+        remoteStageOverride: IncrementalRemoteContactStage? = null,
     ): ContakoSyncPassExecutor {
         val checkpoint = MemoryCheckpointStore()
         val metadata = ContactInventoryMetadata(
@@ -1170,10 +1379,10 @@ class ContakoSyncPassExecutorTest {
             emptyList(), emptyList(), ContactInventoryVersionProvenance.REMOTE_SERVER,
             ContactInventoryCoverage.AUTHORITATIVE_REMOTE_REVISION,
         )
-        val stage = IncrementalRemoteContactStage(
+        val stage = remoteStageOverride ?: IncrementalRemoteContactStage(
             ProtonContactInventoryGateway { _, _ ->
                 inventory()
-                GatewayOutcome.Success(
+                if (inventoryFailure != null) GatewayOutcome.Failure(inventoryFailure) else GatewayOutcome.Success(
                     ContactInventoryPage(
                         listOf(metadata), null, null, 1,
                         ContactInventorySnapshotAuthority.AUTHORITATIVE_REMOTE_REVISION,
@@ -1181,7 +1390,7 @@ class ContakoSyncPassExecutorTest {
                 )
             },
             ProtonVerifiedContactCardGateway { _, id ->
-                GatewayOutcome.Success(
+                if (cardFailure != null) GatewayOutcome.Failure(cardFailure) else GatewayOutcome.Success(
                     VerifiedContactCard(id, RemoteVersion("version"), CanonicalContact("account", "remote")),
                 )
             },
@@ -1190,6 +1399,9 @@ class ContakoSyncPassExecutorTest {
                 canonical()
                 CanonicalReconciliationReceipt(cards.map { it.id }.toSet(), labels, deletions)
             },
+            eventsGateway = eventFailure?.let { failure -> com.patmanak.contako.data.proton.ProtonContactEventsGateway { _, _ ->
+                GatewayOutcome.Failure(failure)
+            } },
         )
         val orchestrator = DurableMutationOrchestrator(
             store,
@@ -1216,6 +1428,7 @@ class ContakoSyncPassExecutorTest {
             stageObserver = stageObserver,
             androidStageResultObserver = androidStageResultObserver,
             fullRepairCoordinator = fullRepairCoordinator,
+            onGroupCatalogAvailability = onGroupCatalogAvailability,
         )
     }
 

@@ -44,6 +44,52 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RoomBackedMutationGatewaysDeviceTest {
+    @Test fun delete404KeepsTheSameDurableIntentUntilTargetedAbsenceIsConfirmed() = runBlocking {
+        saveContact(CanonicalContact(ACCOUNT.value, "delete-404", displayName = "Disposable"))
+        assertEquals(1, orchestrator().drain(ACCOUNT.value, 1_000).uploaded)
+        val created = requireNotNull(repository.getContact(ACCOUNT.value, "delete-404"))
+        repository.deleteContact(ACCOUNT.value, created.id)
+        val intent = database.outboxDao().getAll(ACCOUNT.value).single()
+        var absenceConfirmed = false
+        val existence = com.patmanak.contako.data.gateway.ProtonContactExistenceGateway { account, id ->
+            assertEquals(ACCOUNT, account)
+            assertEquals(created.remoteContactId, id.value)
+            GatewayOutcome.Success(if (absenceConfirmed)
+                com.patmanak.contako.data.gateway.RemoteContactPresence.CONFIRMED_ABSENT
+            else com.patmanak.contako.data.gateway.RemoteContactPresence.PRESENT)
+        }
+        var deleteAttempts = 0
+        val upload = RoomBackedMutationUploadGateway(ACCOUNT, database,
+            object : ProtonContactMutationGateway {
+                override suspend fun apply(account: AccountScope, mutation: ContactMutation): GatewayOutcome<ContactMutationReceipt> {
+                    assertTrue(mutation is ContactMutation.Delete)
+                    deleteAttempts++
+                    return GatewayOutcome.Failure(GatewayFailureCategory.NOT_FOUND)
+                }
+            }, remote, remote, remote)
+        fun runner() = DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+            RoomBackedMutationPreparationGateway(ACCOUNT, database, remote, remote, existence), upload)
+
+        assertEquals(1, runner().drain(ACCOUNT.value, 1_000).retryWaiting)
+        val pending = database.outboxDao().getAll(ACCOUNT.value).single()
+        assertEquals(intent.revision, pending.revision)
+        assertEquals(intent.remoteIdentity, pending.remoteIdentity)
+        assertEquals("DELETE", pending.operation)
+        assertTrue(pending.requiresReconciliation)
+        assertEquals(intent.revision, database.contactDao().get(ACCOUNT.value, created.id)?.contact?.pendingMutationRevision)
+
+        // Persistence and a new orchestrator cannot turn the generic 404 into acknowledgement.
+        database.close()
+        database = ContakoDatabase.create(context, DATABASE_NAME)
+        absenceConfirmed = true
+        assertEquals(1, runner().drain(ACCOUNT.value, pending.nextAttemptAtEpochMillis).reconciledWithoutUpload)
+        assertEquals(1, deleteAttempts)
+        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+        val tombstone = requireNotNull(database.contactDao().get(ACCOUNT.value, created.id)).contact
+        assertTrue(tombstone.isDeleted)
+        assertNull(tombstone.pendingMutationRevision)
+    }
+
     @Test fun deleteAfterRemoteDeletionRequiresFreshAbsenceProof() = runBlocking {
         saveContact(CanonicalContact(ACCOUNT.value, "deleted-remote", displayName = "Disposable"))
         cleanContact("deleted-remote", "absent-remote")

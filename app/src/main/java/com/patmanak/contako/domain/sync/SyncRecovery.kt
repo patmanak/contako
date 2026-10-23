@@ -16,6 +16,11 @@ enum class SyncDashboardState {
 
 enum class SyncActivity { IDLE, SCHEDULED, RUNNING }
 
+/** Private local presentation data, excluded from diagnostic serialization. */
+data class SyncImportProblem(val remoteId: String, val displayName: String?, val problem: SyncProblem) {
+    override fun toString() = "SyncImportProblem(REDACTED, problem=$problem)"
+}
+
 data class SyncDashboardSnapshot(
     val state: SyncDashboardState,
     val pendingMutationCount: Int = 0,
@@ -26,6 +31,7 @@ data class SyncDashboardSnapshot(
     val androidPendingContactIds: Set<String> = emptySet(),
     /** Local UI locators for blocked Proton writes; never exported or logged. */
     val blockedMutationContactIds: Set<String> = emptySet(),
+    val importProblems: List<SyncImportProblem> = emptyList(),
 ) {
     override fun toString(): String = "SyncDashboardSnapshot(state=$state, pendingMutationCount=$pendingMutationCount, " +
         "actionRequiredCount=$actionRequiredCount, problem=$problem, androidPendingCount=${androidPendingContactIds.size}, " +

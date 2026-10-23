@@ -13,6 +13,10 @@ import android.Manifest
 import com.patmanak.contako.android.account.ContakoAndroidAccountContract
 import com.patmanak.contako.domain.sync.AccountSyncRunner
 import com.patmanak.contako.domain.sync.SyncPassOutcome
+import com.patmanak.contako.domain.sync.SyncCompletionCause
+import com.patmanak.contako.domain.sync.SyncPassCompletionDetailsSource
+import com.patmanak.contako.domain.sync.SyncPassExecutor
+import com.patmanak.contako.domain.sync.SyncPassRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
@@ -27,6 +31,32 @@ class ContakoContactsSyncAdapterDeviceTest {
         InstrumentationRegistry.getInstrumentation().uiAutomation.apply {
             grantRuntimePermission(context.packageName, Manifest.permission.READ_CONTACTS)
             grantRuntimePermission(context.packageName, Manifest.permission.WRITE_CONTACTS)
+        }
+    }
+
+    @Test fun knownCompletionCausesProduceDistinctAndroidStats() {
+        grantContacts()
+        val provider = requireNotNull(context.contentResolver.acquireContentProviderClient(ContactsContract.AUTHORITY))
+        provider.use {
+            for (cause in SyncCompletionCause.entries) {
+                val runner = AccountSyncRunner(CoroutineScope(Dispatchers.Default),
+                    object : SyncPassExecutor, SyncPassCompletionDetailsSource {
+                        override val completionCause = cause
+                        override suspend fun execute(request: SyncPassRequest) = SyncPassOutcome.ACTION_REQUIRED
+                    })
+                val result = SyncResult()
+                ContakoContactsSyncAdapter(context) { runner }.onPerformSync(
+                    Account("synthetic", ContakoAndroidAccountContract.ACCOUNT_TYPE), Bundle(),
+                    ContakoAndroidAccountContract.CONTACTS_AUTHORITY, it, result)
+                assertEquals(cause.name, if (cause == SyncCompletionCause.AUTHENTICATION) 1L else 0L,
+                    result.stats.numAuthExceptions)
+                assertEquals(cause.name, cause == SyncCompletionCause.STORAGE, result.databaseError)
+                assertEquals(cause.name, if (cause == SyncCompletionCause.TRANSIENT_IO) 1L else 0L,
+                    result.stats.numIoExceptions)
+                assertEquals(cause.name, if (cause !in setOf(SyncCompletionCause.AUTHENTICATION,
+                    SyncCompletionCause.STORAGE, SyncCompletionCause.TRANSIENT_IO)) 1L else 0L,
+                    result.stats.numParseExceptions)
+            }
         }
     }
 
