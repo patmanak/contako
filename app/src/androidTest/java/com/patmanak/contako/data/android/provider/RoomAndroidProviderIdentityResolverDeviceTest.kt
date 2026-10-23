@@ -286,7 +286,7 @@ class RoomAndroidProviderIdentityResolverDeviceTest {
         val before = database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID).toSet()
         val invalid = listOf(
             fixture.copy(rawContact = fixture.rawContact.copy(dirty = true)),
-            fixture.copy(rawContact = fixture.rawContact.copy(deleted = true)),
+            fixture.copy(rawContact = fixture.rawContact.copy(deleted = true), dataRows = emptyList()),
             fixture.copy(rawContact = fixture.rawContact.copy(sourceIdentity = "another-source")),
             fixture.copy(dataRows = listOf(row.copy(dataRowId = 601), row)),
             fixture.copy(dataRows = listOf(row.copy(canonicalValueId = "unknown-name"))),

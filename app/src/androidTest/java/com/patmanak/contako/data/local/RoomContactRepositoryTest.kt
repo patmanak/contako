@@ -212,6 +212,14 @@ class RoomContactRepositoryTest {
                 preservationKey = if (kind == ContactValueKind.UNKNOWN_VCARD_PROPERTY) "raw-1" else null,
             )
         }
+        // These three fixture labels are locally entered and cannot be represented by Proton.
+        // Keep the expected payload independent of repository normalization.
+        val localLabelKinds = setOf(ContactValueKind.URL, ContactValueKind.POSTAL_ADDRESS, ContactValueKind.RELATIONSHIP)
+        val expectedValues = values.map { value ->
+            if (value.kind in localLabelKinds) value.copy(
+                metadata = value.metadata + ("contakoLocalOnlyLabel" to "true"),
+            ) else value
+        }
         repository.saveContact(
             CanonicalContact(
                 accountId = ACCOUNT,
@@ -230,7 +238,12 @@ class RoomContactRepositoryTest {
         val restored = requireNotNull(repository.getContact(ACCOUNT, "complete-shape"))
         assertEquals(ContactValueKind.entries.toSet(), restored.values.map { it.kind }.toSet())
         assertEquals(values.map { it.components }, restored.values.map { it.components })
-        assertEquals(values.map { it.metadata }, restored.values.map { it.metadata })
+        assertEquals(expectedValues, restored.values)
+        assertEquals(expectedValues.map { it.metadata }, restored.values.map { it.metadata })
+        restored.values.forEach { value ->
+            assertEquals(if (value.kind in localLabelKinds) "true" else null,
+                value.metadata["contakoLocalOnlyLabel"])
+        }
         assertEquals("private://photo/1", restored.values.first { it.kind == ContactValueKind.PHOTO }.binaryReference)
         assertEquals("X-UNKNOWN;TYPE=test:value", restored.preservationEnvelope?.rawProperties?.get("raw-1"))
     }
@@ -363,6 +376,10 @@ class RoomContactRepositoryTest {
             order = 0,
             metadata = mapOf("vcardTypeTokens" to "X-REMOTE-REL"),
         )
+        val expectedRelation = relation.copy(metadata = mapOf(
+            "vcardTypeTokens" to "X-REMOTE-REL",
+            "contakoLocalOnlyLabel" to "true",
+        ))
         val canary = ContactValue(
             "date-canary",
             ContactValueKind.UNKNOWN_VCARD_PROPERTY,
@@ -390,9 +407,14 @@ class RoomContactRepositoryTest {
 
         val restored = requireNotNull(repository.getContact(ACCOUNT, "fx-c-009-010"))
         assertEquals(edited.values.associateBy(ContactValue::id), restored.values.associateBy(ContactValue::id))
+        assertEquals(listOf(birthday, anniversary, custom.copy(value = "--12-31"), expectedRelation, canary)
+            .associateBy(ContactValue::id), restored.values.associateBy(ContactValue::id))
         assertEquals("--12-31", restored.values.single { it.id == custom.id }.value)
         assertEquals("LOCAL_ONLY", restored.values.single { it.id == custom.id }.metadata["syncDisposition"])
-        assertEquals(relation, restored.values.single { it.id == relation.id })
+        assertEquals(expectedRelation, restored.values.single { it.id == relation.id })
+        assertEquals("true", restored.values.single { it.id == relation.id }.metadata["contakoLocalOnlyLabel"])
+        assertTrue(restored.values.filterNot { it.id == relation.id }
+            .none { "contakoLocalOnlyLabel" in it.metadata })
         assertEquals(canary, restored.values.single { it.id == canary.id })
         assertEquals(envelope, restored.preservationEnvelope)
 
@@ -401,7 +423,7 @@ class RoomContactRepositoryTest {
         reopenDatabase()
 
         val afterDelete = requireNotNull(repository.getContact(ACCOUNT, "fx-c-009-010"))
-        assertEquals(listOf(birthday, anniversary, relation, canary).associateBy(ContactValue::id),
+        assertEquals(listOf(birthday, anniversary, expectedRelation, canary).associateBy(ContactValue::id),
             afterDelete.values.associateBy(ContactValue::id))
         assertEquals(envelope, afterDelete.preservationEnvelope)
         assertEquals(3L, afterDelete.revision)

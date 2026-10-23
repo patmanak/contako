@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactGroup
 import com.patmanak.contako.domain.model.ContactValue
@@ -150,10 +151,18 @@ class RoomRepositoryContractTest {
                 remoteBaseline = "BEGIN:VCARD\nVERSION:4.0\nFN:Synthetic\nEND:VCARD",
             ),
         )
+        val localLabelKinds = setOf(ContactValueKind.URL, ContactValueKind.POSTAL_ADDRESS, ContactValueKind.RELATIONSHIP)
+        // Assert the entire persisted shape, including the explicitly expected local provenance.
+        val expectedValues = originalValues.map { value ->
+            if (value.kind in localLabelKinds) value.copy(
+                metadata = value.metadata + ("contakoLocalOnlyLabel" to "true"),
+            ) else value
+        }
 
         repository.saveContact(original)
         reopenDatabase()
         val firstRead = requireNotNull(repository.getContact(ACCOUNT_A, original.id))
+        assertEquals(expectedValues, firstRead.values)
         now++
         repository.saveContact(firstRead.copy(values = firstRead.values.reversed()))
         reopenDatabase()
@@ -161,7 +170,11 @@ class RoomRepositoryContractTest {
         reopenDatabase()
         val thirdRead = requireNotNull(repository.getContact(ACCOUNT_A, original.id))
 
-        assertEquals(originalValues, secondRead.values)
+        assertEquals(expectedValues, secondRead.values)
+        secondRead.values.forEach { value ->
+            assertEquals(if (value.kind in localLabelKinds) "true" else null,
+                value.metadata["contakoLocalOnlyLabel"])
+        }
         assertEquals(secondRead, thirdRead)
         assertEquals(original.preservationEnvelope, secondRead.preservationEnvelope)
         assertEquals(original.remoteContactId, secondRead.remoteContactId)
@@ -259,8 +272,13 @@ class RoomRepositoryContractTest {
 
     @Test
     fun currentSchemaReopensEmptyAndPopulatedFxP300WithoutLoss() = runBlocking {
-        assertEquals(17, database.openHelper.readableDatabase.version)
+        // The schema assets are exported by Room; a current-schema test must not pin an old migration target.
+        val exportedVersions = requireNotNull(InstrumentationRegistry.getInstrumentation().context.assets
+            .list(ContakoDatabase::class.java.name)).mapNotNull { file -> file.removeSuffix(".json").toIntOrNull() }
+        val currentVersion = requireNotNull(exportedVersions.maxOrNull())
+        assertEquals(currentVersion, database.openHelper.readableDatabase.version)
         reopenDatabase()
+        assertEquals(currentVersion, database.openHelper.readableDatabase.version)
         assertTrue(repository.observeContacts(ACCOUNT_A).first().isEmpty())
 
         repeat(FX_P_300_SIZE) { index ->
@@ -269,6 +287,7 @@ class RoomRepositoryContractTest {
         reopenDatabase()
 
         val contacts = repository.observeContacts(ACCOUNT_A).first()
+        assertEquals(currentVersion, database.openHelper.readableDatabase.version)
         assertEquals(FX_P_300_SIZE, contacts.size)
         assertEquals(FX_P_300_SIZE, contacts.map { it.id }.toSet().size)
         assertEquals(FX_P_300_SIZE, database.outboxDao().getAll(ACCOUNT_A).size)
@@ -278,6 +297,7 @@ class RoomRepositoryContractTest {
         })
 
         reopenDatabase()
+        assertEquals(currentVersion, database.openHelper.readableDatabase.version)
         assertEquals(FX_P_300_SIZE, repository.observeContacts(ACCOUNT_A).first().size)
     }
 

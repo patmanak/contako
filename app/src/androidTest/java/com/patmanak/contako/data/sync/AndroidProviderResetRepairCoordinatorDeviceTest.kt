@@ -122,12 +122,21 @@ class AndroidProviderResetRepairCoordinatorDeviceTest {
         var projected = 0
         val coordinator = AndroidProviderResetRepairCoordinator(
             database,
-            AndroidBoundedProjectionCoordinator { page, _ ->
+            AndroidBoundedProjectionCoordinator { repairContext, afterKey ->
                 projected++
-                assertEquals(null, page)
+                assertEquals(ACCOUNT, repairContext.account)
+                assertEquals(ANDROID_ACCOUNT, repairContext.androidAccountName)
+                assertEquals(2L, repairContext.accountRevision)
+                assertEquals(1L, repairContext.providerEpoch)
+                assertEquals(null, afterKey)
                 AndroidProjectionPage(null, 1) to AndroidBoundedPageResult.Applied
             },
-        ) { _, _ -> AndroidProviderEpochProofWriteResult.Written }
+        ) { accountName, epoch ->
+            assertEquals(ANDROID_ACCOUNT, accountName)
+            assertEquals(1L, epoch)
+            assertEquals(1, projected)
+            AndroidProviderEpochProofWriteResult.Written
+        }
 
         assertEquals(
             AndroidInteroperabilityStageResult.Success,
@@ -137,7 +146,10 @@ class AndroidProviderResetRepairCoordinatorDeviceTest {
         assertEquals(1, projected)
         assertEquals(beforeContact, database.contactDao().get(ACCOUNT.value, canonical.id))
         assertEquals(beforeOutbox, database.outboxDao().getAll(ACCOUNT.value))
-        assertEquals(false, database.androidProjectionLedgerDao().getAccount(ACCOUNT.value)?.providerRepairPending)
+        val completed = requireNotNull(database.androidProjectionLedgerDao().getAccount(ACCOUNT.value))
+        assertEquals(3L, completed.revision)
+        assertEquals(1L, completed.providerEpoch)
+        assertEquals(false, completed.providerRepairPending)
     }
 
     private companion object {
