@@ -39,10 +39,11 @@ class MutationRetryPolicy(
         require(previousAttemptCount >= 0)
         require(retryAfterMillis == null || retryAfterMillis >= 0)
         if (category == GatewayFailureCategory.CANCELLED) return RetryDecision.Cancelled
-        if (category == GatewayFailureCategory.NOT_FOUND && operation == RemoteMutationOperation.DELETE) {
-            return RetryDecision.DeleteConverged
-        }
-        if (category !in RETRYABLE) return RetryDecision.ActionRequired
+        // HTTP 404 is not account/ID-scoped absence proof. Preserve the delete and let
+        // the next preparation obtain structured existence proof before acknowledgement.
+        val unverifiedDeleteAbsence = category == GatewayFailureCategory.NOT_FOUND &&
+            operation == RemoteMutationOperation.DELETE
+        if (category !in RETRYABLE && !unverifiedDeleteAbsence) return RetryDecision.ActionRequired
 
         if (previousAttemptCount >= maximumAutomaticAttempts) return RetryDecision.ActionRequired
         val attempt = previousAttemptCount + 1
@@ -58,7 +59,7 @@ class MutationRetryPolicy(
         return RetryDecision.RetryAt(
             attemptCount = attempt,
             nextEligibleEpochMillis = saturatingAdd(nowEpochMillis, delay),
-            reconcileBeforeReplay = category in AMBIGUOUS_DELIVERY,
+            reconcileBeforeReplay = category in AMBIGUOUS_DELIVERY || unverifiedDeleteAbsence,
         )
     }
 

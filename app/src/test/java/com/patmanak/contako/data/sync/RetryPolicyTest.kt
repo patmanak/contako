@@ -40,9 +40,12 @@ class RetryPolicyTest {
     }
 
     @Test
-    fun `03-FAULT cancellation preserves attempts and delete not found converges`() {
+    fun `03-FAULT cancellation preserves attempts and delete 404 requires absence proof`() {
         assertEquals(RetryDecision.Cancelled, policy.decide(CANCELLED, UPDATE, 2, 10_000))
-        assertEquals(RetryDecision.DeleteConverged, policy.decide(NOT_FOUND, DELETE, 2, 10_000))
+        val retry = policy.decide(NOT_FOUND, DELETE, 2, 10_000) as RetryDecision.RetryAt
+        assertTrue(retry.reconcileBeforeReplay)
+        assertEquals(3, retry.attemptCount)
+        assertEquals(RetryDecision.ActionRequired, policy.decide(NOT_FOUND, DELETE, 3, 10_000))
         assertEquals(RetryDecision.ActionRequired, policy.decide(NOT_FOUND, UPDATE, 2, 10_000))
     }
 
