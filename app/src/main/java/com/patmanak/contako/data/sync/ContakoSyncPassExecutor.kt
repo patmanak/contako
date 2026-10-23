@@ -296,36 +296,45 @@ internal class ContakoSyncPassExecutor(
         // A resumed repair still needs a current catalog before draining group intent.
         observe(SyncPassStage.REMOTE_GROUPS)
         acceptGroups(groupStage?.run(account, ::cancelled))?.let { return it }
-        if (!repair.progress.completed(FullRepairPhase.CANONICAL_RECONCILIATION)) {
-            observe(SyncPassStage.REMOTE_CONTACTS)
-            var partial = false
-            when (remoteStage.run(account,
-                forceHydration = !repair.progress.completed(FullRepairPhase.REMOTE_ENUMERATION),
-                isCancellationRequested = ::cancelled)) {
-                is RemoteContactStageResult.Success -> Unit
-                is RemoteContactStageResult.Partial -> {
-                    independentOutcome = SyncPassOutcome.ACTION_REQUIRED
-                    completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.VALIDATION
-                    partial = true
-                    remoteCardsPending = true
-                }
-                is RemoteContactStageResult.RetryWaiting, RemoteContactStageResult.StalePlan ->
-                    return SyncPassOutcome.RETRY_WAITING
-                RemoteContactStageResult.Cancelled -> return SyncPassOutcome.CANCELLED
-                RemoteContactStageResult.ActionRequired -> return remoteActionRequired()
-                RemoteContactStageResult.LocalPersistenceFailure -> return persistenceFailure(remoteStage.lastExceptionCategory)
+        if (cancelled()) return SyncPassOutcome.CANCELLED
+        mutationOrchestrator.recoverInterrupted(account.value, wallClock())
+        if (cancelled()) return SyncPassOutcome.CANCELLED
+        // Uploads happen after the canonical/projection checkpoints. A resumed repair MUST
+        // inspect current remote state even when those phases completed: its last create may
+        // have reached Proton without a local acknowledgement. An earlier failed resume may
+        // already have recovered the intent, so the recovery count is not a freshness proof.
+        observe(SyncPassStage.REMOTE_CONTACTS)
+        when (remoteStage.run(account,
+            forceHydration = !repair.progress.completed(FullRepairPhase.REMOTE_ENUMERATION),
+            isCancellationRequested = ::cancelled)) {
+            is RemoteContactStageResult.Success -> Unit
+            is RemoteContactStageResult.Partial -> {
+                independentOutcome = SyncPassOutcome.ACTION_REQUIRED
+                completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.VALIDATION
+                remoteCardsPending = true
             }
-            if (cancelled()) return SyncPassOutcome.CANCELLED
-            if (!repair.checkpoint(FullRepairPhase.REMOTE_ENUMERATION, 1, 1) ||
-                (!partial && (!repair.checkpoint(FullRepairPhase.CANONICAL_RECONCILIATION, 0, 1) ||
-                !repair.checkpoint(FullRepairPhase.CANONICAL_RECONCILIATION, 1, 1)))
+            is RemoteContactStageResult.RetryWaiting, RemoteContactStageResult.StalePlan ->
+                return SyncPassOutcome.RETRY_WAITING
+            RemoteContactStageResult.Cancelled -> return SyncPassOutcome.CANCELLED
+            RemoteContactStageResult.ActionRequired -> return remoteActionRequired()
+            RemoteContactStageResult.LocalPersistenceFailure -> return persistenceFailure(remoteStage.lastExceptionCategory)
+        }
+        if (cancelled()) return SyncPassOutcome.CANCELLED
+        if (!repair.progress.completed(FullRepairPhase.REMOTE_ENUMERATION) &&
+            !repair.checkpoint(FullRepairPhase.REMOTE_ENUMERATION, 1, 1)
+        ) return if (cancelled()) SyncPassOutcome.CANCELLED else SyncPassOutcome.FAILED
+        if (!remoteCardsPending && !repair.progress.completed(FullRepairPhase.CANONICAL_RECONCILIATION)) {
+            if ((repair.progress.phase.ordinal < FullRepairPhase.CANONICAL_RECONCILIATION.ordinal &&
+                !repair.checkpoint(FullRepairPhase.CANONICAL_RECONCILIATION, 0, 1)) ||
+                !repair.checkpoint(FullRepairPhase.CANONICAL_RECONCILIATION, 1, 1)
             ) return if (cancelled()) SyncPassOutcome.CANCELLED else SyncPassOutcome.FAILED
         }
 
-        if (!repair.progress.completed(FullRepairPhase.ANDROID_PROJECTION) ||
-            !repair.progress.completed(FullRepairPhase.CANONICAL_RECONCILIATION)) {
+        run {
             // Ingestion/forced hydration may advance the account revision. Project against
             // a fresh guarded context, just as the incremental pass does after remote work.
+            // Always revisit durable projection obligations: a previous resumed pass may
+            // have committed remote changes and failed here after the original checkpoint.
             observe(SyncPassStage.ANDROID_PREFLIGHT)
             val projectionContext = when (val refreshed = androidPreflight.check(account, ::cancelled)) {
                 is AndroidInteroperabilityPreflightResult.Ready -> refreshed.context
@@ -351,11 +360,14 @@ internal class ContakoSyncPassExecutor(
                 AndroidInteroperabilityStageResult.Cancelled -> return SyncPassOutcome.CANCELLED
                 AndroidInteroperabilityStageResult.LocalPersistenceFailure -> return SyncPassOutcome.FAILED
             }
-            // Later phase markers imply all earlier phases are complete. Project healthy
-            // contacts now, but keep the repair at enumeration while cards remain deferred.
-            if (!remoteCardsPending && (!repair.checkpoint(FullRepairPhase.ANDROID_PROJECTION, 0, 1) ||
-                !repair.checkpoint(FullRepairPhase.ANDROID_PROJECTION, 1, 1))
-            ) return if (cancelled()) SyncPassOutcome.CANCELLED else SyncPassOutcome.FAILED
+            // Project healthy contacts without advancing past deferred cards. Historical
+            // checkpoints remain monotone; a partial result keeps even a resumed repair open.
+            if (!remoteCardsPending && !repair.progress.completed(FullRepairPhase.ANDROID_PROJECTION)) {
+                if ((repair.progress.phase.ordinal < FullRepairPhase.ANDROID_PROJECTION.ordinal &&
+                    !repair.checkpoint(FullRepairPhase.ANDROID_PROJECTION, 0, 1)) ||
+                    !repair.checkpoint(FullRepairPhase.ANDROID_PROJECTION, 1, 1)
+                ) return if (cancelled()) SyncPassOutcome.CANCELLED else SyncPassOutcome.FAILED
+            }
         }
 
         if (cancelled()) return SyncPassOutcome.CANCELLED
@@ -566,6 +578,9 @@ internal class ContakoSyncPassExecutor(
         acceptGroups(groupStage?.run(account, request::isAccountCancellationRequested))?.let {
             return withDeferredAndroid(it)
         }
+        if (request.isAccountCancellationRequested()) return SyncPassOutcome.CANCELLED
+        mutationOrchestrator.recoverInterrupted(account.value, wallClock())
+        if (request.isAccountCancellationRequested()) return SyncPassOutcome.CANCELLED
         observe(SyncPassStage.REMOTE_CONTACTS)
         val remote = remoteStage.run(
             account,

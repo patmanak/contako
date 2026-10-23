@@ -280,6 +280,13 @@ field value MUST NOT erase preserved remote metadata.
 | Role/function | `ROLE` | job description when the editor exposes it | Preserve separately from title; Android must not collapse the two on rebuild |
 | PO box/extended/street/locality/region/postcode/country | seven ordered `ADR` components | PO box/neighborhood/street/city/region/postcode/country | Map exact compatible components; preserve extended/unrepresented fragments and treat formatted address as derived |
 
+Remote adoption, including an explicit Proton conflict choice, MUST preserve
+locally established phonetic given/middle/family components and their canonical
+value identities. A family-only phonetic name is valid local data. Until a
+complete Proton round trip is supported, the serializer MUST NOT generate a
+partial phonetic extension from these components. Imported opaque phonetic
+extensions MUST remain preserved independently on compatible edits.
+
 ### Email, postal, and website types
 
 | Android type | Canonical/vCard type | Rule |

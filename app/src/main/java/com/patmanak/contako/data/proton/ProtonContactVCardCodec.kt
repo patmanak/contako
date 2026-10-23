@@ -924,6 +924,9 @@ internal class ProtonContactVCardCodec(
                 ContactValueKind.STRUCTURED_NAME, ContactValueKind.EMAIL, ContactValueKind.PUBLIC_KEY,
                 ContactValueKind.CATEGORY, ContactValueKind.CUSTOM_DATE,
                 ContactValueKind.UNKNOWN_VCARD_PROPERTY -> Unit
+                // Phonetic components are local/Android-only until a complete Proton
+                // round trip is supported. Imported extensions remain opaque and preserved.
+                ContactValueKind.PHONETIC_NAME -> Unit
                 ContactValueKind.PHONE -> addDecorated(
                     "TEL", value, groupIndex++, PHONE_TYPES,
                     preservedDecoration = preservedDecoration(contact, value, "TEL", setOf(1, 3)),
@@ -989,8 +992,6 @@ internal class ProtonContactVCardCodec(
                     alreadyEscaped = true,
                     preservedDecoration = preservedDecoration(contact, value, "LOGO", setOf(1, 3)),
                 )
-                ContactValueKind.PHONETIC_NAME ->
-                    addDecoratedProperty(contact, "X-PHONETIC-FIRST-NAME", value, groupIndex++)
             }
         }
     }

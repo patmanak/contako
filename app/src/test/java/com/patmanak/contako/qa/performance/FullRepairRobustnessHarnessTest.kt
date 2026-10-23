@@ -105,14 +105,45 @@ class FullRepairRobustnessHarnessTest {
         ).forEach { checkpoint ->
             val boundary = CountingProviderBoundary(fixture.contacts.size)
             val repair = MemoryRepair(checkpoint)
-            val harness = Harness(fixture, boundary, repair, initialCanonicalIds = fixture.contacts.map { it.id })
+            val harness = Harness(
+                fixture, boundary, repair,
+                initialCanonicalIds = fixture.contacts.map { it.id },
+                initialProjectedIds = if (checkpoint.phase >= FullRepairPhase.ANDROID_PROJECTION)
+                    fixture.contacts.map { it.id } else emptyList(),
+            )
 
             assertEquals(SyncPassOutcome.SUCCESS, harness.executor().execute(request()))
             assertTrue(repair.cleared)
             assertEquals(fixture.contacts.size, harness.expectedConvergedCount)
             assertEquals(harness.canonicalCommitIds.distinct().size, harness.canonicalCommitIds.size)
+            assertEquals(fixture.contacts.map { it.id }.toSet(), harness.projectedContactIds)
+            assertEquals(1, harness.projectionChecks)
             if (checkpoint.phase >= FullRepairPhase.ANDROID_PROJECTION) assertEquals(0, boundary.batchCount)
+            val writesAfterResume = boundary.batchCount
+            assertEquals(SyncPassOutcome.SUCCESS, harness.executor().execute(request()))
+            assertEquals(2, harness.projectionChecks)
+            assertEquals(writesAfterResume, boundary.batchCount)
         }
+    }
+
+    @Test
+    fun `07-CANCEL advanced checkpoint still completes a new projection obligation without rewriting clean copies`() = runTest {
+        val fixture = PerformanceFixtureGenerator.generate(PerformanceFixtureProfile.STRESS)
+        val boundary = CountingProviderBoundary(1)
+        val harness = Harness(
+            fixture, boundary,
+            MemoryRepair(FullRepairProgress(2, FullRepairPhase.ANDROID_PROJECTION, 1, 1, 0, 0, false, false)),
+            initialCanonicalIds = fixture.contacts.map { it.id },
+            initialProjectedIds = fixture.contacts.dropLast(1).map { it.id },
+        )
+
+        assertEquals(SyncPassOutcome.SUCCESS, harness.executor().execute(request()))
+        assertEquals(1, harness.projectionChecks)
+        assertEquals(1, boundary.batchCount)
+        assertEquals(fixture.contacts.map { it.id }.toSet(), harness.projectedContactIds)
+        assertEquals(SyncPassOutcome.SUCCESS, harness.executor().execute(request()))
+        assertEquals(2, harness.projectionChecks)
+        assertEquals(1, boundary.batchCount)
     }
 
     @Test
@@ -164,10 +195,15 @@ class FullRepairRobustnessHarnessTest {
         private val repair: MemoryRepair,
         private val onRequest: () -> Unit = {},
         initialCanonicalIds: List<String> = emptyList(),
+        initialProjectedIds: List<String> = emptyList(),
     ) {
         val uniqueCanonicalIds = linkedSetOf<String>().apply { addAll(initialCanonicalIds) }
         val canonicalCommitIds = mutableListOf<String>()
         val expectedConvergedCount: Int get() = uniqueCanonicalIds.size
+        private val projectedIds = initialProjectedIds.toMutableSet()
+        val projectedContactIds: Set<String> get() = projectedIds.toSet()
+        var projectionChecks = 0
+            private set
         private val checkpoint = MemoryCheckpointStore()
 
         fun executor(): ContakoSyncPassExecutor {
@@ -216,9 +252,16 @@ class FullRepairRobustnessHarnessTest {
                     if (isCancelled()) AndroidInteroperabilityStageResult.Cancelled else AndroidInteroperabilityStageResult.Success
 
                 override suspend fun project(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean): AndroidInteroperabilityStageResult {
-                    repeat(fixture.contacts.size) {
+                    projectionChecks++
+                    // A resumed pass checks obligations again. An acknowledged unchanged copy
+                    // is not another provider write; model that durable state independently
+                    // from the repair phase so the no-change write assertion remains meaningful.
+                    fixture.contacts.forEach { contact ->
                         if (isCancelled()) return AndroidInteroperabilityStageResult.Cancelled
-                        provider.applyBatch(1, 256)
+                        if (contact.id !in projectedIds) {
+                            provider.applyBatch(1, 256)
+                            projectedIds += contact.id
+                        }
                     }
                     return AndroidInteroperabilityStageResult.Success
                 }

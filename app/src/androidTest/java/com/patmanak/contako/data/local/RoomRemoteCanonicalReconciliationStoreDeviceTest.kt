@@ -12,19 +12,42 @@ import com.patmanak.contako.data.gateway.ContactInventoryPage
 import com.patmanak.contako.data.gateway.ContactInventorySnapshotAuthority
 import com.patmanak.contako.data.gateway.ContactInventoryVersionProvenance
 import com.patmanak.contako.data.gateway.GatewayOutcome
+import com.patmanak.contako.data.gateway.GatewayFailureCategory
 import com.patmanak.contako.data.gateway.ProtonContactInventoryGateway
 import com.patmanak.contako.data.gateway.ProtonVerifiedContactCardGateway
 import com.patmanak.contako.data.gateway.RemoteContactId
 import com.patmanak.contako.data.gateway.RemoteVersion
 import com.patmanak.contako.data.gateway.VerifiedContactCard
 import com.patmanak.contako.data.proton.PersistentContactInventoryPlanner
+import com.patmanak.contako.data.proton.ProtonEmailGroupMembershipReader
+import com.patmanak.contako.data.sync.AndroidInteroperabilityContext
+import com.patmanak.contako.data.sync.AndroidInteroperabilityPreflight
+import com.patmanak.contako.data.sync.AndroidInteroperabilityPreflightResult
+import com.patmanak.contako.data.sync.AndroidInteroperabilityStage
+import com.patmanak.contako.data.sync.AndroidInteroperabilityStageResult
+import com.patmanak.contako.data.sync.ContakoSyncPassExecutor
+import com.patmanak.contako.data.sync.DurableMutationOrchestrator
+import com.patmanak.contako.data.sync.FullRepairPhase
 import com.patmanak.contako.data.sync.IncrementalRemoteContactStage
+import com.patmanak.contako.data.sync.MutationUploadGateway
 import com.patmanak.contako.data.sync.RemoteContactStageResult
+import com.patmanak.contako.data.sync.RemoteMutationOperation
+import com.patmanak.contako.data.sync.RoomBackedMutationPreparationGateway
+import com.patmanak.contako.data.sync.RoomFullRepairExecutionCoordinator
+import com.patmanak.contako.data.sync.RoomFullRepairProgressStore
+import com.patmanak.contako.data.sync.SyncPrerequisiteChecker
+import com.patmanak.contako.data.sync.SyncPrerequisiteState
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.PreservationEnvelope
 import com.patmanak.contako.domain.repository.SaveResult
 import com.patmanak.contako.domain.sync.ServerClockCalibration
+import com.patmanak.contako.domain.sync.ContactConflictChoice
+import com.patmanak.contako.domain.sync.SyncPassOutcome
+import com.patmanak.contako.domain.sync.SyncPassRequest
+import com.patmanak.contako.domain.sync.SyncScope
+import com.patmanak.contako.domain.sync.SyncTrigger
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -49,6 +72,10 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         context.deleteDatabase(DATABASE_NAME)
+        openDatabase()
+    }
+
+    private fun openDatabase() {
         database = ContakoDatabase.create(context, DATABASE_NAME)
         repository = RoomContactRepository(
             database,
@@ -289,23 +316,99 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
 
     @Test
     fun lostCreateAcknowledgementMatchesStableVCardUidInsteadOfDuplicatingLocalContact() = runBlocking {
+        recoverInterruptedCreate(SyncScope.INCREMENTAL)
+    }
+
+    @Test
+    fun fullRepairRecoversInterruptedCreateBeforeHydrationWithoutDuplicatingLocalContact() = runBlocking {
+        recoverInterruptedCreate(SyncScope.FULL_REPAIR)
+    }
+
+    @Test
+    fun advancedFullRepairRetriesRecoveredCreateAfterInventoryFailureWithoutDuplicatingLocalContact() = runBlocking {
+        recoverInterruptedCreate(SyncScope.FULL_REPAIR, resumeAfterProjection = true)
+    }
+
+    private suspend fun recoverInterruptedCreate(scope: SyncScope, resumeAfterProjection: Boolean = false) {
         remote = emptyList()
         stage().run(ACCOUNT)
         wallClock = 10_500_000
         elapsedClock = 501_000
         save(CanonicalContact(accountId = ACCOUNT.value, id = "local-uid", displayName = "Pending Create"))
-        val ambiguous = database.outboxDao().getAll(ACCOUNT.value).single()
-        database.outboxDao().upsert(ambiguous.copy(requiresReconciliation = true))
+        if (scope == SyncScope.FULL_REPAIR) {
+            val progress = RoomFullRepairProgressStore(database)
+            progress.beginOrResume(ACCOUNT, false, false, wallClock)
+            if (resumeAfterProjection) {
+                for ((phase, completed) in listOf(
+                    FullRepairPhase.REMOTE_ENUMERATION to 1L,
+                    FullRepairPhase.CANONICAL_RECONCILIATION to 0L,
+                    FullRepairPhase.CANONICAL_RECONCILIATION to 1L,
+                    FullRepairPhase.ANDROID_PROJECTION to 0L,
+                    FullRepairPhase.ANDROID_PROJECTION to 1L,
+                )) {
+                    assertTrue(progress.checkpoint(ACCOUNT, requireNotNull(progress.load(ACCOUNT)).revision,
+                        phase, completed, 1, wallClock))
+                }
+            }
+        }
+        val mutations = RoomMutationExecutionStore(database)
+        val command = mutations.eligible(ACCOUNT.value, wallClock, 100).single()
+        assertEquals(RemoteMutationOperation.CREATE, command.operation)
+        assertFalse(command.requiresReconciliation)
+        assertTrue(mutations.claim(command, wallClock))
+        val claimed = database.outboxDao().getAll(ACCOUNT.value).single()
+        assertEquals(DurableMutationState.IN_FLIGHT.name, claimed.state)
+        assertFalse(claimed.requiresReconciliation)
+        // Proton accepted the create, but the process stopped before its acknowledgement.
         remote = listOf(remoteFixture("remote-created", "Pending Create", 1, 12_000, "local-uid"))
+        database.close()
+        openDatabase()
+        if (resumeAfterProjection) {
+            val failedResume = passExecutor(inventoryFailure = { GatewayFailureCategory.NETWORK_UNAVAILABLE })
+            assertEquals(SyncPassOutcome.RETRY_WAITING, failedResume.execute(passRequest(scope)))
+            val recoveredBeforeInventory = database.outboxDao().getAll(ACCOUNT.value).single()
+            assertEquals(DurableMutationState.PENDING.name, recoveredBeforeInventory.state)
+            assertTrue(recoveredBeforeInventory.requiresReconciliation)
+            assertNull(repository.getContact(ACCOUNT.value, "local-uid")?.remoteContactId)
+            // The next restart has no IN_FLIGHT row left to recover. Its completed repair
+            // phase must still trigger a fresh incremental check and projection traversal.
+            database.close()
+            openDatabase()
+        }
+        var projections = 0
+        val restarted = passExecutor(onProject = { projections++ })
 
-        stage().run(ACCOUNT)
+        assertEquals(SyncPassOutcome.ACTION_REQUIRED, restarted.execute(passRequest(scope)))
+        assertTrue(projections > 0)
+        if (resumeAfterProjection) {
+            val progress = requireNotNull(RoomFullRepairProgressStore(database).load(ACCOUNT))
+            assertEquals(FullRepairPhase.ANDROID_PROJECTION, progress.phase)
+            assertEquals(1L, progress.completedUnits)
+        }
 
         val reconciled = requireNotNull(repository.getContact(ACCOUNT.value, "local-uid"))
         assertEquals("remote-created", reconciled.remoteContactId)
         assertTrue(reconciled.pendingMutationRevision != null)
+        assertEquals(listOf("local-uid"), repository.observeContacts(ACCOUNT.value).first().map { it.id })
         assertNull(repository.getContact(ACCOUNT.value, "remote-created"))
-        assertEquals("remote-created", database.outboxDao().getAll(ACCOUNT.value).single().remoteIdentity)
-        assertTrue(RoomContactConflictStore(database).detail(ACCOUNT.value, "local-uid") != null)
+        val recovered = database.outboxDao().getAll(ACCOUNT.value).single()
+        assertEquals("remote-created", recovered.remoteIdentity)
+        assertEquals(claimed.revision, recovered.revision)
+        assertEquals(claimed.idempotencyKey, recovered.idempotencyKey)
+        assertTrue(recovered.requiresReconciliation)
+
+        // Matching UID restores identity, not authority to overwrite either version. The
+        // normal guarded conflict choice must then be able to finish without another create.
+        val conflicts = RoomContactConflictStore(database)
+        val detail = requireNotNull(conflicts.detail(ACCOUNT.value, "local-uid"))
+        assertTrue(conflicts.choose(ACCOUNT.value, detail.summary, ContactConflictChoice.PROTON))
+        assertEquals(SyncPassOutcome.SUCCESS, restarted.execute(passRequest(scope)))
+        assertNull(repository.getContact(ACCOUNT.value, "local-uid")?.pendingMutationRevision)
+        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+        val hydrated = hydrationCount
+        assertEquals(SyncPassOutcome.SUCCESS, restarted.execute(passRequest(SyncScope.INCREMENTAL)))
+        assertEquals(hydrated, hydrationCount)
+        assertEquals(listOf("local-uid"), repository.observeContacts(ACCOUNT.value).first().map { it.id })
     }
 
     @Test fun sharedUidDoesNotMergeDistinctRemoteIdsInEitherImportOrder() = runBlocking {
@@ -487,10 +590,48 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         assertEquals(before + 1, hydrationCount)
     }
 
-    private fun stage(): IncrementalRemoteContactStage {
+    private fun passExecutor(
+        inventoryFailure: () -> GatewayFailureCategory? = { null },
+        onProject: () -> Unit = {},
+    ): ContakoSyncPassExecutor = ContakoSyncPassExecutor(
+        account = ACCOUNT,
+        prerequisites = SyncPrerequisiteChecker { SyncPrerequisiteState.READY },
+        remoteStage = stage(inventoryFailure),
+        mutationOrchestrator = DurableMutationOrchestrator(
+            RoomMutationExecutionStore(database),
+            RoomBackedMutationPreparationGateway(
+                ACCOUNT, database,
+                ProtonEmailGroupMembershipReader { _, _ -> error("No group intent") },
+                verifiedCards = ProtonVerifiedContactCardGateway { _, id ->
+                    GatewayOutcome.Success(remote.single { it.metadata.id == id }.card)
+                },
+            ),
+            MutationUploadGateway { error("An accepted create must never be replayed") },
+        ),
+        wallClock = { wallClock },
+        androidPreflight = AndroidInteroperabilityPreflight { account, _ ->
+            AndroidInteroperabilityPreflightResult.Ready(AndroidInteroperabilityContext(account, "fixture", 0, 0))
+        },
+        androidStage = object : AndroidInteroperabilityStage {
+            override suspend fun ingest(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) =
+                AndroidInteroperabilityStageResult.Success
+            override suspend fun project(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) =
+                AndroidInteroperabilityStageResult.Success.also { onProject() }
+        },
+        fullRepairCoordinator = RoomFullRepairExecutionCoordinator(
+            ACCOUNT, RoomFullRepairProgressStore(database), { wallClock },
+        ),
+    )
+
+    private fun passRequest(scope: SyncScope) = SyncPassRequest(
+        setOf(SyncTrigger.MANUAL), scope, 0, { 0 }, 0, { 0 },
+    )
+
+    private fun stage(inventoryFailure: () -> GatewayFailureCategory? = { null }): IncrementalRemoteContactStage {
         val inventoryGateway = ProtonContactInventoryGateway { _, cursor ->
             check(cursor == null)
-            GatewayOutcome.Success(
+            val failure = inventoryFailure()
+            if (failure != null) GatewayOutcome.Failure(failure) else GatewayOutcome.Success(
                 ContactInventoryPage(
                     contacts = remote.map(RemoteFixture::metadata),
                     requestedCursor = null,

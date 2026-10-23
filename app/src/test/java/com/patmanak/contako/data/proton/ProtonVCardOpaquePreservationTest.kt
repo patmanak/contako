@@ -1,6 +1,7 @@
 package com.patmanak.contako.data.proton
 
 import com.patmanak.contako.domain.model.ContactValueKind
+import com.patmanak.contako.domain.model.ContactValue
 import me.proton.core.contact.domain.entity.Contact
 import me.proton.core.contact.domain.entity.ContactCardType
 import me.proton.core.contact.domain.entity.ContactId
@@ -29,7 +30,8 @@ class ProtonVCardOpaquePreservationTest {
             assertEquals("Änne, Chloë", phonetic.value)
             val edited = imported.copy(values = imported.values.map {
                 if (it.kind == ContactValueKind.NOTE) it.copy(value = "After") else it
-            })
+            } + ContactValue("local-phonetic", ContactValueKind.PHONETIC_NAME, "Local given", order = 0,
+                components = mapOf("given" to "Local given", "additional" to "Local middle", "family" to "Local family")))
             val encoded = codec.encode(edited)
             val sourceOutput = when (type) {
                 ContactCardType.ClearText -> encoded.clear
@@ -38,12 +40,16 @@ class ProtonVCardOpaquePreservationTest {
             }
             assertTrue("Extension source=$type", sourceOutput.contains(extension))
             assertTrue("Associated label source=$type", sourceOutput.contains(label))
+            val allOutput = encoded.clear + encoded.signed + encoded.encryptedPrivate
+            assertEquals(1, Regex("X-PHONETIC-FIRST-NAME").findAll(allOutput).count())
+            assertTrue(listOf("Local given", "Local middle", "Local family").none(allOutput::contains))
             val reparsed = codec.decode("fixture-account", remote, listOf(
                 ProtonPlainContactCard(ContactCardType.ClearText, encoded.clear),
                 ProtonPlainContactCard(ContactCardType.Signed, encoded.signed),
                 ProtonPlainContactCard(ContactCardType.EncryptedAndSigned, encoded.encryptedPrivate),
             ))
             assertEquals("After", reparsed.valuesOf(ContactValueKind.NOTE).single().value)
+            assertTrue(reparsed.valuesOf(ContactValueKind.PHONETIC_NAME).isEmpty())
             assertEquals(phonetic.value, reparsed.valuesOf(ContactValueKind.UNKNOWN_VCARD_PROPERTY)
                 .single { it.label == "X-PHONETIC-FIRST-NAME" }.value)
         }

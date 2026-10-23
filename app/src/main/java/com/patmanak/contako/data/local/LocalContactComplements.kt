@@ -11,10 +11,14 @@ import java.util.Locale
  * A whole-contact Proton conflict choice uses the same rule as normal hydration.
  */
 internal fun retainLocalContactComplements(local: CanonicalContact, remote: CanonicalContact): CanonicalContact {
-    val localDates = local.valuesOf(ContactValueKind.CUSTOM_DATE)
-    // Remote decoding does not generate CUSTOM_DATE. Refuse a value-ID collision rather
-    // than replacing either peer's value; the surrounding transaction remains atomic.
-    require(localDates.none { date -> remote.values.any { it.id == date.id } })
+    val localOnlyValues = local.values.filter {
+        it.kind == ContactValueKind.CUSTOM_DATE || it.kind == ContactValueKind.PHONETIC_NAME
+    }
+    // Remote decoding does not generate these local/Android-only families. Keep complete
+    // values and identities, including every phonetic component and its linked row binding.
+    // Refuse a value-ID collision rather than replacing either peer's value;
+    // the surrounding transaction remains atomic.
+    require(localOnlyValues.none { localValue -> remote.values.any { it.id == localValue.id } })
     val values = remote.values.map { incoming ->
         if (!incoming.label.isNullOrBlank() || !incoming.metadata["vcardTypeTokens"].isNullOrBlank()) {
             return@map incoming
@@ -28,7 +32,7 @@ internal fun retainLocalContactComplements(local: CanonicalContact, remote: Cano
             metadata = incoming.metadata + old.metadata.filterKeys { it in LOCAL_TYPE_METADATA } +
                 (LOCAL_LABEL_METADATA to "true"))
     }
-    return remote.copy(values = values + localDates)
+    return remote.copy(values = values + localOnlyValues)
 }
 
 private fun ContactValue.sameComplementTarget(other: ContactValue): Boolean =

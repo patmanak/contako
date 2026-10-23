@@ -37,6 +37,67 @@ import org.junit.Test
 
 class ContakoSyncPassExecutorTest {
     @Test
+    fun interruptedMutationRecoveryPrecedesRemoteReconciliationInBothPassKinds() = runTest {
+        for (scope in SyncScope.entries) {
+            var recovered = false
+            var committed = false
+            val executor = executor(
+                prerequisite = { SyncPrerequisiteState.READY },
+                inventory = { assertTrue("$scope inventory before recovery", recovered) },
+                canonical = { assertTrue(recovered); committed = true },
+                store = SingleCommandStore(null, onRecover = { recovered = true }),
+                prepare = { error("No pending upload") }, upload = { error("No pending upload") },
+                fullRepairCoordinator = FullRepairExecutionCoordinator { MemoryFullRepair(mutableListOf()) },
+            )
+            assertEquals(scope.name, SyncPassOutcome.SUCCESS, executor.execute(
+                if (scope == SyncScope.FULL_REPAIR) fullRepairRequest() else request(),
+            ))
+            assertTrue(scope.name, committed)
+        }
+    }
+
+    @Test
+    fun failedInterruptedMutationRecoveryStopsBeforeImportOrUploadInBothPassKinds() = runTest {
+        for (scope in SyncScope.entries) {
+            val published = mutableListOf<SyncPassOutcome>()
+            val executor = executor(
+                prerequisite = { SyncPrerequisiteState.READY },
+                inventory = { error("Recovery failure must stop before inventory") },
+                canonical = { error("Recovery failure must stop before reconciliation") },
+                store = SingleCommandStore(command(), onRecover = { throw java.io.IOException() }),
+                prepare = { error("Recovery failure must stop before preparation") },
+                upload = { error("Recovery failure must stop before upload") },
+                publish = { published += it },
+                fullRepairCoordinator = FullRepairExecutionCoordinator { MemoryFullRepair(mutableListOf()) },
+            )
+            assertEquals(scope.name, SyncPassOutcome.FAILED, executor.execute(
+                if (scope == SyncScope.FULL_REPAIR) fullRepairRequest() else request(),
+            ))
+            assertEquals(SyncCompletionCause.TRANSIENT_IO, executor.completionCause)
+            assertEquals(listOf(SyncPassOutcome.FAILED), published)
+        }
+    }
+
+    @Test
+    fun cancellationDuringInterruptedMutationRecoveryStopsBeforeImportInBothPassKinds() = runTest {
+        for (scope in SyncScope.entries) {
+            var generation = 0L
+            val executor = executor(
+                prerequisite = { SyncPrerequisiteState.READY },
+                inventory = { error("Cancelled recovery must stop before inventory") },
+                canonical = { error("Cancelled recovery must stop before reconciliation") },
+                store = SingleCommandStore(command(), onRecover = { generation++ }),
+                prepare = { error("Cancelled recovery must stop before preparation") },
+                upload = { error("Cancelled recovery must stop before upload") },
+                fullRepairCoordinator = FullRepairExecutionCoordinator { MemoryFullRepair(mutableListOf()) },
+            )
+            assertEquals(scope.name, SyncPassOutcome.CANCELLED, executor.execute(
+                SyncPassRequest(setOf(SyncTrigger.MANUAL), scope, 0, { generation }, 0, { 0 }),
+            ))
+        }
+    }
+
+    @Test
     fun `03-ORDER pass checks prerequisites and remote state before upload`() = runTest {
         val order = mutableListOf<String>()
         val store = SingleCommandStore(command())
@@ -627,7 +688,7 @@ class ContakoSyncPassExecutorTest {
         val groupCommand = DurableMutationCommand("account", "GROUP", "pending-group", 1,
             RemoteMutationOperation.UPDATE, 0, 0, false)
         val executor = executor(prerequisite = { SyncPrerequisiteState.READY },
-            inventory = { error("COMPLETED_CONTACT_INVENTORY_MUST_NOT_REPEAT") }, canonical = {},
+            inventory = { events += "contacts-read" }, canonical = {},
             store = SingleCommandStore(groupCommand), prepare = {
                 assertTrue(available)
                 events += "group-prepare"
@@ -642,10 +703,19 @@ class ContakoSyncPassExecutorTest {
         assertTrue(repair.cleared)
         assertTrue(events.indexOf("groups-read") < events.indexOf("groups-commit"))
         assertTrue(events.indexOf("groups-commit") < events.indexOf("group-prepare"))
+        assertTrue(events.indexOf("contacts-read") < events.indexOf("group-prepare"))
         assertTrue(events.indexOf("group-prepare") < events.indexOf("group-upload"))
     }
 
     @Test fun partialFullRepairKeepsItsPhaseAndRetriesOnlyTheDurablyDeferredCard() = runTest {
+        partialRepairRetriesOnlyDeferredCard(resumeAfterProjection = false)
+    }
+
+    @Test fun partialResumedRepairKeepsAdvancedCheckpointAndRetriesOnlyTheDurablyDeferredCard() = runTest {
+        partialRepairRetriesOnlyDeferredCard(resumeAfterProjection = true)
+    }
+
+    private suspend fun partialRepairRetriesOnlyDeferredCard(resumeAfterProjection: Boolean) {
         val account = AccountScope("account")
         val pending = mutableSetOf<RemoteContactId>()
         val reads = mutableListOf<String>()
@@ -676,7 +746,11 @@ class ContakoSyncPassExecutorTest {
                 override suspend fun resolved(account: AccountScope, ids: Set<RemoteContactId>) { pending -= ids }
             })
         val events = mutableListOf<String>()
-        val repair = MemoryFullRepair(events)
+        val repair = MemoryFullRepair(events).apply {
+            if (resumeAfterProjection) progress = progress.copy(
+                revision = 5, phase = FullRepairPhase.ANDROID_PROJECTION, completedUnits = 1, totalUnits = 1,
+            )
+        }
         var uploads = 0
         var projections = 0
         val executor = executor(prerequisite = { SyncPrerequisiteState.READY },
@@ -691,8 +765,12 @@ class ContakoSyncPassExecutorTest {
         assertEquals(SyncPassOutcome.ACTION_REQUIRED, executor.execute(fullRepairRequest()))
         assertEquals(setOf("healthy"), committed)
         assertEquals(setOf(RemoteContactId("rejected")), pending)
-        assertEquals(FullRepairPhase.REMOTE_ENUMERATION, repair.progress.phase)
-        assertTrue(repair.progress.phase.ordinal < FullRepairPhase.CANONICAL_RECONCILIATION.ordinal)
+        assertEquals(if (resumeAfterProjection) FullRepairPhase.ANDROID_PROJECTION
+            else FullRepairPhase.REMOTE_ENUMERATION, repair.progress.phase)
+        if (resumeAfterProjection) assertTrue(events.none {
+            it.startsWith("REMOTE_ENUMERATION:") || it.startsWith("CANONICAL_RECONCILIATION:") ||
+                it.startsWith("ANDROID_PROJECTION:")
+        })
         assertFalse(repair.cleared)
         assertEquals(1, uploads)
         assertEquals(1, projections)
@@ -1296,7 +1374,7 @@ class ContakoSyncPassExecutorTest {
     }
 
     @Test
-    fun `07-REPAIR process recreation skips completed canonical phase`() = runTest {
+    fun `07-REPAIR process recreation refreshes remote state without repeating completed checkpoints`() = runTest {
         val events = mutableListOf<String>()
         val repair = MemoryFullRepair(events).apply {
             progress = progress.copy(
@@ -1324,8 +1402,9 @@ class ContakoSyncPassExecutorTest {
         )
 
         assertEquals(SyncPassOutcome.SUCCESS, executor.execute(fullRepairRequest()))
-        assertFalse(events.contains("remote"))
+        assertTrue(events.contains("remote"))
         assertTrue(events.contains("android"))
+        assertFalse(events.any { it.startsWith("REMOTE_ENUMERATION:") || it.startsWith("CANONICAL_RECONCILIATION:") })
     }
 
     @Test
@@ -1518,9 +1597,16 @@ private class MemoryCheckpointStore : ContactInventoryCheckpointStore {
     }
 }
 
-private class SingleCommandStore(private var command: DurableMutationCommand?, private var followUp: DurableMutationCommand? = null) : MutationExecutionStore {
+private class SingleCommandStore(
+    private var command: DurableMutationCommand?,
+    private var followUp: DurableMutationCommand? = null,
+    private val onRecover: suspend () -> Unit = {},
+) : MutationExecutionStore {
     private var inFlight = false
-    override suspend fun recoverInterrupted(accountId: String, nowEpochMillis: Long) = 0
+    override suspend fun recoverInterrupted(accountId: String, nowEpochMillis: Long): Int {
+        onRecover()
+        return 0
+    }
     override suspend fun eligible(accountId: String, nowEpochMillis: Long, limit: Int) = listOfNotNull(command)
     override suspend fun claim(command: DurableMutationCommand, nowEpochMillis: Long): Boolean {
         inFlight = this.command != null

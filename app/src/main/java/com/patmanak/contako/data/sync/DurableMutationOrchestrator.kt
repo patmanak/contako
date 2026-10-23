@@ -155,13 +155,23 @@ class DurableMutationOrchestrator(
         require(batchLimit in 1..100)
     }
 
+    /**
+     * Called under the account runner's serialization before remote reconciliation. A create
+     * may have reached Proton before the process stopped, so its durable ambiguity must be
+     * restored before hydration tries to match an unbound local creation by UID.
+     */
+    suspend fun recoverInterrupted(accountId: String, nowEpochMillis: Long): Int {
+        require(accountId.isNotBlank())
+        return store.recoverInterrupted(accountId, nowEpochMillis)
+    }
+
     suspend fun drain(
         accountId: String,
         nowEpochMillis: Long,
         isCancellationRequested: () -> Boolean = { false },
     ): MutationDrainResult {
         require(accountId.isNotBlank())
-        store.recoverInterrupted(accountId, nowEpochMillis)
+        recoverInterrupted(accountId, nowEpochMillis)
         val eligible = store.eligible(accountId, nowEpochMillis, batchLimit)
         var examined = 0
         var uploaded = 0

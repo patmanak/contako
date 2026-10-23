@@ -15,6 +15,13 @@ See [State contracts](SYNC_STATES.md) and [Architecture](ARCHITECTURE.md).
 Local and Android-originated mutations MUST be committed to canonical state and
 outbox before network writes. Lost acknowledgements, retries and process restarts
 MUST NOT create duplicate intent or discard pending edits.
+Both ordinary and repair passes MUST durably recover interrupted in-flight
+intent before remote hydration can match an unbound creation. Recovering only
+when draining uploads is too late: the remote create may already be present.
+A resumed repair MUST perform a fresh incremental remote check and revisit
+guarded projection obligations even after those phases were checkpointed.
+Completed phases MUST NOT trigger another forced hydration of unchanged cards
+or move checkpoints backward; new deferred cards MUST keep the repair open.
 
 Group assignment reconciliation MUST wait for pending contact writes in the same
 account, including blocked conflicts. Contact writes can restore email identities

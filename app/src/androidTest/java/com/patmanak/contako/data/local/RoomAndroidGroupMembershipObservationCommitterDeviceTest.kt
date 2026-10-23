@@ -17,6 +17,9 @@ import com.patmanak.contako.data.android.mapping.AndroidGroupSnapshot
 import com.patmanak.contako.data.android.mapping.AndroidGroupSnapshotBinaryCodec
 import com.patmanak.contako.data.android.mapping.AndroidCanonicalDelta
 import com.patmanak.contako.data.android.mapping.CanonicalAndroidContactMapper
+import com.patmanak.contako.data.android.mapping.AndroidContactRow
+import com.patmanak.contako.data.android.mapping.AndroidRowKind
+import com.patmanak.contako.data.android.mapping.AndroidValueIdentity
 import com.patmanak.contako.data.gateway.AccountScope
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactGroup
@@ -194,12 +197,39 @@ class RoomAndroidGroupMembershipObservationCommitterDeviceTest {
             requireNotNull(database.contactGroupDao().get(ACCOUNT.value, GROUP_A)).toDomain().memberships)
     }
 
-    @Test
-    fun preferredEmailTransitionsCommitAtomicallyPreserveSecondaryGroupsAndReplayAfterRestart() = runBlocking {
-        var first = true
-        for (withGroups in listOf(false, true)) for (change in listOf("first", "last", "delete-preferred", "switch")) {
-            if (!first) resetDatabase()
-            first = false
+    @Test fun firstNativeEmailWithoutGroupsCommitsAndReplays() = runBlocking {
+        verifyPreferredEmailTransition("first", withGroups = false)
+    }
+
+    @Test fun firstNativeEmailWithGroupsCommitsAndReplays() = runBlocking {
+        verifyPreferredEmailTransition("first", withGroups = true)
+    }
+
+    @Test fun lastNativeEmailWithoutGroupsCommitsAndReplays() = runBlocking {
+        verifyPreferredEmailTransition("last", withGroups = false)
+    }
+
+    @Test fun lastNativeEmailWithGroupsCommitsAndReplays() = runBlocking {
+        verifyPreferredEmailTransition("last", withGroups = true)
+    }
+
+    @Test fun deletedPreferredNativeEmailWithoutGroupsCommitsAndReplays() = runBlocking {
+        verifyPreferredEmailTransition("delete-preferred", withGroups = false)
+    }
+
+    @Test fun deletedPreferredNativeEmailWithGroupsCommitsAndReplays() = runBlocking {
+        verifyPreferredEmailTransition("delete-preferred", withGroups = true)
+    }
+
+    @Test fun switchedPreferredNativeEmailWithoutGroupsCommitsAndReplays() = runBlocking {
+        verifyPreferredEmailTransition("switch", withGroups = false)
+    }
+
+    @Test fun switchedPreferredNativeEmailWithGroupsCommitsAndReplays() = runBlocking {
+        verifyPreferredEmailTransition("switch", withGroups = true)
+    }
+
+    private suspend fun verifyPreferredEmailTransition(change: String, withGroups: Boolean) {
             val fixture = seed(canonicalGroupIds = setOf(GROUP_B), previousGroupId = GROUP_B)
             var before = requireNotNull(database.contactDao().get(ACCOUNT.value, CONTACT_ID)).toDomain()
             if (change == "first" || change == "last") {
@@ -214,13 +244,28 @@ class RoomAndroidGroupMembershipObservationCommitterDeviceTest {
                 }
             }
             val previousEmail = com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy.preferredEmail(before)?.id
-            val edited = before.copy(values = when (change) {
-                "first" -> listOf(ContactValue("first-email", ContactValueKind.EMAIL, "first@example.test", order = 0, isPrimary = true))
-                "last" -> emptyList()
-                else -> before.values.filterNot { change == "delete-preferred" && it.id == EMAIL_ID }
-                    .map { it.copy(isPrimary = it.id == SECONDARY_EMAIL_ID) }
+            val mapper = CanonicalAndroidContactMapper()
+            val baselineContact = mapper.project(before)
+            // Exercise the provider-facing primary signal, including its conversion to the
+            // canonical vCard preference. Changing ContactValue.isPrimary alone is insufficient.
+            val observedContact = baselineContact.copy(rows = when (change) {
+                "first" -> baselineContact.rows + AndroidContactRow(AndroidValueIdentity("first-email"),
+                    AndroidRowKind.EMAIL, value = "first@example.test", isPrimary = true)
+                "last" -> baselineContact.rows.filterNot { it.kind == AndroidRowKind.EMAIL }
+                "delete-preferred" -> baselineContact.rows.filterNot { it.identity.canonicalValueId == previousEmail }
+                "switch" -> baselineContact.rows.map { row ->
+                    if (row.kind != AndroidRowKind.EMAIL) row else row.copy(
+                        isPrimary = row.identity.canonicalValueId == SECONDARY_EMAIL_ID,
+                        isSuperPrimary = row.identity.canonicalValueId == SECONDARY_EMAIL_ID,
+                    )
+                }
+                else -> error("Unknown transition fixture")
             })
+            val delta = mapper.applyControlledDelta(before, baselineContact, observedContact)
+            val edited = delta.contact
             val nextEmail = com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy.preferredEmail(edited)?.id
+            assertTrue("$change must change the canonical preferred email", previousEmail != nextEmail)
+            assertTrue(delta.changedValueIds.isNotEmpty())
             val physicalMappings = if (withGroups && previousEmail != null) membershipSnapshot(GROUP_B).locatorMappings
                 else emptyList()
             val previous = AndroidGroupMembershipSnapshot.create(ACCOUNT.value, CONTACT_ID, previousEmail,
@@ -238,8 +283,6 @@ class RoomAndroidGroupMembershipObservationCommitterDeviceTest {
             val observedMembership = AndroidGroupMembershipSnapshot.create(ACCOUNT.value, CONTACT_ID, nextEmail,
                 if (nextEmail == null) AndroidGroupMembershipAvailability.NO_EMAIL else AndroidGroupMembershipAvailability.AVAILABLE,
                 physicalMappings)
-            val mapper = CanonicalAndroidContactMapper()
-            val observedContact = mapper.project(edited)
             val groupsBefore = database.contactGroupDao().getAll(ACCOUNT.value).associate { it.group.id to it.toDomain() }
             fun groupStates(groups: List<ContactGroupWithMemberships>) = groups.map {
                 RoomExpectedContactGroupState(it.group.id, it.group.revision, it.group.isDeleted)
@@ -255,8 +298,7 @@ class RoomAndroidGroupMembershipObservationCommitterDeviceTest {
                 preferredEmailTransition = RoomAndroidPreferredEmailTransition(previousEmail, nextEmail, before.revision),
             )
             val command = RoomAndroidUnifiedObservationCommand(contactLedger, LOCATOR, 7, before.revision,
-                AndroidCanonicalDelta(edited, mapper.fingerprint(observedContact), mapper.fingerprint(observedContact),
-                    changedValueIds = (before.values.map { it.id } + edited.values.map { it.id }).toSet()),
+                delta,
                 observedContact, membershipCommand)
             fun unified() = RoomAndroidUnifiedObservationCommitter(database,
                 RoomAndroidObservationCommitter(ACCOUNT, RoomAndroidProjectionLedger(database),
@@ -265,6 +307,9 @@ class RoomAndroidGroupMembershipObservationCommitterDeviceTest {
             val after = requireNotNull(database.contactDao().get(ACCOUNT.value, CONTACT_ID)).toDomain()
             assertEquals(before.revision + 1, after.revision)
             assertEquals(nextEmail, com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy.preferredEmail(after)?.id)
+            assertEquals(nextEmail, mapper.project(after).rows.singleOrNull {
+                it.kind == AndroidRowKind.EMAIL && it.isPrimary
+            }?.identity?.canonicalValueId)
             assertEquals(after.revision, database.outboxDao().get(ACCOUNT.value, AggregateType.CONTACT.name, CONTACT_ID)?.revision)
             val remainingIds = after.values.map { it.id }.toSet()
             database.contactGroupDao().getAll(ACCOUNT.value).forEach { stored ->
@@ -295,7 +340,6 @@ class RoomAndroidGroupMembershipObservationCommitterDeviceTest {
             assertTrue(unified().commit(replay) is RoomAndroidUnifiedObservationResult.Applied)
             assertEquals(after.revision, requireNotNull(database.contactDao().get(ACCOUNT.value, CONTACT_ID)).contact.revision)
             assertEquals(groupRevisions, database.contactGroupDao().getAll(ACCOUNT.value).associate { it.group.id to it.group.revision })
-        }
     }
 
     @Test
