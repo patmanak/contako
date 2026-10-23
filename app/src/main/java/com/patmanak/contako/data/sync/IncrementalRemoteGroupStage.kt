@@ -22,6 +22,8 @@ internal sealed interface RemoteGroupStageResult {
 internal class IncrementalRemoteGroupStage(
     private val gateway: ProtonContactGroupGateway,
     private val store: RemoteGroupReconciliationStore,
+    private val failureObserver: (GatewayFailureCategory) -> Unit = {},
+    private val exceptionObserver: (SyncPassExceptionCategory) -> Unit = {},
 ) {
     suspend fun run(
         account: AccountScope,
@@ -30,13 +32,17 @@ internal class IncrementalRemoteGroupStage(
         if (isCancellationRequested()) return RemoteGroupStageResult.Cancelled
         val groups = when (val result = gateway.list(account)) {
             is GatewayOutcome.Success -> result.value
-            is GatewayOutcome.Failure -> return result.category.toGroupStageResult()
+            is GatewayOutcome.Failure -> {
+                runCatching { failureObserver(result.category) }
+                return result.category.toGroupStageResult()
+            }
         }
         if (isCancellationRequested()) return RemoteGroupStageResult.Cancelled
         return try {
             store.commit(account, groups)
             RemoteGroupStageResult.Success(groups.groups.size)
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            runCatching { exceptionObserver(syncPassExceptionCategory(error)) }
             RemoteGroupStageResult.LocalPersistenceFailure
         }
     }

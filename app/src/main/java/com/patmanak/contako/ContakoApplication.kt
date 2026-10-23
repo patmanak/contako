@@ -101,9 +101,8 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
     }
 
     private inline fun syncDiagnostic(event: () -> SanitizedDiagnosticEvent) {
-        if (BuildConfig.SANITIZED_DIAGNOSTICS || BuildConfig.SYNC_DIAGNOSTICS) {
-            SanitizedDiagnosticLog.write(event())
-        }
+        // The private bounded journal is available in ordinary releases; Logcat stays build-gated.
+        SanitizedDiagnosticLog.write(event())
     }
 
     private val sharedSyncRuntime: ProductionSharedSyncRuntime by lazy {
@@ -112,6 +111,24 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
             database,
             protonGateCRuntime,
             stopScheduling = syncSchedulingPolicy::close,
+            syncRunnerObserver = object : com.patmanak.contako.domain.sync.SyncRunnerObserver {
+                override fun onRequest(trigger: SyncTrigger, scope: com.patmanak.contako.domain.sync.SyncScope,
+                    disposition: com.patmanak.contako.domain.sync.SyncRequestDisposition) {
+                    syncDiagnostic { SanitizedDiagnosticEvent.SyncRequest(trigger, scope, disposition) }
+                }
+                override fun onStart(scope: com.patmanak.contako.domain.sync.SyncScope) {
+                    syncDiagnostic { SanitizedDiagnosticEvent.PassStarted(scope) }
+                }
+                override fun onFinish(outcome: SyncPassOutcome) {
+                    syncDiagnostic { SanitizedDiagnosticEvent.PassFinished(outcome) }
+                }
+            },
+            remoteGroupFailureObserver = { category ->
+                syncDiagnostic { SanitizedDiagnosticEvent.GroupReadFailure(category) }
+            },
+            canonicalContactRejectionObserver = com.patmanak.contako.data.local.AndroidCanonicalContactRejectionObserver { reason ->
+                syncDiagnostic { SanitizedDiagnosticEvent.CanonicalRejection(reason) }
+            },
             passStageObserver = object : SyncPassStageObserver {
                 override fun onImportPhase(phase: com.patmanak.contako.data.sync.RemoteImportPhase) {
                     syncDiagnostic { SanitizedDiagnosticEvent.ImportPhase(phase) }
@@ -224,6 +241,9 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
 
     override fun onCreate() {
         super.onCreate()
+        com.patmanak.contako.diagnostics.SyncDiagnosticJournal.initialize(
+            java.io.File(noBackupFilesDir, "sync-diagnostics/journal.txt"), applicationScope,
+        )
         if (!instrumentationStartupSuppressed) syncSchedulingPolicy.initialize()
         if (BuildConfig.SANITIZED_DIAGNOSTICS || BuildConfig.SYNC_DIAGNOSTICS) applicationScope.launch {
             RoomSyncStatusStore(database).observe(protonGateCRuntime.accountScope.value)

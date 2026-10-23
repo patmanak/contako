@@ -79,6 +79,9 @@
     <string name="settings_notifications">Notificaciones y diagnósticos</string>
     <string name="settings_account">Cuenta y firma</string>
     <string name="diagnostics_title">Diagnósticos locales</string>
+    <string name="diagnostics_journal_body">Un historial local rotativo conserva hasta 128 eventos técnicos tras reiniciar la aplicación, con horas UTC, desencadenantes, etapas y categorías de error o campo. No incluye valores de contactos ni se envía automáticamente. Borrarlo no elimina los documentos exportados.</string>
+    <string name="diagnostics_clear_history">Borrar historial local</string>
+    <string name="diagnostics_clear_failed">No se pudo borrar el historial del almacenamiento. Inténtelo de nuevo; el historial anterior puede permanecer tras reiniciar.</string>
     <string name="diagnostics_body">Genere un informe depurado solo cuando usted lo elija, con versiones, estados de capacidad e intervalos agregados permitidos, sin valores de contactos, identificadores estables, credenciales, códigos, contenidos, recuentos raros exactos, rutas ni errores sin depurar.</string>
     <string name="diagnostics_generate">Generar informe depurado</string>
     <string name="diagnostics_export">Exportar a un documento</string>

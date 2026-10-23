@@ -79,6 +79,9 @@
     <string name="settings_notifications">Notification et diagnostic</string>
     <string name="settings_account">Compter et signer</string>
     <string name="diagnostics_title">Diagnostics locaux</string>
+    <string name="diagnostics_journal_body">Un historique local tournant conserve jusqu’à 128 événements techniques après redémarrage, avec heures UTC, déclencheurs, étapes et catégories d’erreur ou de champ. Il ne contient aucune valeur de contact et aucun envoi automatique. Effacer cet historique ne supprime pas les documents exportés.</string>
+    <string name="diagnostics_clear_history">Effacer l’historique local</string>
+    <string name="diagnostics_clear_failed">Impossible d’effacer l’historique du stockage. Réessayez ; l’ancien historique peut rester présent après redémarrage.</string>
     <string name="diagnostics_body">Générez un rapport assaini uniquement à votre demande. Il contient des versions, des états de capacité et des plages agrégées autorisés, sans valeurs de contact, identifiants stables, identifiants de connexion, codes, contenus, petits décomptes exacts, chemins ni erreurs brutes.</string>
     <string name="diagnostics_generate">Générer le rapport assaini</string>
     <string name="diagnostics_export">Exporter vers un document</string>

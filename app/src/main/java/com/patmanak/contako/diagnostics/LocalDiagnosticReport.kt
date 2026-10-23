@@ -14,6 +14,9 @@ data class LocalDiagnosticInput(
     val contactsPermissionGranted: Boolean,
     val importInvestigation: Boolean = false,
     val investigationEvents: List<InvestigationTraceEntry> = emptyList(),
+    val journal: SyncJournalSnapshot? = null,
+    val problem: com.patmanak.contako.domain.sync.SyncProblem? = null,
+    val androidPendingContactCount: Int = 0,
 )
 
 enum class DiagnosticSyncState {
@@ -50,10 +53,10 @@ object LocalDiagnosticReportGenerator {
         require(input.apiLevel >= 1)
         require(
             input.contactCount >= 0 && input.groupCount >= 0 &&
-                input.pendingMutationCount >= 0 && input.actionRequiredCount >= 0,
+                input.pendingMutationCount >= 0 && input.actionRequiredCount >= 0 && input.androidPendingContactCount >= 0,
         )
         val report = buildString {
-            appendLine("contako_diagnostic_schema=${if (input.importInvestigation) 2 else 1}")
+            appendLine("contako_diagnostic_schema=${if (input.journal != null) 3 else if (input.importInvestigation) 2 else 1}")
             appendLine("app_version=${input.appVersion}")
             appendLine("platform=android")
             appendLine("api_level_band=${apiBand(input.apiLevel)}")
@@ -65,7 +68,15 @@ object LocalDiagnosticReportGenerator {
             appendLine("actions_required=${countBand(input.actionRequiredCount)}")
             appendLine("sync_state=${input.syncState.name.lowercase()}")
             appendLine("contacts_permission=${if (input.contactsPermissionGranted) "granted" else "not_granted"}")
-            if (input.importInvestigation) {
+            if (input.journal != null) {
+                appendLine("sync_problem=${input.problem?.name ?: "NONE"}")
+                appendLine("android_copy_pending=${countBand(input.androidPendingContactCount)}")
+                appendLine("journal_storage=${input.journal.storage.name}")
+                appendLine("journal_clock=utc_and_process_elapsed_ms")
+                appendLine("journal_last_failure=${input.journal.lastFailure?.encoded ?: "none"}")
+                appendLine("journal_events=" + input.journal.events.takeLast(SyncDiagnosticBuffer.MAX_EVENTS)
+                    .joinToString("|") { it.encoded }.ifEmpty { "none" })
+            } else if (input.importInvestigation) {
                 appendLine("import_mode=batch_25_parallel_10")
                 appendLine("investigation_events=" + input.investigationEvents.takeLast(InvestigationTrace.MAX_EVENTS)
                     .joinToString("|") { it.code }.ifEmpty { "none" })
@@ -94,7 +105,7 @@ object LocalDiagnosticReportGenerator {
 object LocalDiagnosticSafetyScanner {
     private val countBand = Regex("none|small|medium|large|very_large")
     private val schema = linkedMapOf(
-        "contako_diagnostic_schema" to Regex("1|2"),
+        "contako_diagnostic_schema" to Regex("1|2|3"),
         "app_version" to Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-RC[1-9][0-9]*)?(?:-(?:debug|preview|diagnostic|sync-diagnostic|benchmark|investigation[0-9]*))?"),
         "platform" to Regex("android"),
         "api_level_band" to Regex("below_supported|31_34|35|36_or_later"),
@@ -120,11 +131,29 @@ object LocalDiagnosticSafetyScanner {
     )
 
     fun isSafeReport(candidate: String): Boolean {
-        if (candidate.length > 32 * 1024) return false
+        if (candidate.length > 96 * 1024) return false
         if (forbidden.any { it.containsMatchIn(candidate) }) return false
         val lines = candidate.lineSequence().filter(String::isNotEmpty).toList()
         val investigation = lines.firstOrNull() == "contako_diagnostic_schema=2"
-        if (lines.size != schema.size + if (investigation) 2 else 0) return false
+        val journal = lines.firstOrNull() == "contako_diagnostic_schema=3"
+        if (lines.size != schema.size + if (journal) 6 else if (investigation) 2 else 0) return false
+        if (journal) {
+            val metadata = lines.drop(schema.size)
+            fun value(index: Int, key: String): String? = metadata[index].takeIf { it.startsWith("$key=") }
+                ?.removePrefix("$key=")
+            val problem = value(0, "sync_problem") ?: return false
+            if (problem != "NONE" && com.patmanak.contako.domain.sync.SyncProblem.entries.none { it.name == problem }) return false
+            if (!countBand.matches(value(1, "android_copy_pending") ?: return false)) return false
+            if (JournalStorage.entries.none { it.name == value(2, "journal_storage") }) return false
+            if (metadata[3] != "journal_clock=utc_and_process_elapsed_ms") return false
+            val failure = value(4, "journal_last_failure") ?: return false
+            if (failure != "none" && !SyncJournalEntry.valid(failure)) return false
+            val events = value(5, "journal_events") ?: return false
+            if (events != "none") {
+                val entries = events.split('|')
+                if (entries.size > SyncDiagnosticBuffer.MAX_EVENTS || entries.any { !SyncJournalEntry.valid(it) }) return false
+            }
+        }
         if (investigation) {
             if (lines[schema.size] != "import_mode=batch_25_parallel_10") return false
             val trace = lines.last().removePrefix("investigation_events=")

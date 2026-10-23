@@ -26,7 +26,7 @@ JVM suite, remove --tests. XML/HTML results stay under app/build/, never in Git.
 | UT-08 | Serialized runner, durable intent, retry/coalescing, cancellation, lost acknowledgement and bounded context refresh. | AccountSyncRunnerTest, DurableMutationOrchestratorTest, ContakoSyncPassExecutorTest, SyncAdapterBlockingTest |
 | UT-09 | Timing evidence, unknown timestamps and expiry/clock jumps never authorize a conflict winner; snapshot encoding preserves complete rich versions and rejects malformed data. | ConflictPolicyTest, VerifiedServerClockTest, ContactConflictSnapshotCodecTest |
 | UT-10 | Sign-out counts native intent and refuses unsafe cleanup; fresh dialog attempt forgets obsolete warnings. | AccountSignOutCoordinatorTest, ContactsViewModelTest |
-| UT-11 | Closed diagnostics and error-body exclusion; version suffixes and contact-count/list consistency. | LocalDiagnosticReportTest, SanitizedDiagnosticEventTest, ProtonGateCAdaptersTest, ContactsViewModelTest |
+| UT-11 | Closed diagnostics and error-body exclusion; timed bounded journal, retained cause, disk validation/rotation/restart/clear, observer isolation, version suffixes and contact-count/list consistency. | LocalDiagnosticReportTest, SyncDiagnosticJournalTest, SanitizedDiagnosticEventTest, AccountSyncRunnerTest, ProtonGateCAdaptersTest, ContactsViewModelTest |
 | UT-12 | Auth generations/password lifetime, permissions, capability failure classes, route/backup/build boundaries. | PendingLoginPasswordTest, AuthenticationViewModelTest, GroupCapabilityCoordinatorTest, ProjectInvariantTest |
 
 The shared [dataset](../app/qa/dataset/README.md) provides concrete contact inputs

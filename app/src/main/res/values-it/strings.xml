@@ -79,6 +79,9 @@
     <string name="settings_notifications">Notifiche e diagnostica</string>
     <string name="settings_account">Account e firma</string>
     <string name="diagnostics_title">Diagnostica locale</string>
+    <string name="diagnostics_journal_body">Una cronologia locale a rotazione conserva fino a 128 eventi tecnici anche dopo il riavvio: orari UTC, attivazioni, fasi e categorie di errore o campo. Nessun valore dei contatti e nessun invio automatico. La cancellazione non elimina i documenti esportati.</string>
+    <string name="diagnostics_clear_history">Cancella cronologia locale</string>
+    <string name="diagnostics_clear_failed">Impossibile cancellare la cronologia dalla memoria. Riprova; la cronologia precedente potrebbe rimanere dopo il riavvio.</string>
     <string name="diagnostics_body">Genera un rapporto ripulito solo quando lo scegli, con versioni, stati delle funzionalità e intervalli aggregati consentiti, senza valori dei contatti, identificatori stabili, credenziali, codici, contenuti, conteggi rari esatti, percorsi o errori non elaborati.</string>
     <string name="diagnostics_generate">Genera rapporto ripulito</string>
     <string name="diagnostics_export">Esporta in un documento</string>

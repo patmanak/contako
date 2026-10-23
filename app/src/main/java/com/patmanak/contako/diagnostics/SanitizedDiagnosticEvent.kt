@@ -31,6 +31,16 @@ internal sealed interface SanitizedDiagnosticEvent {
     data class AuthPhase(val phase: GateCAuthPhase) : SanitizedDiagnosticEvent
     data class AuthFailure(val event: GateCAuthDiagnosticEvent) : SanitizedDiagnosticEvent
     data class SyncStage(val stage: SyncPassStage) : SanitizedDiagnosticEvent
+    data class SyncRequest(
+        val trigger: com.patmanak.contako.domain.sync.SyncTrigger,
+        val scope: com.patmanak.contako.domain.sync.SyncScope,
+        val disposition: com.patmanak.contako.domain.sync.SyncRequestDisposition,
+    ) : SanitizedDiagnosticEvent
+    data class PassStarted(val scope: com.patmanak.contako.domain.sync.SyncScope) : SanitizedDiagnosticEvent
+    data class PassFinished(val outcome: SyncPassOutcome) : SanitizedDiagnosticEvent
+    data class GroupReadFailure(val category: GatewayFailureCategory) : SanitizedDiagnosticEvent
+    data class AndroidCallback(val result: DiagnosticAndroidCallback) : SanitizedDiagnosticEvent
+    data class CanonicalRejection(val reason: com.patmanak.contako.data.local.AndroidCanonicalContactRejectionReason) : SanitizedDiagnosticEvent
     data class ImportPhase(val phase: com.patmanak.contako.data.sync.RemoteImportPhase) : SanitizedDiagnosticEvent
     data class ContactUpdateFailure(
         val stage: com.patmanak.contako.data.proton.ProtonContactUpdateStage,
@@ -118,6 +128,8 @@ internal enum class DiagnosticAndroidResult {
     }
 }
 
+internal enum class DiagnosticAndroidCallback { RECEIVED, REJECTED_ACCOUNT_OR_AUTHORITY, ACCOUNT_NOT_BOUND, FINISHED }
+
 /** The minified sync-only artifact MUST NOT enable authentication/cryptography traces. */
 internal fun isSyncDiagnostic(event: SanitizedDiagnosticEvent): Boolean = when (event) {
     is SanitizedDiagnosticEvent.AuthPhase,
@@ -136,6 +148,12 @@ internal fun renderDiagnostic(event: SanitizedDiagnosticEvent): String = when (e
     is SanitizedDiagnosticEvent.AuthFailure ->
         "AUTH_ERROR=${event.event.diagnosticClass.name} HTTP=${event.event.httpCode} CODE=${event.event.protonCode}"
     is SanitizedDiagnosticEvent.SyncStage -> "SYNC_STAGE=${event.stage.name}"
+    is SanitizedDiagnosticEvent.SyncRequest -> "SYNC_REQUEST=${event.trigger.name} SCOPE=${event.scope.name} DISPOSITION=${event.disposition.name}"
+    is SanitizedDiagnosticEvent.PassStarted -> "SYNC_STARTED=${event.scope.name}"
+    is SanitizedDiagnosticEvent.PassFinished -> "SYNC_FINISHED=${event.outcome.name}"
+    is SanitizedDiagnosticEvent.GroupReadFailure -> "GROUP_READ_FAILURE=${event.category.name}"
+    is SanitizedDiagnosticEvent.AndroidCallback -> "ANDROID_CALLBACK=${event.result.name}"
+    is SanitizedDiagnosticEvent.CanonicalRejection -> "CANONICAL_REJECTION=${event.reason.name}"
     is SanitizedDiagnosticEvent.ImportPhase -> "IMPORT_PHASE=${event.phase.name}"
     is SanitizedDiagnosticEvent.ContactUpdateFailure ->
         "CONTACT_UPDATE_FAILURE=${event.stage.name} CATEGORY=${event.category.name} " +

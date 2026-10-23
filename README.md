@@ -28,7 +28,8 @@ Screenshots show the application interface with fictional contacts.
 - Sign in with a Proton account, including TOTP 2FA and CAPTCHA.
 - Choose light, dark or system appearance and one of eight interface languages.
 - Inspect separate Proton-upload and Android-copy queues and export a local,
-  sanitized diagnostic summary from Sync.
+  sanitized diagnostic report from Sync, including a bounded local event history
+  with timestamps and synchronization failure categories.
 
 Android 12 or later is required. One Proton account is supported at a time.
 The current source version is **0.10.1**; see the

@@ -21,7 +21,13 @@ internal object InvestigationTrace {
     private val ring = ArrayDeque<InvestigationTraceEntry>()
 
     @Synchronized fun record(event: SanitizedDiagnosticEvent) {
-        val code = when (event) {
+        val code = codeFor(event) ?: return
+        check(isAllowedCode(code))
+        if (ring.size == MAX_EVENTS) ring.removeFirst()
+        ring.addLast(InvestigationTraceEntry(code))
+    }
+
+    internal fun codeFor(event: SanitizedDiagnosticEvent): String? = when (event) {
             is SanitizedDiagnosticEvent.SyncStage -> "stage:${event.stage.name}"
             is SanitizedDiagnosticEvent.ImportPhase -> "import:${event.phase.name}"
             is SanitizedDiagnosticEvent.SyncException -> "failure:${event.category.name}"
@@ -48,12 +54,8 @@ internal object InvestigationTrace {
                 "mutation:${event.source.name}.${event.operation.name}.${event.category?.name ?: "NONE"}.${event.reason?.name ?: "NONE"}"
             is SanitizedDiagnosticEvent.ContactFailure ->
                 "remote:${event.boundary.name}:${event.category?.name ?: "NONE"}:${event.hydration?.name ?: "NONE"}"
-            else -> return // Exclude auth/crypto traces, fields, exact aggregates and all other event types.
+            else -> null // Exclude auth/crypto traces, fields, exact aggregates and all other event types.
         }
-        check(isAllowedCode(code))
-        if (ring.size == MAX_EVENTS) ring.removeFirst()
-        ring.addLast(InvestigationTraceEntry(code))
-    }
 
     @Synchronized fun snapshot(): List<InvestigationTraceEntry> = ring.toList()
     @Synchronized fun clear() = ring.clear()

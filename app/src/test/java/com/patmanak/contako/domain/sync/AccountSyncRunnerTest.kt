@@ -13,6 +13,24 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AccountSyncRunnerTest {
+    @Test fun diagnosticObserversDescribeRequestsAndCannotChangeScheduling() = runTest {
+        val events = mutableListOf<String>()
+        val observer = object : SyncRunnerObserver {
+            override fun onRequest(trigger: SyncTrigger, scope: SyncScope, disposition: SyncRequestDisposition) {
+                events += "${trigger.name}:${disposition.name}"
+                error("observer only")
+            }
+            override fun onStart(scope: SyncScope) { events += "start:${scope.name}"; error("observer only") }
+            override fun onFinish(outcome: SyncPassOutcome) { events += "finish:${outcome.name}"; error("observer only") }
+        }
+        val runner = AccountSyncRunner(backgroundScope, observer) { SyncPassOutcome.SUCCESS }
+        assertEquals(SyncRequestDisposition.STARTED, runner.request(SyncTrigger.ANDROID_UPLOAD))
+        runner.awaitIdle()
+        runner.cancelForAccountRemoval()
+        assertEquals(SyncRequestDisposition.ACCOUNT_INVALIDATED, runner.request(SyncTrigger.MANUAL))
+        assertEquals(listOf("ANDROID_UPLOAD:STARTED", "start:INCREMENTAL", "finish:SUCCESS", "MANUAL:ACCOUNT_INVALIDATED"), events)
+    }
+
     @Test
     fun `03-SINGLE trigger storm runs one pass and at most one coalesced follow up`() = runTest {
         val firstStarted = CompletableDeferred<Unit>()

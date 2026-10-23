@@ -79,6 +79,9 @@
     <string name="settings_notifications">Notificações e diagnósticos</string>
     <string name="settings_account">Conta e desliga</string>
     <string name="diagnostics_title">Diagnóstico local</string>
+    <string name="diagnostics_journal_body">Um histórico local rotativo conserva até 128 eventos técnicos após reiniciar a aplicação: horas UTC, motivos da sincronização, etapas e categorias de erro ou campo. Sem valores de contactos nem envio automático. A limpeza não elimina documentos exportados.</string>
+    <string name="diagnostics_clear_history">Limpar histórico local</string>
+    <string name="diagnostics_clear_failed">Não foi possível limpar o histórico do armazenamento. Tente novamente; o histórico anterior pode permanecer após reiniciar.</string>
     <string name="diagnostics_body">Gere um relatório higienizado apenas quando escolher, com versões, estados de capacidades e intervalos agregados permitidos, sem valores de contactos, identificadores estáveis, credenciais, códigos, conteúdos, contagens raras exatas, caminhos ou erros brutos.</string>
     <string name="diagnostics_generate">Gerar relatório higienizado</string>
     <string name="diagnostics_export">Exportar para um documento</string>

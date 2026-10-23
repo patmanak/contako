@@ -120,6 +120,8 @@ internal fun composeProductionSharedSyncRuntime(
     canonicalContactRejectionObserver: AndroidCanonicalContactRejectionObserver =
         AndroidCanonicalContactRejectionObserver { },
     projectionRepairObserver: AndroidProjectionRepairObserver = AndroidProjectionRepairObserver { },
+    syncRunnerObserver: com.patmanak.contako.domain.sync.SyncRunnerObserver = object : com.patmanak.contako.domain.sync.SyncRunnerObserver {},
+    remoteGroupFailureObserver: (GatewayFailureCategory) -> Unit = {},
 ): ProductionSharedSyncRuntime {
     val gateD = proton.gateD
     return composeProductionSharedSyncRuntime(
@@ -155,6 +157,8 @@ internal fun composeProductionSharedSyncRuntime(
         membershipLedgerStaleObserver,
         canonicalContactRejectionObserver,
         projectionRepairObserver,
+        syncRunnerObserver,
+        remoteGroupFailureObserver,
     )
 }
 
@@ -190,6 +194,8 @@ internal fun composeProductionSharedSyncRuntime(
     canonicalContactRejectionObserver: AndroidCanonicalContactRejectionObserver =
         AndroidCanonicalContactRejectionObserver { },
     projectionRepairObserver: AndroidProjectionRepairObserver = AndroidProjectionRepairObserver { },
+    syncRunnerObserver: com.patmanak.contako.domain.sync.SyncRunnerObserver = object : com.patmanak.contako.domain.sync.SyncRunnerObserver {},
+    remoteGroupFailureObserver: (GatewayFailureCategory) -> Unit = {},
 ): ProductionSharedSyncRuntime {
     val applicationContext = context.applicationContext
     val account = dependencies.account
@@ -327,6 +333,8 @@ internal fun composeProductionSharedSyncRuntime(
         groupStage = IncrementalRemoteGroupStage(
             dependencies.groups,
             RoomRemoteGroupReconciliationStore(database),
+            remoteGroupFailureObserver,
+            exceptionObserver = passStageObserver::onException,
         ),
         statusPublisher = RoomSyncPassStatusPublisher(
             account.value,
@@ -374,7 +382,7 @@ internal fun composeProductionSharedSyncRuntime(
         ),
         fullRepairCoordinator = RoomFullRepairExecutionCoordinator(account, fullRepairStore),
     )
-    val runner = AccountSyncRunner(runnerScope, executor)
+    val runner = AccountSyncRunner(runnerScope, syncRunnerObserver, executor)
     runnerScope.launch {
         if (fullRepairStore.load(account) != null) {
             runner.request(

@@ -79,6 +79,9 @@
     <string name="settings_notifications">Powiadomienia i diagnostyka</string>
     <string name="settings_account">Rachunek i podpis</string>
     <string name="diagnostics_title">Diagnostyka lokalna</string>
+    <string name="diagnostics_journal_body">Lokalna historia rotacyjna zachowuje do 128 zdarzeń technicznych po ponownym uruchomieniu: czas UTC, przyczyny synchronizacji, etapy oraz kategorie błędów i pól. Bez wartości kontaktów i automatycznego wysyłania. Wyczyszczenie nie usuwa wyeksportowanych dokumentów.</string>
+    <string name="diagnostics_clear_history">Wyczyść lokalną historię</string>
+    <string name="diagnostics_clear_failed">Nie udało się usunąć historii z pamięci. Spróbuj ponownie; poprzednia historia może pozostać po ponownym uruchomieniu.</string>
     <string name="diagnostics_body">Wygeneruj oczyszczony raport tylko na własne żądanie, z dozwolonymi wersjami, stanami funkcji i zagregowanymi zakresami, bez wartości kontaktów, stałych identyfikatorów, danych logowania, kodów, treści, dokładnych rzadkich liczb, ścieżek ani surowych błędów.</string>
     <string name="diagnostics_generate">Wygeneruj oczyszczony raport</string>
     <string name="diagnostics_export">Eksportuj do dokumentu</string>

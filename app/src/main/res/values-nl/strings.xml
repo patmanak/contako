@@ -79,6 +79,9 @@
     <string name="settings_notifications">Kennisgevingen en diagnoses</string>
     <string name="settings_account">Accounteren en afmelden</string>
     <string name="diagnostics_title">Lokale diagnostiek</string>
+    <string name="diagnostics_journal_body">Een lokale roterende geschiedenis bewaart maximaal 128 technische gebeurtenissen na een herstart: UTC-tijden, aanleidingen, stappen en fout- of veldcategorieën. Geen contactwaarden of automatische verzending. Wissen verwijdert geen geëxporteerde documenten.</string>
+    <string name="diagnostics_clear_history">Lokale geschiedenis wissen</string>
+    <string name="diagnostics_clear_failed">De geschiedenis kon niet uit de opslag worden gewist. Probeer opnieuw; de vorige geschiedenis kan na een herstart blijven bestaan.</string>
     <string name="diagnostics_body">Genereer alleen op uw verzoek een opgeschoond rapport met toegestane versies, functiestatussen en geaggregeerde bereiken, zonder contactwaarden, stabiele identificatoren, aanmeldgegevens, codes, inhoud, exacte zeldzame aantallen, paden of ruwe fouten.</string>
     <string name="diagnostics_generate">Opgeschoond rapport genereren</string>
     <string name="diagnostics_export">Naar een document exporteren</string>

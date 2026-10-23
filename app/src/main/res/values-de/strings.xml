@@ -79,6 +79,9 @@
     <string name="settings_notifications">Benachrichtigungen und Diagnosen</string>
     <string name="settings_account">Konto und Abmelden</string>
     <string name="diagnostics_title">Lokale Diagnose</string>
+    <string name="diagnostics_journal_body">Ein lokaler Ringspeicher bewahrt bis zu 128 technische Ereignisse auch nach App-Neustarts auf: UTC-Zeiten, Auslöser, Schritte sowie Fehler- oder Feldkategorien. Keine Kontaktwerte und kein automatischer Versand. Das Löschen entfernt keine exportierten Dokumente.</string>
+    <string name="diagnostics_clear_history">Lokalen Verlauf löschen</string>
+    <string name="diagnostics_clear_failed">Der lokale Verlauf konnte nicht aus dem Speicher gelöscht werden. Erneut versuchen; der bisherige Verlauf kann nach einem Neustart erhalten bleiben.</string>
     <string name="diagnostics_body">Erstellen Sie nur auf eigenen Wunsch einen bereinigten Bericht mit erlaubten Versionen, Funktionszuständen und aggregierten Bereichen, ohne Kontaktwerte, stabile Kennungen, Zugangsdaten, Codes, Nutzdaten, genaue seltene Anzahlen, Pfade oder Rohfehler.</string>
     <string name="diagnostics_generate">Bereinigten Bericht erstellen</string>
     <string name="diagnostics_export">In ein Dokument exportieren</string>

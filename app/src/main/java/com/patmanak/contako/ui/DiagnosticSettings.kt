@@ -39,6 +39,7 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
     val context = LocalContext.current
     var report by remember { mutableStateOf<LocalDiagnosticReport?>(null) }
     var generationFailed by remember { mutableStateOf(false) }
+    var historyClearFailed by remember { mutableStateOf(false) }
     var exportSucceeded by remember { mutableStateOf<Boolean?>(null) }
     val scope = rememberCoroutineScope()
     var exporting by remember { mutableStateOf(false) }
@@ -68,6 +69,17 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
 
     InfoCard(stringResource(R.string.diagnostics_title)) {
         Text(stringResource(R.string.diagnostics_body), style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.diagnostics_journal_body), style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(enabled = !exporting, onClick = {
+            exporting = true
+            scope.launch {
+                try {
+                    historyClearFailed = !com.patmanak.contako.diagnostics.SyncDiagnosticJournal.clear()
+                    if (!historyClearFailed) { report = null; exportSucceeded = null }
+                } finally { exporting = false }
+            }
+        }) { Text(stringResource(R.string.diagnostics_clear_history)) }
+        if (historyClearFailed) Text(stringResource(R.string.diagnostics_clear_failed))
         Button(
             enabled = !exporting,
             onClick = {
@@ -85,6 +97,9 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
                         importInvestigation = BuildConfig.IMPORT_INVESTIGATION,
                         investigationEvents = if (BuildConfig.IMPORT_INVESTIGATION)
                             com.patmanak.contako.diagnostics.InvestigationTrace.snapshot() else emptyList(),
+                        journal = com.patmanak.contako.diagnostics.SyncDiagnosticJournal.snapshot(),
+                        problem = state.syncDashboard.problem,
+                        androidPendingContactCount = state.syncDashboard.androidPendingContactIds.size,
                     ),
                 )
                 .also { generationFailed = false } } catch (_: IllegalStateException) {

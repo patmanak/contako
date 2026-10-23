@@ -31,14 +31,23 @@ internal class ContakoContactsSyncAdapter(
         provider: ContentProviderClient,
         syncResult: SyncResult,
     ) {
+        com.patmanak.contako.diagnostics.SanitizedDiagnosticLog.write(
+            com.patmanak.contako.diagnostics.SanitizedDiagnosticEvent.AndroidCallback(
+                com.patmanak.contako.diagnostics.DiagnosticAndroidCallback.RECEIVED))
         if (authority != ContakoAndroidAccountContract.CONTACTS_AUTHORITY ||
             account.type != ContakoAndroidAccountContract.ACCOUNT_TYPE
         ) {
+            com.patmanak.contako.diagnostics.SanitizedDiagnosticLog.write(
+                com.patmanak.contako.diagnostics.SanitizedDiagnosticEvent.AndroidCallback(
+                    com.patmanak.contako.diagnostics.DiagnosticAndroidCallback.REJECTED_ACCOUNT_OR_AUTHORITY))
             syncResult.stats.numAuthExceptions++
             return
         }
         val runner = runnerResolver.resolve(account)
         if (runner == null) {
+            com.patmanak.contako.diagnostics.SanitizedDiagnosticLog.write(
+                com.patmanak.contako.diagnostics.SanitizedDiagnosticEvent.AndroidCallback(
+                    com.patmanak.contako.diagnostics.DiagnosticAndroidCallback.ACCOUNT_NOT_BOUND))
             syncResult.stats.numAuthExceptions++
             return
         }
@@ -71,6 +80,9 @@ internal class ContakoContactsSyncAdapter(
                 SyncPassOutcome.CANCELLED, null -> Unit
             }
         }
+        com.patmanak.contako.diagnostics.SanitizedDiagnosticLog.write(
+            com.patmanak.contako.diagnostics.SanitizedDiagnosticEvent.AndroidCallback(
+                com.patmanak.contako.diagnostics.DiagnosticAndroidCallback.FINISHED))
     }
 }
 

@@ -63,6 +63,13 @@ fun interface SyncPassExecutor {
     suspend fun execute(request: SyncPassRequest): SyncPassOutcome
 }
 
+/** Optional closed-metadata observer. Observer failures MUST NOT affect scheduling or execution. */
+interface SyncRunnerObserver {
+    fun onRequest(trigger: SyncTrigger, scope: SyncScope, disposition: SyncRequestDisposition) {}
+    fun onStart(scope: SyncScope) {}
+    fun onFinish(outcome: SyncPassOutcome) {}
+}
+
 /**
  * One account-owned runner. Trigger submission is detached from the caller so cancellation of a UI
  * or framework caller cannot cancel an in-progress cross-system pass. Account removal uses the
@@ -70,8 +77,12 @@ fun interface SyncPassExecutor {
  */
 class AccountSyncRunner(
     private val scope: CoroutineScope,
+    private val observer: SyncRunnerObserver = object : SyncRunnerObserver {},
     private val executor: SyncPassExecutor,
 ) {
+    constructor(scope: CoroutineScope, executor: SyncPassExecutor) :
+        this(scope, object : SyncRunnerObserver {}, executor)
+
     private val mutex = Mutex()
     private val cancellationGeneration = AtomicLong(0)
     private val repairCancellationGeneration = AtomicLong(0)
@@ -102,6 +113,7 @@ class AccountSyncRunner(
                 SyncRequestDisposition.STARTED
             }
         }
+        runCatching { observer.onRequest(trigger, requestedScope, disposition) }
         if (launchDrain) scope.launch { drain() }
         return disposition
     }
@@ -165,6 +177,7 @@ class AccountSyncRunner(
                 pass
             }
 
+            runCatching { observer.onStart(request.scope) }
             val outcome = try {
                 executor.execute(request)
             } catch (_: CancellationException) {
@@ -173,6 +186,7 @@ class AccountSyncRunner(
                 SyncPassOutcome.FAILED
             }
 
+            runCatching { observer.onFinish(outcome) }
             val continueWithFollowUp = mutex.withLock {
                 val completed = SyncRunState.Completed(outcome, passNumber)
                 mutableLastCompletion.value = completed

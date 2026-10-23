@@ -2,6 +2,14 @@
 
 Features and improvements by version.
 
+## Unreleased
+
+- Include a rotating, persistent local sync history in manually exported
+  diagnostics: UTC/process-relative timings, request triggers, execution stages,
+  known error/field categories, Android-copy backlog and retained failure context.
+- Allow clearing local diagnostic history without removing exported documents;
+  report history-storage failures without changing synchronization behavior.
+
 ## 0.10.1
 
 - Preserve separate occurrences of identical email addresses and their individual

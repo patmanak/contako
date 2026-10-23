@@ -1,6 +1,6 @@
 # Contako Privacy Policy
 
-Effective date: 2 October 2026.
+Effective date: 18 October 2026.
 
 This policy applies to **Contako**, the Android contact-management and
 synchronization application (`com.patmanak.contako`), developed and maintained
@@ -123,12 +123,19 @@ system records and exported files are governed by Android or the app/provider
 holding them; review those locations if you want to remove every copy. Removing
 local data does not remove remote Proton data.
 
-Diagnostic summaries are generated only when requested. They contain the app
-version, broad Android platform and count categories, permission state and overall
-sync state, rather than contact values, account identifiers or credentials.
-You choose whether and where to export them. Dismissing an on-screen report does
-not delete a file already exported; delete it through its destination provider.
-Contako does not automatically send reports to the developer.
+Contako keeps a small rotating technical history in its private, backup-excluded
+storage: up to 128 events and a retained failure detail. It includes UTC event
+times, elapsed process timings, synchronization triggers, steps and known error
+or field categories. It excludes contact values, account identifiers, credentials,
+raw errors and authentication/cryptographic traces. It survives app restarts and
+can be cleared from Local diagnostics. It is not automatically sent anywhere.
+
+Diagnostic reports are generated only when requested. They include this technical
+history, the app version, broad Android platform and count categories, permission
+state and overall sync state. You choose whether and where to export them.
+Dismissing an on-screen report or clearing the local history does not delete a
+file already exported; delete it through its destination provider. Contako does
+not automatically send reports to the developer.
 
 ## Contact and policy changes
 

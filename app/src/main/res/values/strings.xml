@@ -79,6 +79,9 @@
     <string name="settings_notifications">Notifications and diagnostics</string>
     <string name="settings_account">Account and sign out</string>
     <string name="diagnostics_title">Local diagnostics</string>
+    <string name="diagnostics_journal_body">A local rotating history keeps up to 128 technical events across app restarts, with UTC times, sync triggers, stages and error or field categories. It contains no contact values and is never sent automatically. Clearing history does not remove exported documents.</string>
+    <string name="diagnostics_clear_history">Clear local history</string>
+    <string name="diagnostics_clear_failed">Local history could not be cleared from storage. Try again; the previous history may remain after a restart.</string>
     <string name="diagnostics_body">Generate a sanitized report only when you choose. It contains allowlisted versions, capability states, and aggregate ranges. It excludes contact values, stable identifiers, credentials, codes, payloads, exact rare counts, paths, and raw errors.</string>
     <string name="diagnostics_generate">Generate sanitized report</string>
     <string name="diagnostics_export">Export to a document</string>

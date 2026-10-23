@@ -14,11 +14,26 @@
   stable private identifiers MUST NOT enter logs, public evidence or source.
 - Proton/Android protected storage and maintained Proton cryptography are used.
   Do not implement cryptographic protocols from scratch.
-- Ordinary and release builds disable diagnostic logging. `diagnostic` enables
-  the reviewed typed diagnostic sink; `syncDiagnostic` enables only closed sync
-  enums and aggregates while remaining minified and non-debuggable. The manual
-  in-app diagnostic summary is a separate, user-initiated export available in
-  ordinary builds; it is not a raw log export or automatic telemetry.
+- Ordinary and release builds disable Android Logcat diagnostics. `diagnostic`
+  enables the reviewed typed Logcat sink; `syncDiagnostic` enables only closed
+  sync enums and aggregates while remaining minified and non-debuggable.
+- All variants maintain a local rotating journal of at most 128 closed technical
+  events and a retained latest detailed failure (a generic result only when no
+  finer cause was recorded in that pass). It records UTC
+  wall time, elapsed milliseconds relative to the process, sync request origins,
+  stages and known error/field categories. Authentication/cryptography traces,
+  contact values, private IDs, URLs, raw messages and stack traces MUST NOT enter
+  this journal. The retained failure may precede a later successful pass; its
+  timestamp MUST NOT be treated as evidence of a current failure.
+- The journal uses app-private, backup-excluded storage. Each atomic file and
+  temporary replacement is capped at 96 KiB; writes are asynchronous and bursts
+  are coalesced. Abrupt termination may lose the last unflushed events. A missing,
+  corrupt or unwritable journal MUST NOT block sync or establish sync success.
+  A persistence failure is visible in the report; a failed clear is reported to
+  the user. Export validation is independent of collection and disk validation.
+- Reports are generated and exported only on request; nothing is sent
+  automatically. Users can clear local history separately from dismissing the
+  displayed report. Neither action deletes documents already exported elsewhere.
 - Release builds MUST be non-debuggable, minified and free of payload logging.
 
 ## Authentication and verification

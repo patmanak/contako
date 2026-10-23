@@ -128,6 +128,14 @@ replaying the full contact campaign.
 
 ## Targeted synchronization diagnostics
 
+All builds expose the local schema-3 report in Sync. Its bounded, app-private
+journal includes UTC/process-relative times, request trigger/disposition,
+execution stages, import phases and closed failure/field categories. The rotating
+128-event history survives restarts, with a separately retained detailed failure
+that subsequent generic banners do not hide. `journal_storage` reports whether persistence is
+available. See [Security](SECURITY.md) for exclusions and retention bounds.
+The journal is not Android Logcat and is never uploaded automatically.
+
 The `syncDiagnostic` variant inherits the minified, non-debuggable, debug-signed
 `preview` configuration and uses the `-sync-diagnostic` version suffix. Its
 `SYNC_DIAGNOSTICS` flag enables only closed synchronization enums and aggregate

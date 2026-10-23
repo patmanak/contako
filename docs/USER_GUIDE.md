@@ -78,16 +78,24 @@ version check for the final write.
 
 ## Report a problem safely
 
-In Sync, generate the local diagnostic summary, review it and export it only if
-you want to share it. It contains the app version, broad platform/count categories,
-permission state and overall synchronization state. It excludes contact values,
-account identifiers and credentials, and is not a detailed activity history.
-Deleting the on-screen summary does not delete a file already exported elsewhere.
+In Sync, reproduce the problem, then generate the local diagnostic report, review
+it and export it only if you want to share it. Ordinary builds include a rotating
+history of up to 128 technical events: UTC times, elapsed milliseconds relative
+to each process, manual/Android/local-change triggers, sync stages and known
+error or field categories. The latest detailed failure is retained separately
+when newer events rotate; a later generic banner or success does not erase it.
+Process-start markers distinguish elapsed-time resets. UTC follows the device
+clock, while elapsed times are unaffected by a wall-clock adjustment.
 
-Known build-specific limitation: generating this summary on a `-sync-diagnostic`
-build fails the current version-format validation. The exporter is implemented,
-but this diagnostic variant must not be described as qualified. This was found
-by source/rule inspection, not a new phone reproduction; see [Known limitations](KNOWN_LIMITATIONS.md).
+The report also contains broad platform/count categories, permission state,
+Android-copy backlog and overall sync reason. It excludes contact values,
+account identifiers, credentials, raw errors and authentication/cryptographic
+traces. An unknown field remains unknown rather than being guessed. The history
+survives app restarts, but abrupt termination can lose the last unflushed events.
+`journal_storage=UNAVAILABLE` indicates a history-storage problem, not a sync result.
+Use **Clear local history** to erase retained history; a storage failure is shown
+instead of confirming a durable clear. Deleting the on-screen report or clearing
+history does not delete a document already exported elsewhere.
 
 Describe the phone model, version, source app and field/action involved, for
 example “added an email in Proton Web; Android copy remains pending.” Do not send
