@@ -35,7 +35,7 @@ class AndroidProjectionMismatchClassifierTest {
             classifyAndroidProjectionMismatch(desired, actual, mapper))
     }
 
-    @Test fun comparisonViewPreservesFingerprintAndLeavesSourceSnapshotsUntouched() {
+    @Test fun comparisonViewIgnoresOnlyPhotoSuperPrimaryAndLeavesObservationSnapshotsUntouched() {
         val rows = AndroidRowKind.entries.mapIndexed { index, kind -> AndroidContactRow(
             AndroidValueIdentity("value-$index", index.toLong() + 1), kind, value = "content",
             isPrimary = true, isSuperPrimary = true, binaryReference = "",
@@ -43,10 +43,26 @@ class AndroidProjectionMismatchClassifierTest {
         ) }
         val source = AndroidContactSnapshot("contact", rows)
         val comparison = mapper.projectionComparisonSnapshot(source)
-        assertEquals(mapper.fingerprint(source), mapper.fingerprint(comparison))
+        // Observation fingerprints deliberately retain the actual PHOTO display preference.
+        // Projection comparison alone ignores that aggregate-selected flag; it is never a ledger
+        // baseline and cannot authorize changing photo bytes, ownership or a provider receipt.
+        assertNotEquals(mapper.fingerprint(source), mapper.fingerprint(comparison))
+        val withoutPhotoDisplayPreference = source.copy(rows = source.rows.map {
+            if (it.kind == AndroidRowKind.PHOTO) it.copy(isSuperPrimary = false) else it
+        })
+        assertEquals(mapper.fingerprint(withoutPhotoDisplayPreference), mapper.fingerprint(comparison))
+        assertEquals(comparison, mapper.projectionComparisonSnapshot(withoutPhotoDisplayPreference))
         assertTrue(source.rows.all { it.identity.providerRowId != null && it.isPrimary && it.isSuperPrimary })
         assertTrue(source.rows.all { it.components.containsKey(AndroidComponent.GIVEN_NAME) })
         assertTrue(comparison.rows.all { it.identity.providerRowId == null })
+        assertFalse(comparison.rows.single { it.kind == AndroidRowKind.PHOTO }.isSuperPrimary)
+        val changedBytes = source.copy(rows = source.rows.map {
+            if (it.kind == AndroidRowKind.PHOTO) it.copy(binaryReference = "changed-photo-bytes") else it
+        })
+        assertNotEquals(mapper.fingerprint(comparison),
+            mapper.fingerprint(mapper.projectionComparisonSnapshot(changedBytes)))
+        assertEquals(AndroidProjectionRepairCategory.POST_WRITE_CONTACT_PHOTO_REFERENCE,
+            classifyAndroidProjectionMismatch(source, changedBytes, mapper))
     }
 
     @Test fun componentDiagnosticReportsOnlyFieldAndDifferenceEnums() {

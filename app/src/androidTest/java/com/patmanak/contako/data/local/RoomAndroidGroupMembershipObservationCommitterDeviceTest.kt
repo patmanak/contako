@@ -195,6 +195,110 @@ class RoomAndroidGroupMembershipObservationCommitterDeviceTest {
     }
 
     @Test
+    fun preferredEmailTransitionsCommitAtomicallyPreserveSecondaryGroupsAndReplayAfterRestart() = runBlocking {
+        var first = true
+        for (withGroups in listOf(false, true)) for (change in listOf("first", "last", "delete-preferred", "switch")) {
+            if (!first) resetDatabase()
+            first = false
+            val fixture = seed(canonicalGroupIds = setOf(GROUP_B), previousGroupId = GROUP_B)
+            var before = requireNotNull(database.contactDao().get(ACCOUNT.value, CONTACT_ID)).toDomain()
+            if (change == "first" || change == "last") {
+                before = repository.saveContact(before.copy(values =
+                    if (change == "first") emptyList() else before.values.filter { it.id == EMAIL_ID },
+                )).requireSaved()
+            }
+            if (!withGroups) {
+                database.contactGroupDao().getAll(ACCOUNT.value).forEach { stored ->
+                    repository.saveGroup(stored.toDomain().copy(memberships = stored.toDomain().memberships
+                        .filterNot { it.contactId == CONTACT_ID })).requireSaved()
+                }
+            }
+            val previousEmail = com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy.preferredEmail(before)?.id
+            val edited = before.copy(values = when (change) {
+                "first" -> listOf(ContactValue("first-email", ContactValueKind.EMAIL, "first@example.test", order = 0, isPrimary = true))
+                "last" -> emptyList()
+                else -> before.values.filterNot { change == "delete-preferred" && it.id == EMAIL_ID }
+                    .map { it.copy(isPrimary = it.id == SECONDARY_EMAIL_ID) }
+            })
+            val nextEmail = com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy.preferredEmail(edited)?.id
+            val physicalMappings = if (withGroups && previousEmail != null) membershipSnapshot(GROUP_B).locatorMappings
+                else emptyList()
+            val previous = AndroidGroupMembershipSnapshot.create(ACCOUNT.value, CONTACT_ID, previousEmail,
+                if (previousEmail == null) AndroidGroupMembershipAvailability.NO_EMAIL else AndroidGroupMembershipAvailability.AVAILABLE,
+                physicalMappings)
+            val previousBytes = AndroidGroupMembershipSnapshotBinaryCodec.encode(previous)
+            groupDao().upsertMembershipBaseline(AndroidGroupMembershipBaselineEntity(ACCOUNT.value, CONTACT_ID,
+                AndroidGroupMembershipSnapshotBinaryCodec.integrityFingerprint(previousBytes).sha256Hex, previousBytes))
+            val initialMembership = requireNotNull(groupDao().getMembership(ACCOUNT.value, CONTACT_ID))
+            assertEquals(1, groupDao().updateMembership(initialMembership.copy(
+                preferredEmailValueId = previousEmail,
+                canonicalProjectionFingerprint = previous.semanticFingerprint().sha256Hex,
+                androidBaselineFingerprint = previous.semanticFingerprint().sha256Hex,
+            )))
+            val observedMembership = AndroidGroupMembershipSnapshot.create(ACCOUNT.value, CONTACT_ID, nextEmail,
+                if (nextEmail == null) AndroidGroupMembershipAvailability.NO_EMAIL else AndroidGroupMembershipAvailability.AVAILABLE,
+                physicalMappings)
+            val mapper = CanonicalAndroidContactMapper()
+            val observedContact = mapper.project(edited)
+            val groupsBefore = database.contactGroupDao().getAll(ACCOUNT.value).associate { it.group.id to it.toDomain() }
+            fun groupStates(groups: List<ContactGroupWithMemberships>) = groups.map {
+                RoomExpectedContactGroupState(it.group.id, it.group.revision, it.group.isDeleted)
+            }
+            val contactLedger = requireNotNull(RoomAndroidProjectionLedger(database).load(ACCOUNT, CONTACT_ID))
+            val membershipCommand = fixture.command.copy(
+                expectedCanonicalContactRevision = before.revision,
+                expectedCanonicalGroupStates = groupStates(database.contactGroupDao().getAll(ACCOUNT.value)),
+                expectedAndroidGroupBindings = fixture.command.expectedAndroidGroupBindings.filter {
+                    physicalMappings.any { mapping -> mapping.canonicalGroupId == it.canonicalGroupId }
+                },
+                observedSnapshot = observedMembership,
+                preferredEmailTransition = RoomAndroidPreferredEmailTransition(previousEmail, nextEmail, before.revision),
+            )
+            val command = RoomAndroidUnifiedObservationCommand(contactLedger, LOCATOR, 7, before.revision,
+                AndroidCanonicalDelta(edited, mapper.fingerprint(observedContact), mapper.fingerprint(observedContact),
+                    changedValueIds = (before.values.map { it.id } + edited.values.map { it.id }).toSet()),
+                observedContact, membershipCommand)
+            fun unified() = RoomAndroidUnifiedObservationCommitter(database,
+                RoomAndroidObservationCommitter(ACCOUNT, RoomAndroidProjectionLedger(database),
+                    RoomAndroidCanonicalMutationStore(database, ACCOUNT, repository)), committer())
+            assertTrue("$change groups=$withGroups", unified().commit(command) is RoomAndroidUnifiedObservationResult.Applied)
+            val after = requireNotNull(database.contactDao().get(ACCOUNT.value, CONTACT_ID)).toDomain()
+            assertEquals(before.revision + 1, after.revision)
+            assertEquals(nextEmail, com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy.preferredEmail(after)?.id)
+            assertEquals(after.revision, database.outboxDao().get(ACCOUNT.value, AggregateType.CONTACT.name, CONTACT_ID)?.revision)
+            val remainingIds = after.values.map { it.id }.toSet()
+            database.contactGroupDao().getAll(ACCOUNT.value).forEach { stored ->
+                assertEquals(groupsBefore.getValue(stored.group.id).memberships.filter {
+                    it.contactId != CONTACT_ID || it.emailValueId in remainingIds
+                }.toSet(), stored.toDomain().memberships.toSet())
+            }
+            assertEquals(observedMembership, AndroidGroupMembershipSnapshotBinaryCodec.decode(
+                requireNotNull(groupDao().getMembershipBaseline(ACCOUNT.value, CONTACT_ID)).encodedSnapshot))
+            // A lost provider acknowledgement must not duplicate the contact transition.
+            assertEquals(RoomAndroidUnifiedObservationResult.ReplanRequired, unified().commit(command))
+            database.close()
+            database = ContakoDatabase.create(context, DATABASE_NAME)
+            repository = RoomContactRepository(database, clock = { FIXED_NOW }, elapsedRealtimeClock = { FIXED_NOW })
+            val replayLedger = requireNotNull(RoomAndroidProjectionLedger(database).load(ACCOUNT, CONTACT_ID))
+            val replayMembership = requireNotNull(groupDao().getMembership(ACCOUNT.value, CONTACT_ID))
+            val replay = command.copy(contactLedger = replayLedger, expectedCanonicalContactRevision = after.revision,
+                contactDelta = mapper.applyControlledDelta(after, observedContact, observedContact),
+                membership = membershipCommand.copy(
+                    expectedAccountRevision = requireNotNull(database.androidProjectionLedgerDao().getAccount(ACCOUNT.value)).revision,
+                    expectedCanonicalContactRevision = after.revision,
+                    expectedContactLedgerRevision = replayLedger.revision,
+                    expectedMembershipLedgerRevision = replayMembership.revision,
+                    expectedCanonicalGroupStates = groupStates(database.contactGroupDao().getAll(ACCOUNT.value)),
+                    preferredEmailTransition = null,
+                ))
+            val groupRevisions = database.contactGroupDao().getAll(ACCOUNT.value).associate { it.group.id to it.group.revision }
+            assertTrue(unified().commit(replay) is RoomAndroidUnifiedObservationResult.Applied)
+            assertEquals(after.revision, requireNotNull(database.contactDao().get(ACCOUNT.value, CONTACT_ID)).contact.revision)
+            assertEquals(groupRevisions, database.contactGroupDao().getAll(ACCOUNT.value).associate { it.group.id to it.group.revision })
+        }
+    }
+
+    @Test
     fun nativeNoteWithUnchangedMembershipsAcceptsOwnGroupRevisionsButRejectsAStalePlan() = runBlocking {
         for (concurrentGroupEdit in listOf(false, true)) {
             if (concurrentGroupEdit) resetDatabase()
@@ -364,6 +468,16 @@ class RoomAndroidGroupMembershipObservationCommitterDeviceTest {
             ),
             committer().commit(fixture.command),
         )
+    }
+
+    @Test
+    fun unchangedNativeMembershipsStillRejectAStaleCanonicalGroupVector() = runBlocking {
+        val fixture = seed(canonicalGroupIds = setOf(GROUP_A), previousGroupId = GROUP_A)
+        val changed = requireNotNull(database.contactGroupDao().get(ACCOUNT.value, GROUP_A)).toDomain()
+        repository.saveGroup(changed.copy(name = "Changed since planning")).requireSaved()
+        assertEquals(RoomAndroidGroupMembershipObservationResult.StaleGroupContext, committer().commit(fixture.command))
+        assertEquals(0L, requireNotNull(database.androidProjectionLedgerDao().getAccount(ACCOUNT.value)).revision)
+        assertEquals(0L, requireNotNull(groupDao().getMembership(ACCOUNT.value, CONTACT_ID)).revision)
     }
 
     @Test

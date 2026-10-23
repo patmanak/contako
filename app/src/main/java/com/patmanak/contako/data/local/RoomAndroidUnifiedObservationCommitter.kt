@@ -514,6 +514,16 @@ internal class RoomAndroidUnifiedObservationCommitter(
                     if (canonicalGroupStates(command.membership.account.value) !=
                         command.membership.expectedCanonicalGroupStates.sortedBy(RoomExpectedContactGroupState::groupId)
                     ) replan(RoomAndroidUnifiedCommitReplanReason.MEMBERSHIP_STALE_GROUP_CONTEXT)
+                    command.membership.preferredEmailTransition?.let { transition ->
+                        val before = database.contactDao().get(
+                            command.membership.account.value, command.contactLedger.canonicalContactId,
+                        )?.toDomain() ?: replan(RoomAndroidUnifiedCommitReplanReason.CONTACT_CANONICAL_STALE)
+                        if (before.revision != transition.previousCanonicalRevision ||
+                            before.revision != command.expectedCanonicalContactRevision ||
+                            CanonicalPrimaryValuePolicy.preferredEmail(before)?.id != transition.previousEmailValueId ||
+                            CanonicalPrimaryValuePolicy.preferredEmail(command.contactDelta.contact)?.id != transition.nextEmailValueId
+                        ) replan(RoomAndroidUnifiedCommitReplanReason.CONTACT_CANONICAL_STALE)
+                    }
                     val contact = contactCommitter.commitContactDelta(
                         ledgerSnapshot = command.contactLedger,
                         locator = command.locator,
@@ -613,6 +623,9 @@ internal class RoomAndroidUnifiedObservationCommitter(
         AndroidGroupMembershipSnapshotBinaryCodec.encode(command.membership.observedSnapshot).contentHashCode(),
         command.membership.expectedCanonicalGroupStates,
         command.membership.expectedAndroidGroupBindings,
+        command.membership.preferredEmailTransition?.previousEmailValueId,
+        command.membership.preferredEmailTransition?.nextEmailValueId,
+        command.membership.preferredEmailTransition?.previousCanonicalRevision,
     ))
 
     private fun digest(values: List<Any?>): String {

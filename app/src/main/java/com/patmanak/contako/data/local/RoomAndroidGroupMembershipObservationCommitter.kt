@@ -14,6 +14,7 @@ import com.patmanak.contako.data.android.mapping.AndroidGroupSnapshotBinaryCodec
 import com.patmanak.contako.data.android.mapping.AndroidGroupSnapshotCodecException
 import com.patmanak.contako.data.android.mapping.AndroidGroupSnapshotContextException
 import com.patmanak.contako.data.gateway.AccountScope
+import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -37,6 +38,31 @@ internal data class RoomExpectedAndroidGroupBinding(
         "RoomExpectedAndroidGroupBinding(REDACTED, revision=$expectedLedgerRevision)"
 }
 
+/** Explicit old/new identity; it is validated before and after the unified contact mutation. */
+internal data class RoomAndroidPreferredEmailTransition(
+    val previousEmailValueId: String?,
+    val nextEmailValueId: String?,
+    val previousCanonicalRevision: Long,
+) {
+    init {
+        require(previousEmailValueId != nextEmailValueId)
+        require(previousEmailValueId == null || previousEmailValueId.isNotBlank())
+        require(nextEmailValueId == null || nextEmailValueId.isNotBlank())
+        require(previousCanonicalRevision in 0 until Long.MAX_VALUE)
+    }
+    override fun toString(): String = "RoomAndroidPreferredEmailTransition(REDACTED)"
+}
+
+/** An unchanged native group set is not an instruction to replace a secondary email's groups. */
+internal fun preferredEmailTransitionGroupIds(
+    targetCanonicalGroups: Set<String>,
+    previousObservedGroups: Set<String>,
+    currentObservedGroups: Set<String>,
+    nextEmailValueId: String?,
+): Set<String> = if (nextEmailValueId == null) emptySet() else
+    (targetCanonicalGroups - (previousObservedGroups - currentObservedGroups)) +
+        (currentObservedGroups - previousObservedGroups)
+
 internal data class RoomAndroidGroupMembershipObservationCommand(
     val account: AccountScope,
     val expectedAccountRevision: Long,
@@ -50,6 +76,7 @@ internal data class RoomAndroidGroupMembershipObservationCommand(
     val observedSnapshot: AndroidGroupMembershipSnapshot,
     val expectedContactAdoptionState: AndroidAdoptionState = AndroidAdoptionState.ADOPTED,
     val allowInitialCanonicalDelta: Boolean = false,
+    val preferredEmailTransition: RoomAndroidPreferredEmailTransition? = null,
 ) {
     init {
         require(expectedAccountRevision >= 0)
@@ -262,6 +289,14 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
                 } catch (_: AndroidGroupSnapshotContextException) {
                     return@withTransaction RoomAndroidGroupMembershipObservationResult.StaleCanonicalContext
                 }
+                val transition = command.preferredEmailTransition
+                if (transition != null && (
+                        canonicalContact.revision != Math.incrementExact(transition.previousCanonicalRevision) ||
+                            CanonicalPrimaryValuePolicy.preferredEmail(canonicalContact)?.id != transition.nextEmailValueId ||
+                            command.observedSnapshot.preferredEmailValueId != transition.nextEmailValueId
+                        )) {
+                    return@withTransaction RoomAndroidGroupMembershipObservationResult.StaleCanonicalContext
+                }
 
                 val groupDao = database.androidGroupProjectionDao()
                 val membershipLedger = groupDao.getMembership(
@@ -285,7 +320,9 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
                         RoomAndroidMembershipLedgerStaleReason.RAW_CONTACT_LOCATOR,
                     )
                 }
-                if (membershipLedger.preferredEmailValueId != command.observedSnapshot.preferredEmailValueId) {
+                val expectedPreviousEmail = if (transition != null) transition.previousEmailValueId
+                    else command.observedSnapshot.preferredEmailValueId
+                if (membershipLedger.preferredEmailValueId != expectedPreviousEmail) {
                     return@withTransaction staleMembershipLedger(
                         RoomAndroidMembershipLedgerStaleReason.PREFERRED_EMAIL_CONTEXT,
                     )
@@ -297,6 +334,11 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
                     } else {
                         return@withTransaction RoomAndroidGroupMembershipObservationResult.RepairRequired
                     }
+                if (transition != null && (previousBaseline == null ||
+                        previousBaseline.preferredEmailValueId != transition.previousEmailValueId ||
+                        membershipLedger.pendingProjectionFingerprint != null)) {
+                    return@withTransaction RoomAndroidGroupMembershipObservationResult.RepairRequired
+                }
                 val requiredBindingIds = previousBaseline?.canonicalGroupIds.orEmpty().toSet() +
                     command.observedSnapshot.canonicalGroupIds
                 if (command.expectedAndroidGroupBindings.mapTo(mutableSetOf()) { it.canonicalGroupId } !=
@@ -310,6 +352,12 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
 
                 val canonicalGroups = database.contactGroupDao().getAll(command.account.value)
                     .map(ContactGroupWithMemberships::toDomain)
+                if (canonicalGroups.map {
+                        RoomExpectedContactGroupState(it.id, it.revision, it.isDeleted)
+                    }.sortedBy(RoomExpectedContactGroupState::groupId) !=
+                    command.expectedCanonicalGroupStates.sortedBy(RoomExpectedContactGroupState::groupId)) {
+                    return@withTransaction RoomAndroidGroupMembershipObservationResult.StaleGroupContext
+                }
                 val canonicalProjection = AndroidGroupProjectionPolicy().projectMemberships(
                     canonicalContact,
                     canonicalGroups,
@@ -319,6 +367,8 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
                         canonicalProjection.availability == command.observedSnapshot.membershipAvailability &&
                         canonicalProjection.canonicalGroupIds == command.observedSnapshot.canonicalGroupIds.toSet()
                 val classification = when {
+                    transition != null ->
+                        RoomAndroidGroupMembershipObservationClassification.CANONICAL_DELTA_COMMITTED
                     membershipLedger.pendingProjectionFingerprint == observedSemanticFingerprint.sha256Hex -> {
                         if (!canonicalMatchesObservation) {
                             return@withTransaction RoomAndroidGroupMembershipObservationResult.RepairRequired
@@ -336,9 +386,8 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
                         }
                     }
                     membershipLedger.androidBaselineFingerprint == observedSemanticFingerprint.sha256Hex -> {
-                        if (!canonicalMatchesObservation) {
-                            return@withTransaction RoomAndroidGroupMembershipObservationResult.RepairRequired
-                        }
+                        // No native group change: a newer canonical projection must not be replaced
+                        // by the old physical memberships (also protects a lost-ack transition).
                         RoomAndroidGroupMembershipObservationClassification.NO_CHANGE
                     }
                     canonicalMatchesObservation ->
@@ -356,14 +405,22 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
                 }
                 checkpoint(RoomAndroidGroupMembershipCommitCheckpoint.AFTER_ACCOUNT_CAS)
 
-                val canonicalResult = repository.applyObservedGroupMembershipsInCurrentTransaction(
+                val observedGroupIds = if (transition != null) preferredEmailTransitionGroupIds(
+                    canonicalProjection.canonicalGroupIds,
+                    requireNotNull(previousBaseline).canonicalGroupIds.toSet(),
+                    command.observedSnapshot.canonicalGroupIds.toSet(),
+                    transition.nextEmailValueId,
+                ) else command.observedSnapshot.canonicalGroupIds.toSet()
+                val canonicalResult = if (classification ==
+                    RoomAndroidGroupMembershipObservationClassification.CANONICAL_DELTA_COMMITTED
+                ) repository.applyObservedGroupMembershipsInCurrentTransaction(
                     accountId = command.account.value,
                     contactId = command.canonicalContactId,
                     expectedCanonicalRevision = command.expectedCanonicalContactRevision,
                     expectedPreferredEmailValueId = command.observedSnapshot.preferredEmailValueId,
                     expectedGroupStates = command.expectedCanonicalGroupStates,
-                    observedCanonicalGroupIds = command.observedSnapshot.canonicalGroupIds.toSet(),
-                )
+                    observedCanonicalGroupIds = observedGroupIds,
+                ) else RoomObservedGroupMembershipMutationResult.NoChange
                 val changedGroupCount = when (canonicalResult) {
                     is RoomObservedGroupMembershipMutationResult.Applied -> canonicalResult.changedGroupIds.size
                     RoomObservedGroupMembershipMutationResult.NoChange -> 0
@@ -390,11 +447,20 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
                     abort(staleMembershipLedger(RoomAndroidMembershipLedgerStaleReason.COMPARE_AND_SET))
                 }
                 checkpoint(RoomAndroidGroupMembershipCommitCheckpoint.AFTER_MEMBERSHIP_LEDGER_CAS)
+                val updatedProjection = AndroidGroupProjectionPolicy().projectMemberships(
+                    canonicalContact, database.contactGroupDao().getAll(command.account.value).map { it.toDomain() },
+                )
+                val projectionMatchesObserved = updatedProjection.preferredEmailValueId ==
+                    command.observedSnapshot.preferredEmailValueId &&
+                    updatedProjection.availability == command.observedSnapshot.membershipAvailability &&
+                    updatedProjection.canonicalGroupIds == command.observedSnapshot.canonicalGroupIds.toSet()
                 val updatedLedger = membershipLedger.copy(
                     revision = Math.incrementExact(command.expectedMembershipLedgerRevision),
                     rawContactLocator = command.locator.localRowHandle,
                     preferredEmailValueId = command.observedSnapshot.preferredEmailValueId,
-                    canonicalProjectionFingerprint = observedSemanticFingerprint.sha256Hex,
+                    // The baseline is the physical observation. A different canonical group set
+                    // remains a projection obligation; do not invent a prepared provider write.
+                    canonicalProjectionFingerprint = observedSemanticFingerprint.sha256Hex.takeIf { projectionMatchesObserved },
                     androidBaselineFingerprint = observedSemanticFingerprint.sha256Hex,
                     pendingProjectionFingerprint = null,
                     projectionState = AndroidProjectionWriteState.CLEAN.name,
@@ -573,7 +639,6 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
             membership.providerEpoch != command.locator.providerEpoch ||
             membership.rawContactLocator != command.locator.localRowHandle ||
             membership.preferredEmailValueId != command.observedSnapshot.preferredEmailValueId ||
-            membership.canonicalProjectionFingerprint != expectedSemanticFingerprint ||
             membership.androidBaselineFingerprint != expectedSemanticFingerprint ||
             membership.pendingProjectionFingerprint != null ||
             membership.projectionState != AndroidProjectionWriteState.CLEAN.name
@@ -635,10 +700,10 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
             contact,
             groups.map(ContactGroupWithMemberships::toDomain),
         )
-        if (projection.preferredEmailValueId != command.observedSnapshot.preferredEmailValueId ||
-            projection.availability != command.observedSnapshot.membershipAvailability ||
-            projection.canonicalGroupIds != command.observedSnapshot.canonicalGroupIds.toSet()
-        ) {
+        val projectionMatchesObserved = projection.preferredEmailValueId == command.observedSnapshot.preferredEmailValueId &&
+            projection.availability == command.observedSnapshot.membershipAvailability &&
+            projection.canonicalGroupIds == command.observedSnapshot.canonicalGroupIds.toSet()
+        if (membership.canonicalProjectionFingerprint != expectedSemanticFingerprint.takeIf { projectionMatchesObserved }) {
             return false
         }
         val observedLocatorById = command.observedSnapshot.locatorMappings
@@ -704,6 +769,12 @@ internal class RoomAndroidGroupMembershipObservationCommitter(
         digest.putLong(command.expectedCanonicalContactRevision)
         digest.putLong(command.expectedContactLedgerRevision)
         digest.putLong(command.expectedMembershipLedgerRevision)
+        command.preferredEmailTransition?.let {
+            digest.putString("preferred-email-transition")
+            digest.putNullableString(it.previousEmailValueId)
+            digest.putNullableString(it.nextEmailValueId)
+            digest.putLong(it.previousCanonicalRevision)
+        }
         digest.putBytes(encodedBaseline)
         val groupStates = command.expectedCanonicalGroupStates.sortedBy { it.groupId }
         digest.putInt(groupStates.size)

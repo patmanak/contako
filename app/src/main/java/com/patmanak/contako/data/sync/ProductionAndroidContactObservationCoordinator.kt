@@ -234,6 +234,10 @@ internal fun isContactLocalPlanFailure(
         AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_VENDOR_MIME,
         AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_MULTIPLE_FAMILIES,
         AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_VALUES_DIFFER,
+        AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_NO_PHOTO_RECOVERY,
+        AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_JOURNAL_MISSING,
+        AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_RECOVERY_STATE_MISMATCH,
+        AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_MEMBERSHIPS_DIFFER,
     )
 
 internal fun isContactLocalCodecFailure(reason: AndroidProviderRowCodecFailure?): Boolean = reason in setOf(
@@ -718,12 +722,13 @@ internal class ProductionAndroidContactObservationCoordinator(
                     ?: return@withTransaction planRepair(AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_VALUES_DIFFER)
             }
             val delta = mapper.applyControlledDelta(canonical, baseline, snapshot)
-            // Membership context is checked against the canonical revision presented to the
-            // membership committer. A contact edit that changes preferred email must replan.
-            val preferredEmail = CanonicalPrimaryValuePolicy.preferredEmail(canonical)?.id
-            if (CanonicalPrimaryValuePolicy.preferredEmail(delta.contact)?.id != preferredEmail) {
-                return@withTransaction ContactPlanResult.Replan
-            }
+            val previousPreferredEmail = CanonicalPrimaryValuePolicy.preferredEmail(canonical)?.id
+            val preferredEmail = CanonicalPrimaryValuePolicy.preferredEmail(delta.contact)?.id
+            val preferredEmailTransition = if (previousPreferredEmail != preferredEmail) {
+                com.patmanak.contako.data.local.RoomAndroidPreferredEmailTransition(
+                    previousPreferredEmail, preferredEmail, canonical.revision,
+                )
+            } else null
             val membershipSnapshot = AndroidGroupMembershipSnapshot.create(
                 context.account.value,
                 entity.canonicalContactId,
@@ -776,6 +781,7 @@ internal class ProductionAndroidContactObservationCoordinator(
                         )
                     }.sortedBy { it.canonicalGroupId },
                     observedSnapshot = membershipSnapshot,
+                    preferredEmailTransition = preferredEmailTransition,
                 ),
             )
             ContactPlanResult.Ready(command)

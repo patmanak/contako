@@ -27,7 +27,12 @@ class AndroidProjectionRepairDiagnosticsTest {
             aggregate.snapshotAndReset(),
         )
         assertTrue(aggregate.snapshotAndReset().isEmpty())
-        assertEquals(100, AndroidProjectionRepairCategory.entries.size)
+        val categories = AndroidProjectionRepairCategory.entries
+        assertTrue(categories.isNotEmpty())
+        assertTrue(categories.all { it.name.matches(Regex("[A-Z][A-Z_]+")) })
+        categories.forEach { aggregate.onRepair(it) }
+        assertEquals(categories.associateWith { 1 }, aggregate.snapshotAndReset())
+        assertTrue(aggregate.snapshotAndReset().isEmpty())
     }
 
     @Test

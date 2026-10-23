@@ -101,6 +101,12 @@ class ProductionAndroidContactObservationCoordinatorTest {
     fun `local payload failures are isolated while identity catalog and allocation failures stop ingestion`() {
         assertEquals(true, isContactLocalPlanFailure(AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_IM))
         assertEquals(true, isContactLocalPlanFailure(AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_READBACK_MISMATCH))
+        listOf(
+            AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_NO_PHOTO_RECOVERY,
+            AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_JOURNAL_MISSING,
+            AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_RECOVERY_STATE_MISMATCH,
+            AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_MEMBERSHIPS_DIFFER,
+        ).forEach { assertEquals(true, isContactLocalPlanFailure(it)) }
         assertEquals(true, isContactLocalPlanFailure(
             AndroidExistingContactPlanRepairReason.ROW_CODEC_FAILURE, AndroidProviderRowCodecFailure.MALFORMED_DATE,
         ))

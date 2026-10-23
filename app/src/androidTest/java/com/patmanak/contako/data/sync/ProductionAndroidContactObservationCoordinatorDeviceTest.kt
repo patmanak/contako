@@ -196,6 +196,78 @@ class ProductionAndroidContactObservationCoordinatorDeviceTest {
         assertTrue(database.outboxDao().getAll(account.value).isEmpty())
     }
 
+    @Test
+    fun missingInitialBaselineProofStaysUnacknowledgedWithoutStrandingLaterRowsOrPages() = runBlocking {
+        val reasons = listOf(
+            AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_NO_PHOTO_RECOVERY,
+            AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_JOURNAL_MISSING,
+            AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_RECOVERY_STATE_MISMATCH,
+        )
+        reasons.forEachIndexed { index, expected ->
+            if (index > 0) {
+                database.close()
+                setUp()
+            }
+            val repository = RoomContactRepository(database)
+            val photo = if (index == 0) null else jpeg()
+            val blockedId = "blocked-baseline"
+            val source = "blocked-source"
+            val saved = repository.saveContact(com.patmanak.contako.domain.model.CanonicalContact(
+                accountId = account.value, id = blockedId, displayName = "Baseline fixture",
+                remoteContactId = source,
+                values = photo?.let { listOf(com.patmanak.contako.domain.model.ContactValue(
+                    "photo", ContactValueKind.PHOTO, requireNotNull(AndroidProviderPhotoReferenceEncoder.encode(it)),
+                    order = 0, isPrimary = true,
+                )) }.orEmpty(),
+            )).let {
+                check(it is com.patmanak.contako.domain.repository.SaveResult.Saved)
+                it.value
+            }
+            val ledger = RoomAndroidProjectionLedger(database)
+            val attached = ledger.attachCanonicalContact(account, blockedId, source)
+            ledger.acknowledgeAdoption(account, blockedId, attached.revision,
+                com.patmanak.contako.data.android.AndroidRawContactLocator(scope.providerEpoch, 10))
+            val beforeLedger = requireNotNull(database.androidProjectionLedgerDao().get(account.value, blockedId))
+            if (index == 2) {
+                database.androidGroupProjectionDao().upsertPhotoProviderWriteJournal(
+                    com.patmanak.contako.data.local.AndroidPhotoProviderWriteJournalEntity(
+                        account.value, blockedId, scope.androidAccountName, scope.providerEpoch, 10, 1, source,
+                        saved.revision, beforeLedger.revision, "photo",
+                        requireNotNull(AndroidProviderPhotoReferenceEncoder.encode(requireNotNull(photo))),
+                        photo.size.toLong(), "0".repeat(64), "REPAIR_REQUIRED", null,
+                    ),
+                )
+            }
+            val beforeJournal = database.androidGroupProjectionDao().getPhotoProviderWriteJournal(account.value, blockedId)
+            val beforeContact = requireNotNull(database.contactDao().get(account.value, blockedId)).toDomain()
+            val beforeIntent = database.outboxDao().get(account.value, AggregateType.CONTACT.name, blockedId)
+            val acknowledged = mutableListOf<Long>()
+            val observedFailures = mutableListOf<AndroidExistingContactPlanRepairReason>()
+            val coordinator = ProductionAndroidContactObservationCoordinator(database, repository,
+                AndroidContactObservationAcknowledger { _, rawId, _, _, _, _ ->
+                    acknowledged += rawId
+                    AndroidProviderAcknowledgementResult.Acknowledged
+                }, existingPlanRepairObserver = AndroidExistingContactPlanRepairObserver { observedFailures += it })
+            coordinator.acceptGroupCatalog(scope, listOf(AndroidOwnedGroupRowPage(
+                AndroidProviderAccountName(scope.androidAccountName), scope.providerEpoch, emptyList(), null,
+            )))
+            val blocked = observation(10, photo).let { it.copy(rawContact = it.rawContact.copy(
+                canonicalContactIdClaim = blockedId, sourceIdentity = source,
+            )) }
+            assertEquals(AndroidBoundedPageResult.PartiallyApplied,
+                coordinator.ingest(scope, page(blocked, observation(11, jpeg()))))
+            assertEquals(listOf(expected), observedFailures)
+            assertEquals(listOf(11L), acknowledged)
+            assertEquals(beforeContact, requireNotNull(database.contactDao().get(account.value, blockedId)).toDomain())
+            assertEquals(beforeIntent, database.outboxDao().get(account.value, AggregateType.CONTACT.name, blockedId))
+            assertEquals(beforeLedger, database.androidProjectionLedgerDao().get(account.value, blockedId))
+            assertEquals(beforeJournal, database.androidGroupProjectionDao().getPhotoProviderWriteJournal(account.value, blockedId))
+            assertNull(database.androidProjectionLedgerDao().getBaseline(account.value, blockedId))
+            assertEquals(AndroidBoundedPageResult.Applied, coordinator.ingest(scope, page(observation(12, jpeg()))))
+            assertEquals(listOf(11L, 12L), acknowledged)
+        }
+    }
+
     private fun coordinator(ack: AndroidContactObservationAcknowledger): ProductionAndroidContactObservationCoordinator {
         val coordinator = ProductionAndroidContactObservationCoordinator(database, RoomContactRepository(database), ack)
         coordinator.acceptGroupCatalog(scope, listOf(AndroidOwnedGroupRowPage(AndroidProviderAccountName(scope.androidAccountName), 0, emptyList(), null)))
