@@ -79,6 +79,39 @@ scope/epoch/ownership, an interrupted baseline/photo failure affects only that
 contact; later contacts and pages MUST still progress without acknowledging the
 unverified row.
 
+For authentication, cancel an initial TOTP attempt and reject an unsupported
+method before signing in as another user on an empty partition. Contrast this
+with cancellation of same-owner reauthentication with retained data. Reconstruct
+orphan provisional reservations after interruption without releasing an
+established owner. For sign-out, suspend after Core session deletion while the
+session observer and composition run; `CONFIRM` and `DISCARD` MUST finish cleanup
+or expose a retryable failure without losing checkpoints.
+Reconstruct both provisioned and unprovisioned cleanup after session deletion,
+including interruption after owner release. Only checkpoint finalization may
+continue after ownership is gone; a new owner, session or local data MUST prevent
+deletion. Pending cleanup MUST close runner admission before any startup request.
+Contrast a refused pre-destructive cleanup with a retained partial-cleanup
+checkpoint. Only the latter MUST enter exclusive recovery; the former MUST permit
+dismissal, synchronization and a new sign-out attempt. `SignOutCompositionDeviceTest`
+covers the corresponding screen transition.
+Open contact and group drafts before cleanup and suspend a save at admission.
+After logout and login as a different owner, no previous draft, cached contact,
+dialog or delayed write may reappear. Recreate the activity during this journey.
+
+`RoomSyncStatusStoreDeviceTest` MUST combine an old group/validation block with
+a new authentication or interactive-unlock requirement. The publisher MUST expose
+the reconnect action and immediate notification across restart while preserving
+all mutations, import obligations and counters. After reconnecting, the original
+unresolved problem MUST remain actionable.
+
+For provisioning recovery, refuse platform creation after the binding commits,
+then accept it on an authenticated foreground return with unchanged permissions.
+The bound name MUST be reused, projection scheduled and full import left intact.
+Interleave a suspended provisioning attempt with sign-out in both orders. Account
+selection and cleanup MUST observe the completed provisioning state, or reject
+the queued provisioning attempt after cleanup wins. Neither a second cleanup
+marker nor a late runner reactivation may be left behind.
+
 For SW-01/03/07/09 stop before and after each relevant durable boundary, repeat the
 operation and verify canonical/outbox/provider state. Different names, DIRTY
 native intent, stale account/epoch/revision, occupied destination, a still-present

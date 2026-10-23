@@ -663,6 +663,8 @@ internal class ProtonGateCRuntime private constructor(
     val readyOwnerUserId: suspend () -> UserId?,
     val prepareReauthentication: suspend () -> Unit,
     val canCleanOwnedScope: suspend () -> Boolean,
+    val localOwnerIdentity: suspend () -> String?,
+    val hasNoCoreAccount: suspend () -> Boolean,
     val capabilityInvalidationGeneration: () -> Long,
 ) {
     companion object {
@@ -896,6 +898,8 @@ internal class ProtonGateCRuntime private constructor(
                         revokeRemote = false) == null)
                 },
                 canCleanOwnedScope = { owner.canClean(sessionCoordinator.currentUserId()) },
+                localOwnerIdentity = owner::identity,
+                hasNoCoreAccount = { !sessionCoordinator.hasStoredAccount() },
                 capabilityInvalidationGeneration = groupCapabilities::invalidationGeneration,
             )
         }

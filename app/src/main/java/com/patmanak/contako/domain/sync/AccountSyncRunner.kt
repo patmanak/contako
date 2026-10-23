@@ -89,10 +89,14 @@ interface SyncRunnerObserver {
 class AccountSyncRunner(
     private val scope: CoroutineScope,
     private val observer: SyncRunnerObserver = object : SyncRunnerObserver {},
+    initiallyInvalidated: Boolean = false,
     private val executor: SyncPassExecutor,
 ) {
     constructor(scope: CoroutineScope, executor: SyncPassExecutor) :
-        this(scope, object : SyncRunnerObserver {}, executor)
+        this(scope, object : SyncRunnerObserver {}, false, executor)
+
+    constructor(scope: CoroutineScope, observer: SyncRunnerObserver, executor: SyncPassExecutor) :
+        this(scope, observer, false, executor)
 
     private val mutex = Mutex()
     private val cancellationGeneration = AtomicLong(0)
@@ -102,7 +106,7 @@ class AccountSyncRunner(
     private val pendingTriggers = linkedSetOf<SyncTrigger>()
     private var pendingScope = SyncScope.INCREMENTAL
     private var active = false
-    private var invalidated = false
+    private var invalidated = initiallyInvalidated
     private var passNumber = 0L
 
     val state: StateFlow<SyncRunState> = mutableState.asStateFlow()

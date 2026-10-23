@@ -26,6 +26,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -152,6 +155,157 @@ class AndroidAccountRemovalCoordinatorDeviceTest {
             })
         assertTrue(coordinator.removeFromApp(target))
         assertEquals(1, releases)
+    }
+
+    @Test fun cancellationAfterSessionCleanupCannotSplitEitherSignOutChoiceFromOwnerFinalization() = runBlocking {
+        for (discard in listOf(false, true)) {
+            val targetScope = AccountScope("cancel-cleanup-$discard")
+            val target = Account("cancel-cleanup-$discard@example.test", ContakoAndroidAccountContract.ACCOUNT_TYPE)
+            val ledger = RoomAndroidProjectionLedger(database)
+            ledger.ensureAccount(targetScope).also { ledger.bindAndroidAccountName(targetScope, it.revision, target.name) }
+            val entered = CompletableDeferred<Unit>()
+            val resume = CompletableDeferred<Unit>()
+            val checkpoints = AccountRemovalCheckpointStore.Memory()
+            var ownerReleased = false
+            var platformRemoved = false
+            val runner = AccountSyncRunner(scope) { SyncPassOutcome.SUCCESS }
+            val coordinator = AndroidAccountRemovalCoordinator(cleanCleaner(), database, targetScope,
+                ProtonLocalSessionCleanupGateway {
+                    entered.complete(Unit)
+                    resume.await()
+                    GatewayOutcome.Success(Unit)
+                }, runner,
+                platformCleanup = object : AccountPlatformCleanup by AccountPlatformCleanup.None {
+                    override fun removeAndroidAccount(account: Account): Boolean { platformRemoved = true; return true }
+                }, checkpoints = checkpoints,
+                releaseOwnerAfterLocalDataCleared = {
+                    assertFalse(database.inTransaction())
+                    assertNull(database.androidProjectionLedgerDao().getAccount(targetScope.value))
+                    assertTrue(platformRemoved)
+                    ownerReleased = true
+                })
+            val operation = launch(Dispatchers.Default) { coordinator.removeFromApp(target, discardPendingChanges = discard) }
+            entered.await()
+            operation.cancel()
+            resume.complete(Unit)
+            operation.join()
+            assertTrue(ownerReleased)
+            assertNull(checkpoints.load(targetScope, target))
+            assertEquals(SyncRequestDisposition.ACCOUNT_INVALIDATED, runner.request(SyncTrigger.RETRY))
+        }
+    }
+
+    @Test fun ownerReleaseFailureAfterRoomPurgeCanResumeFromExactCheckpointThroughAppSignOut() = runBlocking {
+        val targetScope = AccountScope("retry-owner-release")
+        val target = Account("retry-owner@example.test", ContakoAndroidAccountContract.ACCOUNT_TYPE)
+        val ledger = RoomAndroidProjectionLedger(database)
+        ledger.ensureAccount(targetScope).also { ledger.bindAndroidAccountName(targetScope, it.revision, target.name) }
+        val checkpoints = AccountRemovalCheckpointStore.Memory()
+        var releases = 0
+        var sessionCleanups = 0
+        var platformRemovals = 0
+        val runner = AccountSyncRunner(scope) { SyncPassOutcome.SUCCESS }
+        val removal = AndroidAccountRemovalCoordinator(cleanCleaner(), database, targetScope,
+            ProtonLocalSessionCleanupGateway { sessionCleanups++; GatewayOutcome.Success(Unit) }, runner,
+            platformCleanup = object : AccountPlatformCleanup by AccountPlatformCleanup.None {
+                override fun removeAndroidAccount(account: Account): Boolean { platformRemovals++; return true }
+            }, checkpoints = checkpoints,
+            releaseOwnerAfterLocalDataCleared = {
+                assertNull(database.androidProjectionLedgerDao().getAccount(targetScope.value))
+                releases++
+                if (releases == 1) error("Synthetic owner storage failure")
+            })
+        val signOut = AccountSignOutCoordinator(targetScope, PendingMutationReader { 0 },
+            BoundAndroidAccountReader { account ->
+                database.androidProjectionLedgerDao().getAccount(account.value)?.androidAccountName
+                    ?.let { Account(it, ContakoAndroidAccountContract.ACCOUNT_TYPE) }
+                    ?: checkpoints.pendingAccount(account)
+            }, runner, InAppAccountRemoval(removal::removeFromApp),
+            noAndroidRemoval = { error("A removed Room binding must not lose the cleanup checkpoint") },
+            hasIncompleteRemoval = { checkpoints.pendingAccount(targetScope) != null })
+        assertEquals(SignOutResult.CleanupFailed, signOut.signOut(SignOutChoice.CONFIRM))
+        assertNull(database.androidProjectionLedgerDao().getAccount(targetScope.value))
+        assertEquals(AccountRemovalPhase.ACCOUNT_REMOVED, checkpoints.load(targetScope, target))
+        assertTrue(signOut.requiresRecovery())
+        assertEquals(SignOutResult.SignedOut, signOut.signOut(SignOutChoice.CONFIRM))
+        assertFalse(signOut.requiresRecovery())
+        assertEquals(2, releases)
+        assertEquals(1, sessionCleanups)
+        assertEquals(1, platformRemovals)
+    }
+
+    @Test fun persistedRemovalCheckpointRestoresOnlyItsExactAccountIdentity() {
+        val targetScope = AccountScope("persisted-cleanup-fixture")
+        val target = Account("persisted:cleanup@example.test", ContakoAndroidAccountContract.ACCOUNT_TYPE)
+        val original = SharedPreferencesAccountRemovalCheckpointStore(context)
+        try {
+            original.save(targetScope, target, AccountRemovalPhase.LOCAL_CLEARED)
+            val restored = SharedPreferencesAccountRemovalCheckpointStore(context)
+            assertEquals(target, restored.pendingAccount(targetScope))
+            assertNull(restored.pendingAccount(AccountScope("unrelated-scope")))
+            assertEquals(AccountRemovalPhase.LOCAL_CLEARED, restored.load(targetScope, target))
+        } finally { original.clear(targetScope, target) }
+    }
+
+    @Test fun unprovisionedCheckpointPersistsOwnerAndPhaseWithoutAnAndroidAccount() {
+        val targetScope = AccountScope("unprovisioned-checkpoint-fixture")
+        val store = SharedPreferencesUnprovisionedRemovalCheckpointStore(context)
+        try {
+            store.save(targetScope, UnprovisionedRemovalCheckpoint("synthetic-owner", UnprovisionedRemovalPhase.OWNER_PENDING))
+            val restored = SharedPreferencesUnprovisionedRemovalCheckpointStore(context)
+            assertEquals("synthetic-owner", restored.load(targetScope)?.ownerId)
+            assertEquals(UnprovisionedRemovalPhase.OWNER_PENDING, restored.load(targetScope)?.phase)
+            assertNull(restored.load(AccountScope("unrelated-unprovisioned-scope")))
+            assertEquals("UnprovisionedRemovalCheckpoint(REDACTED)", restored.load(targetScope).toString())
+        } finally { store.clear(targetScope) }
+    }
+
+    @Test fun restoredCleanupCheckpointStopsAndAwaitsANewlyConstructedActiveRunner() = runBlocking {
+        val targetScope = AccountScope("restarted-cleanup-runner")
+        val target = Account("restarted-cleanup@example.test", ContakoAndroidAccountContract.ACCOUNT_TYPE)
+        val ledger = RoomAndroidProjectionLedger(database)
+        ledger.ensureAccount(targetScope).also { ledger.bindAndroidAccountName(targetScope, it.revision, target.name) }
+        val checkpoint = AccountRemovalCheckpointStore.Memory().apply {
+            save(targetScope, target, AccountRemovalPhase.PROJECTION_CLEARED)
+        }
+        val passStarted = CompletableDeferred<Unit>()
+        val cancellationStarted = CompletableDeferred<Unit>()
+        val releasePass = CompletableDeferred<Unit>()
+        val passExited = CompletableDeferred<Unit>()
+        var deletionStarted = false
+        val freshRunner = AccountSyncRunner(scope) { request ->
+            passStarted.complete(Unit)
+            // AccountSyncRunner cancels cooperatively through its generation, not Job.cancel.
+            while (!request.isAccountCancellationRequested()) delay(1)
+            cancellationStarted.complete(Unit)
+            releasePass.await()
+            passExited.complete(Unit)
+            SyncPassOutcome.CANCELLED
+        }
+        assertEquals(SyncRequestDisposition.STARTED, freshRunner.request(SyncTrigger.MANUAL))
+        passStarted.await()
+        val removal = AndroidAccountRemovalCoordinator(cleanCleaner(), database, targetScope,
+            ProtonLocalSessionCleanupGateway { error("Session cleanup was already checkpointed") }, freshRunner,
+            platformCleanup = object : AccountPlatformCleanup by AccountPlatformCleanup.None {
+                override fun deleteScopedFiles(account: AccountScope) {
+                    assertTrue(passExited.isCompleted)
+                    deletionStarted = true
+                }
+            }, checkpoints = checkpoint)
+        val operation = launch(Dispatchers.Default) { assertTrue(removal.removeFromApp(target, discardPendingChanges = true)) }
+        cancellationStarted.await()
+        assertFalse(deletionStarted)
+        releasePass.complete(Unit)
+        operation.join()
+        assertTrue(deletionStarted)
+        assertNull(checkpoint.load(targetScope, target))
+        assertEquals(SyncRequestDisposition.ACCOUNT_INVALIDATED, freshRunner.request(SyncTrigger.RETRY))
+    }
+
+    private fun cleanCleaner() = object : AndroidAccountProjectionCleaner {
+        override fun delete(accountName: String, accountType: String) = true
+        override fun deleteIfClean(accountName: String, accountType: String) = true
+        override fun hasPendingChanges(accountName: String, accountType: String) = false
     }
 
     @Test fun mismatchedAndroidAccountFailsClosedAndPreservesEverything() = runBlocking {

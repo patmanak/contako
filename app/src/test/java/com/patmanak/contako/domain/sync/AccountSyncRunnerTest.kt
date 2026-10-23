@@ -13,6 +13,25 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AccountSyncRunnerTest {
+    @Test fun persistedCleanupClosesAdmissionBeforeAnyStartupCoroutineRuns() = runTest {
+        var executions = 0
+        val runner = AccountSyncRunner(backgroundScope, initiallyInvalidated = true) {
+            executions++
+            SyncPassOutcome.SUCCESS
+        }
+        // No scheduler advancement or asynchronous cancellation is needed to reject the first
+        // SyncAdapter/worker request against a newly constructed process runtime.
+        for (trigger in SyncTrigger.entries) {
+            assertEquals(SyncRequestDisposition.ACCOUNT_INVALIDATED, runner.request(trigger))
+        }
+        assertEquals(0, executions)
+        assertEquals(SyncRunState.Idle, runner.state.value)
+        runner.reactivateAfterAccountProvisioning()
+        assertEquals(SyncRequestDisposition.STARTED, runner.request(SyncTrigger.FIRST_IMPORT))
+        runner.awaitIdle()
+        assertEquals(1, executions)
+    }
+
     @Test fun completionRetainsClosedFailureCauseAndSuccessClearsIt() = runTest {
         var outcome = SyncPassOutcome.ACTION_REQUIRED
         val executor = object : SyncPassExecutor, SyncPassCompletionDetailsSource {

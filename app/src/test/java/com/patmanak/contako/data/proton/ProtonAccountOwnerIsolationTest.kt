@@ -1,5 +1,10 @@
 package com.patmanak.contako.data.proton
 
+import com.patmanak.contako.data.gateway.AccountScope
+import com.patmanak.contako.data.gateway.AuthenticationState
+import com.patmanak.contako.data.gateway.GatewayFailureCategory
+import com.patmanak.contako.data.gateway.GatewayOutcome
+import com.patmanak.contako.data.gateway.OperationSecret
 import java.lang.reflect.Proxy
 import java.nio.file.Files
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,15 +16,141 @@ import me.proton.core.account.domain.entity.AccountState
 import me.proton.core.account.domain.entity.SessionState
 import me.proton.core.account.domain.repository.AccountRepository
 import me.proton.core.auth.domain.entity.SecondFactor
+import me.proton.core.auth.domain.entity.SecondFactorMethod
+import me.proton.core.auth.domain.entity.Fido2Info
+import me.proton.core.auth.domain.entity.ScopeInfo
 import me.proton.core.auth.domain.entity.SessionInfo
 import me.proton.core.domain.entity.UserId
 import me.proton.core.network.domain.session.Session
 import me.proton.core.network.domain.session.SessionId
+import me.proton.core.user.domain.UserManager
 import org.junit.Assert.*
 import org.junit.Test
 
 /** Uses the production session coordinator, retaining ownership across session-store destruction. */
 class ProtonAccountOwnerIsolationTest {
+    @Test fun cancelledInitialTotpLoginReleasesOnlyItsEmptyReservation() = runTest {
+        val storage = MemoryOwnerStorage()
+        val accounts = FakeAccounts()
+        val coordinator = ProtonCoreSessionCoordinator(accounts.proxy, owner = DurableAccountOwner(storage) { false })
+        val core = LoginCore(login("owner-a", "session-a", secondFactor(SecondFactorMethod.Totp)))
+        val authentication = ProtonCoreAuthenticationAdapter(SCOPE, core, coordinator)
+        assertTrue((authentication.signIn(SCOPE, secret(), secret()) as GatewayOutcome.Success).value is AuthenticationState.SecondFactorRequired)
+        assertEquals(GateCStoredSessionState.SECOND_FACTOR_REQUIRED, coordinator.state())
+        assertEquals(UserId("owner-a"), coordinator.currentUserId())
+        authentication.cancel(SCOPE)
+        assertNull(storage.value)
+        assertEquals(listOf("session-a"), core.revoked)
+        core.next = login("owner-b", "session-b")
+        assertEquals(GatewayOutcome.Success(AuthenticationState.Ready), authentication.signIn(SCOPE, secret(), secret()))
+        assertEquals("owner-b", storage.value)
+    }
+
+    @Test fun unsupportedInitialSecurityKeyLoginDoesNotClaimAnEmptyPartition() = runTest {
+        val storage = MemoryOwnerStorage()
+        val coordinator = ProtonCoreSessionCoordinator(FakeAccounts().proxy, owner = DurableAccountOwner(storage) { false })
+        val core = LoginCore(login("owner-a", "session-a", secondFactor(SecondFactorMethod.Authenticator)))
+        val authentication = ProtonCoreAuthenticationAdapter(SCOPE, core, coordinator)
+        assertEquals(GatewayOutcome.Success(AuthenticationState.SecurityKeyOnlyUnsupported),
+            authentication.signIn(SCOPE, secret(), secret()))
+        assertNull(storage.value)
+        core.next = login("owner-b", "session-b")
+        assertEquals(GatewayOutcome.Success(AuthenticationState.Ready), authentication.signIn(SCOPE, secret(), secret()))
+    }
+
+    @Test fun pendingInitialLoginRestorationReleasesDurableReservationAfterRestart() = runTest {
+        val directory = Files.createTempDirectory("contako-login-reservation").toFile()
+        val file = java.io.File(directory, "owner")
+        try {
+            val accounts = FakeAccounts()
+            val first = ProtonCoreSessionCoordinator(accounts.proxy, owner = DurableAccountOwner(FileAccountOwnerStorage(file)) { false })
+            first.persistLogin(login("owner-a", "session-a", secondFactor(SecondFactorMethod.Totp)))
+            val restored = ProtonCoreSessionCoordinator(accounts.proxy, owner = DurableAccountOwner(FileAccountOwnerStorage(file)) { false })
+            val core = LoginCore(login("owner-b", "session-b"))
+            assertEquals(GatewayOutcome.Success(com.patmanak.contako.data.gateway.SessionState.AUTHENTICATION_REQUIRED),
+                ProtonCoreSessionAdapter(SCOPE, core, restored).restore(SCOPE))
+            assertFalse(file.exists())
+            assertEquals(GatewayOutcome.Success(AuthenticationState.Ready),
+                ProtonCoreAuthenticationAdapter(SCOPE, core, restored).signIn(SCOPE, secret(), secret()))
+        } finally {
+            file.delete()
+            java.io.File(directory, "owner.pending").delete()
+            directory.delete()
+        }
+    }
+
+    @Test fun crashBeforeCorePersistenceCanReleaseAnOrphanReservationButNeverEstablishedOwnership() = runTest {
+        val storage = MemoryOwnerStorage()
+        DurableAccountOwner(storage) { false }.reserveForLogin(UserId("owner-a"))
+        val restarted = ProtonCoreSessionCoordinator(FakeAccounts().proxy, owner = DurableAccountOwner(storage) { false })
+        assertTrue(restarted.beginLoginAttempt())
+        restarted.persistLogin(login("owner-b", "session-b"))
+        restarted.endLoginAttempt()
+        restarted.activate(UserId("owner-b"))
+        restarted.clearLocal(UserId("owner-b"))
+        assertEquals("owner-b", storage.value)
+        assertTrue(restarted.beginLoginAttempt())
+        try { restarted.persistLogin(login("owner-c", "session-c")); fail("An established empty owner still survives revocation") }
+        catch (_: LocalAccountOwnerMismatch) { }
+        finally { restarted.endLoginAttempt() }
+    }
+
+    @Test fun abortedReauthenticationKeepsEstablishedOwnerAndPendingData() = runTest {
+        val storage = MemoryOwnerStorage()
+        var hasData = false
+        val coordinator = ProtonCoreSessionCoordinator(FakeAccounts().proxy, owner = DurableAccountOwner(storage) { hasData })
+        coordinator.persistLogin(login("owner-a", "old-session"))
+        coordinator.activate(UserId("owner-a"))
+        hasData = true
+        coordinator.clearLocal(UserId("owner-a"))
+        val core = LoginCore(login("owner-a", "session-a", secondFactor(SecondFactorMethod.Totp)))
+        val authentication = ProtonCoreAuthenticationAdapter(SCOPE, core, coordinator)
+        authentication.signIn(SCOPE, secret(), secret())
+        authentication.cancel(SCOPE)
+        assertEquals("owner-a", storage.value)
+        assertTrue(hasData)
+        core.next = login("owner-b", "session-b")
+        assertEquals(GatewayOutcome.Failure(GatewayFailureCategory.ACCOUNT_ALREADY_CONNECTED),
+            authentication.signIn(SCOPE, secret(), secret()))
+        assertEquals("owner-a", storage.value)
+    }
+
+    @Test fun reservationWithUnexpectedLocalDataCannotBeReleasedOrReassigned() = runTest {
+        val storage = MemoryOwnerStorage()
+        var hasData = false
+        val owner = DurableAccountOwner(storage) { hasData }
+        owner.reserveForLogin(UserId("owner-a"))
+        hasData = true
+        owner.releaseAbandonedReservation()
+        try { owner.reserveForLogin(UserId("owner-b")); fail("Data forbids releasing a reservation") }
+        catch (_: LocalAccountOwnerMismatch) { }
+        owner.requireOwner(UserId("owner-a"))
+    }
+
+    @Test fun legacyIncompleteTotpSessionWithoutOwnerCanBeAbandonedBeforeFirstActivation() = runTest {
+        val accounts = FakeAccounts()
+        ProtonCoreSessionCoordinator(accounts.proxy).persistLogin(login("owner-a", "legacy-session", secondFactor(SecondFactorMethod.Totp)))
+        val storage = MemoryOwnerStorage()
+        val restored = ProtonCoreSessionCoordinator(accounts.proxy, owner = DurableAccountOwner(storage) { false })
+        val core = LoginCore(login("owner-b", "session-b"))
+        assertEquals(GatewayOutcome.Success(com.patmanak.contako.data.gateway.SessionState.AUTHENTICATION_REQUIRED),
+            ProtonCoreSessionAdapter(SCOPE, core, restored).restore(SCOPE))
+        assertNull(storage.value)
+        assertEquals(GatewayOutcome.Success(AuthenticationState.Ready),
+            ProtonCoreAuthenticationAdapter(SCOPE, core, restored).signIn(SCOPE, secret(), secret()))
+    }
+
+    @Test fun legacyIncompleteSessionCannotClaimAnUnownedNonemptyPartition() = runTest {
+        val accounts = FakeAccounts()
+        ProtonCoreSessionCoordinator(accounts.proxy).persistLogin(login("unproven-owner", "legacy-session", secondFactor(SecondFactorMethod.Totp)))
+        val storage = MemoryOwnerStorage()
+        val restored = ProtonCoreSessionCoordinator(accounts.proxy, owner = DurableAccountOwner(storage) { true })
+        try { restored.state(); fail("An incomplete legacy session does not prove ownership of retained data") }
+        catch (_: LocalAccountOwnerMismatch) { }
+        assertNull(storage.value)
+        assertEquals(1, accounts.accounts.value.size)
+    }
+
     @Test fun ownerSurvivesMetadataStoreReconstructionAndCorruptionFailsClosed() = runTest {
         val directory = Files.createTempDirectory("contako-owner-fixture").toFile()
         val file = java.io.File(directory, "owner")
@@ -172,7 +303,7 @@ class ProtonAccountOwnerIsolationTest {
     private class MemoryOwnerStorage : AccountOwnerStorage {
         var value: String? = null
         override suspend fun read() = value
-        override suspend fun write(userId: String) { value = userId }
+        override suspend fun write(record: String) { value = record }
         override suspend fun clear() { value = null }
     }
 
@@ -214,10 +345,23 @@ class ProtonAccountOwnerIsolationTest {
         } as AccountRepository
     }
 
-    private fun login(owner: String, session: String) = SessionInfo(
+    private class LoginCore(var next: SessionInfo) : GateCCoreOperations {
+        val revoked = mutableListOf<String>()
+        override suspend fun login(username: String, password: ByteArray) = next
+        override suspend fun secondFactor(sessionId: SessionId, code: String) = ScopeInfo(scopes = listOf("full"))
+        override suspend fun unlock(userId: UserId, password: ByteArray) = UserManager.UnlockResult.Success
+        override suspend fun restoreProtectedUnlock(userId: UserId) = UserManager.UnlockResult.Success
+        override suspend fun lockAndClear(userId: UserId) = Unit
+        override suspend fun revoke(sessionId: SessionId): Boolean { revoked += sessionId.id; return true }
+    }
+
+    private fun secret() = OperationSecret.takeAndClear("synthetic".toCharArray())
+    private fun secondFactor(method: SecondFactorMethod) = SecondFactor.Enabled(setOf(method), Fido2Info(null, emptyList()))
+    private val SCOPE = AccountScope("primary")
+    private fun login(owner: String, session: String, secondFactor: SecondFactor = SecondFactor.Disabled) = SessionInfo(
         username = "synthetic-user", accessToken = "synthetic-access", tokenType = "Bearer",
         scopes = listOf("full"), sessionId = SessionId(session), userId = UserId(owner),
         refreshToken = "synthetic-refresh", eventId = "synthetic-event", serverProof = null,
-        localId = 1, passwordMode = 1, secondFactor = SecondFactor.Disabled, temporaryPassword = false,
+        localId = 1, passwordMode = 1, secondFactor = secondFactor, temporaryPassword = false,
     )
 }

@@ -298,21 +298,28 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
     internal val accountSignOutCoordinator: AccountSignOutCoordinator
         get() = sharedSyncRuntime.accountSignOutCoordinator
 
-    internal suspend fun reactivateAuthenticatedProtonAccount() {
-        check(protonGateCRuntime.readyOwnerUserId() != null)
-        sharedSyncRuntime.runner.reactivateAfterAccountProvisioning()
-    }
+    internal val contactMutationAdmission: com.patmanak.contako.ui.ContactMutationAdmission
+        get() = sharedSyncRuntime.accountLifecycleAdmission
+
+    internal suspend fun reactivateAuthenticatedProtonAccount(): Boolean =
+        sharedSyncRuntime.accountLifecycleAdmission.authenticated(false) {
+            sharedSyncRuntime.runner.reactivateAfterAccountProvisioning()
+            true
+        }
 
     /** Retry only the missing Android prerequisite; the remote import has its own checkpoint. */
     internal fun retryMissingAndroidProvisioning() {
         applicationScope.launch {
             runCatching {
-                if (protonGateCRuntime.readyOwnerUserId() == null) return@launch
-                if (database.androidProjectionLedgerDao().getAccount(protonGateCRuntime.accountScope.value)
-                        ?.androidAccountName != null) return@launch
-                val address = protonGateCRuntime.currentAccountAddress() ?: return@launch
-                if (provisionAndroidAccount(address) == AccountProvisioningResult.READY) {
-                    sharedSyncRuntime.runner.request(SyncTrigger.STARTUP_STALE_CHECK)
+                sharedSyncRuntime.accountLifecycleAdmission.authenticated(Unit) {
+                    val result = sharedSyncRuntime.accountProvisioningCoordinator.retryMissing(
+                        protonGateCRuntime.accountScope,
+                        protonGateCRuntime.currentAccountAddress,
+                    )
+                    if (result == AccountProvisioningResult.READY) {
+                        sharedSyncRuntime.runner.reactivateAfterAccountProvisioning()
+                        sharedSyncRuntime.runner.request(SyncTrigger.STARTUP_STALE_CHECK)
+                    }
                 }
             }
         }
@@ -324,14 +331,15 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
      * Without this, `AndroidRuntimeAccountPreflight` never reaches `Ready` and every pass degrades
      * to action-required. Safe to call repeatedly: provisioning is idempotent.
      */
-    internal suspend fun provisionAndroidAccount(protonAccountAddress: String): AccountProvisioningResult {
-        val result = sharedSyncRuntime.accountProvisioningCoordinator.provision(
-            protonGateCRuntime.accountScope,
-            protonAccountAddress,
-        )
-        if (result == AccountProvisioningResult.READY) {
-            sharedSyncRuntime.runner.reactivateAfterAccountProvisioning()
+    internal suspend fun provisionAndroidAccount(protonAccountAddress: String): AccountProvisioningResult =
+        sharedSyncRuntime.accountLifecycleAdmission.authenticated(AccountProvisioningResult.UNAVAILABLE) {
+            val result = sharedSyncRuntime.accountProvisioningCoordinator.provision(
+                protonGateCRuntime.accountScope,
+                protonAccountAddress,
+            )
+            if (result == AccountProvisioningResult.READY) {
+                sharedSyncRuntime.runner.reactivateAfterAccountProvisioning()
+            }
+            result
         }
-        return result
-    }
 }

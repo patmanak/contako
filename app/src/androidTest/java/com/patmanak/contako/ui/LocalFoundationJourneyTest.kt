@@ -89,11 +89,12 @@ class LocalFoundationJourneyTest {
     fun providerOnlyPendingSignOutOffersSyncAndSeparatelyConfirmedDiscard() {
         val viewModel = ContactsViewModel(RoomContactRepository(database))
         val choices = mutableListOf<SignOutChoice>()
+        var signOutResult by mutableStateOf<SignOutResult?>(null)
         compose.setContent {
             if (showUi) ContakoTheme {
-                ContakoApp(viewModel, onSignOut = { choice ->
+                ContakoApp(viewModel, signOutResult = signOutResult, onDismissSignOutResult = { signOutResult = null }, onSignOut = { choice ->
                     choices += choice
-                    if (choice == SignOutChoice.DISCARD) SignOutResult.SignedOut else SignOutResult.PendingChanges
+                    signOutResult = if (choice == SignOutChoice.DISCARD) SignOutResult.SignedOut else SignOutResult.PendingChanges
                 })
             }
         }
@@ -116,12 +117,13 @@ class LocalFoundationJourneyTest {
         val viewModel = ContactsViewModel(RoomContactRepository(database))
         val choices = mutableListOf<SignOutChoice>()
         var providerPending = true
+        var signOutResult by mutableStateOf<SignOutResult?>(null)
         compose.setContent {
             if (showUi) ContakoTheme {
-                ContakoApp(viewModel, onSignOut = { choice ->
+                ContakoApp(viewModel, signOutResult = signOutResult, onDismissSignOutResult = { signOutResult = null }, onSignOut = { choice ->
                     choices += choice
                     assertEquals(SignOutChoice.CONFIRM, choice)
-                    if (providerPending) SignOutResult.PendingChanges else SignOutResult.SignedOut
+                    signOutResult = if (providerPending) SignOutResult.PendingChanges else SignOutResult.SignedOut
                 })
             }
         }

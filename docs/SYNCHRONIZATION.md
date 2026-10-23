@@ -57,6 +57,12 @@ debounce, rate spacing and engine backoff. The periodic request is approximately
 hourly; stale app-open refresh uses a 15-minute interval. Android may delay work;
 a forced scheduler dispatch is not proof of natural execution timing.
 
+An authenticated foreground return MUST retry a missing Android account even
+when its durable binding was committed before a failed platform creation. Reuse
+the bound name and revalidate ownership; a changed display address MUST NOT
+silently rebind the account. This projection recovery MUST NOT restart a full
+Proton import or recreate an already present bound account.
+
 On foreground return, an empty Room outbox MUST NOT establish absence of native
 intent. For the eligible current account, probe at most one owned RawContacts
 DIRTY flag, including dirty tombstones, and schedule ANDROID_UPLOAD through the
@@ -136,6 +142,19 @@ consent to discard newly created native intent. Explicit discard and Android
 Settings account removal retain scoped local cleanup without remote deletion.
 App sign-out attempts bounded best-effort session revocation before mandatory
 local session cleanup; an unavailable network MUST NOT strand the local session.
+The explicit sign-out operation MUST survive removal of its initiating screen.
+Its own session-clear notification MUST NOT cancel the remaining cleanup or
+hide a cleanup failure. Owner release remains conditional on committed local
+deletion, with partial-cleanup checkpoints retained for retry. This recovery
+MUST also survive process restart when no Android account was provisioned and
+the Proton session was already cleared. Recovery MUST retain the original owner
+fence, block new synchronization/login admission and expose an explicit retry.
+A finalization checkpoint after owner release MUST NOT authorize another data
+or session deletion.
+Refusal before destructive cleanup, with no remaining checkpoint, MUST NOT force
+exclusive cleanup recovery. UI mutations MUST share account lifecycle admission:
+cleanup invalidates queued draft saves and waits for admitted writes before purge.
+Drafts and cached contact views MUST NOT survive into a different owner's session.
 
 Named deletion confirmation precedes a durable delete. A sync failure MUST retain
 recoverable intent; cancellation is not success. Provider deletion/acknowledgement

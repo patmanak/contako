@@ -18,6 +18,7 @@ internal object AuthenticationCapturePolicy {
         AuthenticationDestination.SECURITY_KEY_UNSUPPORTED,
         AuthenticationDestination.HUMAN_VERIFICATION_UNAVAILABLE,
         AuthenticationDestination.READY,
+        AuthenticationDestination.SIGN_OUT_RECOVERY,
         -> false
     }
 }

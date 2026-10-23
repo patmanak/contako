@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -171,8 +172,18 @@ fun ContakoApp(
     onLanguageChange: (AppLanguage) -> Unit = {},
     onConfigureSyncNotifications: () -> Unit = {},
     onReauthenticate: () -> Unit = {},
-    onSignOut: suspend (SignOutChoice) -> SignOutResult = { SignOutResult.CleanupFailed },
+    signOutInProgress: Boolean = false,
+    accountMutationsBlocked: Boolean = false,
+    signOutResult: SignOutResult? = null,
+    onDismissSignOutResult: () -> Unit = {},
+    onSignOut: (SignOutChoice) -> Unit = {},
 ) {
+    if (signOutInProgress || accountMutationsBlocked) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
     val state by viewModel.uiState.collectAsState()
     val conflictPanel by viewModel.conflictPanel.collectAsState()
     if (conflictPanel.contactId != null) ContactConflictDialog(conflictPanel, viewModel)
@@ -182,23 +193,15 @@ fun ContakoApp(
     var confirmSignOut by remember { mutableStateOf(false) }
     var signOutPendingReported by remember(accountAddress) { mutableStateOf(false) }
     var confirmDiscard by remember { mutableStateOf(false) }
-    var signOutFailure by remember { mutableStateOf<SignOutResult?>(null) }
-    var signOutInProgress by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     fun executeSignOut(choice: SignOutChoice) {
         if (signOutInProgress) return
-        signOutInProgress = true
-        scope.launch {
-            val result = onSignOut(choice)
-            signOutInProgress = false
-            when (result) {
-                SignOutResult.SignedOut -> Unit
-                SignOutResult.PendingChanges -> {
-                    signOutPendingReported = true
-                    confirmSignOut = true
-                }
-                SignOutResult.SyncFailed, SignOutResult.CleanupFailed -> signOutFailure = result
-            }
+        onSignOut(choice)
+    }
+    LaunchedEffect(signOutResult) {
+        if (signOutResult == SignOutResult.PendingChanges) {
+            signOutPendingReported = true
+            confirmSignOut = true
+            onDismissSignOutResult()
         }
     }
     BackHandler(
@@ -448,12 +451,12 @@ fun ContakoApp(
         },
         dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text(stringResource(R.string.action_cancel)) } },
     )
-    signOutFailure?.let { failure ->
+    signOutResult?.takeIf { it == SignOutResult.SyncFailed || it == SignOutResult.CleanupFailed }?.let { failure ->
         AlertDialog(
-            onDismissRequest = { signOutFailure = null },
+            onDismissRequest = onDismissSignOutResult,
             title = { Text(stringResource(R.string.dialog_signout_failed_title)) },
             text = { Text(stringResource(if (failure == SignOutResult.SyncFailed) R.string.dialog_signout_sync_failed else R.string.dialog_signout_cleanup_failed)) },
-            confirmButton = { TextButton(onClick = { signOutFailure = null }) { Text(stringResource(R.string.action_close)) } },
+            confirmButton = { TextButton(onClick = onDismissSignOutResult) { Text(stringResource(R.string.action_close)) } },
         )
     }
 }

@@ -35,10 +35,15 @@ internal class AccountSignOutCoordinator(
     private val runner: AccountSyncRunner,
     private val removal: InAppAccountRemoval,
     private val noAndroidRemoval: suspend (discardPendingChanges: Boolean) -> Boolean = { false },
+    private val hasIncompleteRemoval: suspend () -> Boolean = { false },
+    private val lifecycleAdmission: AccountLifecycleAdmission = AccountLifecycleAdmission(),
 ) {
     suspend fun pendingCount(): Int = pendingMutations.count(accountScope)
+    suspend fun requiresRecovery(): Boolean = hasIncompleteRemoval()
 
-    suspend fun signOut(choice: SignOutChoice): SignOutResult {
+    suspend fun signOut(choice: SignOutChoice): SignOutResult = lifecycleAdmission.cleanup { signOutLocked(choice) }
+
+    private suspend fun signOutLocked(choice: SignOutChoice): SignOutResult {
         val pending = if (choice == SignOutChoice.DISCARD) 0 else try {
             pendingCount()
         } catch (cancelled: CancellationException) {

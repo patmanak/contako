@@ -1,5 +1,6 @@
 package com.patmanak.contako.android.account
 
+import android.content.Context
 import com.patmanak.contako.data.gateway.AccountScope
 import com.patmanak.contako.domain.sync.AccountSyncRunner
 import kotlinx.coroutines.CancellationException
@@ -27,32 +28,64 @@ internal class UnprovisionedAccountSignOut(
     private val revokeSession: suspend () -> Boolean,
     private val clearLocalData: suspend (discardPendingChanges: Boolean) -> Boolean,
     private val releaseOwner: suspend () -> Unit,
+    private val ownerIdentity: suspend () -> String?,
+    private val hasNoCoreAccount: suspend () -> Boolean,
+    private val isLocalDataEmpty: suspend () -> Boolean,
+    private val checkpoints: UnprovisionedRemovalCheckpointStore = UnprovisionedRemovalCheckpointStore.Memory(),
     private val stopScheduling: () -> Unit = {},
 ) {
     private val mutex = Mutex()
 
     suspend fun remove(discardPendingChanges: Boolean): Boolean = mutex.withLock {
+        var checkpoint = checkpoints.load(accountScope)
         var runnerStopped = false
-        var destructiveStarted = false
+        var destructiveStarted = checkpoint != null
         try {
-            if (!ownerIsVerified() || !hasNoAndroidBinding()) return@withLock false
-            if (!discardPendingChanges && pendingMutations.count(accountScope) != 0) return@withLock false
+            val expectedOwner = checkpoint?.ownerId ?: ownerIdentity() ?: return@withLock false
+            val finishing = checkpoint?.phase == UnprovisionedRemovalPhase.OWNER_PENDING
+            if (!hasNoAndroidBinding()) return@withLock false
+            if (finishing) {
+                val currentOwner = ownerIdentity()
+                if ((currentOwner != null && currentOwner != expectedOwner) || !hasNoCoreAccount() || !isLocalDataEmpty()) return@withLock false
+            } else {
+                if (ownerIdentity() != expectedOwner || !ownerIsVerified()) return@withLock false
+                if (!discardPendingChanges && pendingMutations.count(accountScope) != 0) return@withLock false
+            }
             runner.cancelForAccountRemoval()
             runnerStopped = true
             runner.awaitIdle()
-            if (!ownerIsVerified() || !hasNoAndroidBinding() ||
-                (!discardPendingChanges && pendingMutations.count(accountScope) != 0)) {
-                runner.reactivateAfterAccountProvisioning()
+            if (!hasNoAndroidBinding() || (!finishing &&
+                (ownerIdentity() != expectedOwner || !ownerIsVerified() ||
+                    (!discardPendingChanges && pendingMutations.count(accountScope) != 0)))) {
+                if (checkpoint == null) runner.reactivateAfterAccountProvisioning()
                 return@withLock false
             }
             // Once the user-confirmed destructive sequence starts, cancellation must not split it.
             withContext(NonCancellable) {
                 destructiveStarted = true
+                if (checkpoint == null) {
+                    checkpoint = UnprovisionedRemovalCheckpoint(expectedOwner, UnprovisionedRemovalPhase.SESSION_PENDING)
+                    checkpoints.save(accountScope, checkpoint!!)
+                }
                 stopScheduling()
-                if (!revokeSession()) return@withContext false
-                if (!hasNoAndroidBinding()) return@withContext false
-                if (!clearLocalData(discardPendingChanges)) return@withContext false
-                releaseOwner()
+                if (checkpoint!!.phase == UnprovisionedRemovalPhase.SESSION_PENDING) {
+                    if (ownerIdentity() != expectedOwner || !ownerIsVerified() || !revokeSession()) return@withContext false
+                    checkpoint = checkpoint!!.withPhase(UnprovisionedRemovalPhase.LOCAL_PENDING)
+                    checkpoints.save(accountScope, checkpoint!!)
+                }
+                if (checkpoint!!.phase == UnprovisionedRemovalPhase.LOCAL_PENDING) {
+                    if (ownerIdentity() != expectedOwner || !hasNoCoreAccount() || !hasNoAndroidBinding()) return@withContext false
+                    if (!clearLocalData(discardPendingChanges)) return@withContext false
+                    checkpoint = checkpoint!!.withPhase(UnprovisionedRemovalPhase.OWNER_PENDING)
+                    checkpoints.save(accountScope, checkpoint!!)
+                }
+                // This phase MUST NOT delete data or sessions, including after a process restart.
+                // A crash after owner release can only clear the marker after proving emptiness.
+                val currentOwner = ownerIdentity()
+                if ((currentOwner != null && currentOwner != expectedOwner) || !hasNoCoreAccount() ||
+                    !hasNoAndroidBinding() || !isLocalDataEmpty()) return@withContext false
+                if (currentOwner != null) releaseOwner()
+                checkpoints.clear(accountScope)
                 true
             }
         } catch (cancelled: CancellationException) {
@@ -70,4 +103,40 @@ internal class UnprovisionedAccountSignOut(
             false
         }
     }
+}
+
+internal enum class UnprovisionedRemovalPhase { SESSION_PENDING, LOCAL_PENDING, OWNER_PENDING }
+internal class UnprovisionedRemovalCheckpoint(val ownerId: String, val phase: UnprovisionedRemovalPhase) {
+    init { require(ownerId.isNotBlank() && '\n' !in ownerId && '\r' !in ownerId) }
+    fun withPhase(next: UnprovisionedRemovalPhase) = UnprovisionedRemovalCheckpoint(ownerId, next)
+    override fun toString() = "UnprovisionedRemovalCheckpoint(REDACTED)"
+}
+
+internal interface UnprovisionedRemovalCheckpointStore {
+    fun load(scope: AccountScope): UnprovisionedRemovalCheckpoint?
+    fun save(scope: AccountScope, checkpoint: UnprovisionedRemovalCheckpoint)
+    fun clear(scope: AccountScope)
+
+    class Memory : UnprovisionedRemovalCheckpointStore {
+        private val values = mutableMapOf<AccountScope, UnprovisionedRemovalCheckpoint>()
+        override fun load(scope: AccountScope) = values[scope]
+        override fun save(scope: AccountScope, checkpoint: UnprovisionedRemovalCheckpoint) { values[scope] = checkpoint }
+        override fun clear(scope: AccountScope) { values.remove(scope) }
+    }
+}
+
+/** Private identity metadata, covered by the application's explicit shared-preference exclusions. */
+internal class SharedPreferencesUnprovisionedRemovalCheckpointStore(context: Context) : UnprovisionedRemovalCheckpointStore {
+    private val preferences = context.applicationContext.getSharedPreferences("unprovisioned-account-removal", Context.MODE_PRIVATE)
+    override fun load(scope: AccountScope): UnprovisionedRemovalCheckpoint? {
+        val encoded = preferences.getString(scope.value, null) ?: return null
+        val separator = encoded.indexOf('\n')
+        require(separator > 0)
+        return UnprovisionedRemovalCheckpoint(encoded.substring(separator + 1),
+            UnprovisionedRemovalPhase.valueOf(encoded.substring(0, separator)))
+    }
+    override fun save(scope: AccountScope, checkpoint: UnprovisionedRemovalCheckpoint) {
+        check(preferences.edit().putString(scope.value, "${checkpoint.phase.name}\n${checkpoint.ownerId}").commit())
+    }
+    override fun clear(scope: AccountScope) { check(preferences.edit().remove(scope.value).commit()) }
 }

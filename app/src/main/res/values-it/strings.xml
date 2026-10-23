@@ -326,7 +326,7 @@
     <string name="dialog_discard_signout_confirm">Ignora e disconnetti</string>
     <string name="dialog_signout_failed_title">Impossibile disconnettersi</string>
     <string name="dialog_signout_sync_failed">La sincronizzazione non è terminata. L\'accesso è ancora attivo e le modifiche restano su questo dispositivo.</string>
-    <string name="dialog_signout_cleanup_failed">La pulizia locale non è terminata. L\'accesso è ancora attivo; riprova.</string>
+    <string name="dialog_signout_cleanup_failed">La pulizia locale non è terminata. Prova di nuovo a disconnetterti.</string>
     <string name="contact_type_home">Casa</string>
     <string name="contact_type_work">Lavoro</string>
     <string name="contact_type_mobile">Cellulare</string>

@@ -16,6 +16,7 @@ import com.patmanak.contako.domain.sync.AccountSyncRunner
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 
 fun interface AccountRemovalCoordinator {
@@ -75,31 +76,51 @@ internal class AndroidAccountRemovalCoordinator(
         if (account.type != ContakoAndroidAccountContract.ACCOUNT_TYPE) return false
         var phase = checkpoints.load(accountScope, account)
         if (phase == null && !localStore.hasExactBinding(accountScope, account)) return false
+        var runnerStopped = false
+        var destructiveStarted = false
 
         return try {
+            // A restored checkpoint can be resumed with a fresh process-scoped runner. Its old
+            // WORK_STOPPED record is not proof that this runner is stopped and quiescent.
+            runner.cancelForAccountRemoval()
+            runnerStopped = true
+            runner.awaitIdle()
             if (phase == null) {
-                runner.cancelForAccountRemoval()
-                runner.awaitIdle()
                 phase = AccountRemovalPhase.WORK_STOPPED.also { checkpoints.save(accountScope, account, it) }
             }
-            val completed = if (!discardPendingChanges && phase == AccountRemovalPhase.WORK_STOPPED) {
-                // Stop the runner before acquiring Room's write transaction: a running pass may
-                // itself need that database. Keep local mutations excluded through cleanup.
-                val localRemoved = localStore.withoutPendingMutations(accountScope, account) {
-                    finishRemoval(account, removeAndroidAccount, phase!!, requireClean = true, stopAfterLocal = true)
+            // Once destructive cleanup starts, finish its durable checkpoint/owner sequence even
+            // if the caller disappears. App revocation is already bounded by the session gateway.
+            withContext(NonCancellable) {
+                destructiveStarted = true
+                val completed = if (!discardPendingChanges && phase == AccountRemovalPhase.WORK_STOPPED) {
+                    // Stop the runner before acquiring Room's write transaction: a running pass may
+                    // itself need that database. Keep local mutations excluded through cleanup.
+                    val localRemoved = localStore.withoutPendingMutations(accountScope, account) {
+                        finishRemoval(account, removeAndroidAccount, phase!!, requireClean = true, stopAfterLocal = true)
+                    }
+                    if (localRemoved) {
+                        // Only checkpoint Room deletion once its transaction has committed.
+                        checkpoints.save(accountScope, account, AccountRemovalPhase.LOCAL_CLEARED)
+                        finishRemoval(account, removeAndroidAccount, AccountRemovalPhase.LOCAL_CLEARED, requireClean = true)
+                    } else false
+                } else finishRemoval(account, removeAndroidAccount, phase!!, requireClean = !discardPendingChanges)
+                if (!completed && checkpoints.load(accountScope, account) == AccountRemovalPhase.WORK_STOPPED) {
+                    // No destructive step ran: retain the session and restore the existing scheduler.
+                    checkpoints.clear(accountScope, account)
+                    runner.reactivateAfterAccountProvisioning()
                 }
-                if (localRemoved) {
-                    // Only checkpoint Room deletion once its transaction has committed.
-                    checkpoints.save(accountScope, account, AccountRemovalPhase.LOCAL_CLEARED)
-                    finishRemoval(account, removeAndroidAccount, AccountRemovalPhase.LOCAL_CLEARED, requireClean = true)
-                } else false
-            } else finishRemoval(account, removeAndroidAccount, phase!!, requireClean = !discardPendingChanges)
-            if (!completed && checkpoints.load(accountScope, account) == AccountRemovalPhase.WORK_STOPPED) {
-                // No destructive step ran: retain the session and restore the existing scheduler.
-                checkpoints.clear(accountScope, account)
-                runner.reactivateAfterAccountProvisioning()
+                completed
             }
-            completed
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable) {
+                val checkpoint = checkpoints.load(accountScope, account)
+                if (!destructiveStarted && runnerStopped && (checkpoint == null || checkpoint == AccountRemovalPhase.WORK_STOPPED)) {
+                    runner.awaitIdle()
+                    checkpoints.clear(accountScope, account)
+                    runner.reactivateAfterAccountProvisioning()
+                }
+            }
+            throw cancelled
         } catch (_: Exception) {
             if (checkpoints.load(accountScope, account) == AccountRemovalPhase.WORK_STOPPED) {
                 checkpoints.clear(accountScope, account)
@@ -150,14 +171,17 @@ internal class AndroidAccountRemovalCoordinator(
             phase = AccountRemovalPhase.LOCAL_CLEARED.also { checkpoints.save(accountScope, account, it) }
         }
         if (phase == AccountRemovalPhase.LOCAL_CLEARED) {
-            // Both deletion paths reach this phase only after Room's deletion transaction commits.
-            // This callback rechecks emptiness and is idempotent when platform removal is retried.
-            releaseOwnerAfterLocalDataCleared()
             platformCleanup.clearNotifications()
             if (removeAndroidAccount) {
                 if (!platformCleanup.removeAndroidAccount(account)) return false
                 phase = AccountRemovalPhase.ACCOUNT_REMOVED.also { checkpoints.save(accountScope, account, it) }
             }
+        }
+        if (phase == AccountRemovalPhase.LOCAL_CLEARED || phase == AccountRemovalPhase.ACCOUNT_REMOVED) {
+            // Both deletion paths reach this phase only after Room's deletion transaction commits.
+            // Keep the owner until platform cleanup succeeds; a durable checkpoint retains the
+            // original account identity if owner release fails after the Room binding is gone.
+            releaseOwnerAfterLocalDataCleared()
         }
         checkpoints.clear(accountScope, account)
         return true
@@ -202,6 +226,7 @@ internal enum class AccountRemovalPhase {
 
 internal interface AccountRemovalCheckpointStore {
     fun load(scope: AccountScope, account: Account): AccountRemovalPhase?
+    fun pendingAccount(scope: AccountScope): Account?
     fun save(scope: AccountScope, account: Account, phase: AccountRemovalPhase)
     fun clear(scope: AccountScope, account: Account)
 
@@ -209,6 +234,7 @@ internal interface AccountRemovalCheckpointStore {
         private val values = mutableMapOf<String, AccountRemovalPhase>()
         private fun key(scope: AccountScope, account: Account) = removalCheckpointKey(scope, account)
         override fun load(scope: AccountScope, account: Account) = values[key(scope, account)]
+        override fun pendingAccount(scope: AccountScope) = pendingRemovalAccount(scope, values.keys)
         override fun save(scope: AccountScope, account: Account, phase: AccountRemovalPhase) { values[key(scope, account)] = phase }
         override fun clear(scope: AccountScope, account: Account) { values.remove(key(scope, account)) }
     }
@@ -249,8 +275,10 @@ internal class FrameworkAccountPlatformCleanup(
         applicationContext.getSystemService(NotificationManager::class.java).cancelAll()
     }
 
-    override fun removeAndroidAccount(account: Account): Boolean =
-        AccountManager.get(applicationContext).removeAccountExplicitly(account)
+    override fun removeAndroidAccount(account: Account): Boolean {
+        val manager = AccountManager.get(applicationContext)
+        return manager.getAccountsByType(account.type).none { it == account } || manager.removeAccountExplicitly(account)
+    }
 }
 
 internal class SharedPreferencesAccountRemovalCheckpointStore(context: Context) : AccountRemovalCheckpointStore {
@@ -258,6 +286,7 @@ internal class SharedPreferencesAccountRemovalCheckpointStore(context: Context) 
     private fun key(scope: AccountScope, account: Account) = removalCheckpointKey(scope, account)
     override fun load(scope: AccountScope, account: Account): AccountRemovalPhase? =
         preferences.getString(key(scope, account), null)?.let(AccountRemovalPhase::valueOf)
+    override fun pendingAccount(scope: AccountScope) = pendingRemovalAccount(scope, preferences.all.keys)
     override fun save(scope: AccountScope, account: Account, phase: AccountRemovalPhase) {
         check(preferences.edit().putString(key(scope, account), phase.name).commit())
     }
@@ -268,3 +297,25 @@ internal class SharedPreferencesAccountRemovalCheckpointStore(context: Context) 
 
 private fun removalCheckpointKey(scope: AccountScope, account: Account): String =
     listOf(scope.value, account.name, account.type).joinToString(separator = "") { "${it.length}:$it" }
+
+/** Read the existing length-prefixed key without inventing an account when metadata is damaged. */
+private fun pendingRemovalAccount(scope: AccountScope, keys: Set<String>): Account? {
+    val matching = keys.map { key ->
+        var offset = 0
+        val fields = List(3) {
+            val separator = key.indexOf(':', offset)
+            require(separator > offset)
+            val length = requireNotNull(key.substring(offset, separator).toIntOrNull())
+            offset = separator + 1
+            require(length > 0 && length <= key.length - offset)
+            key.substring(offset, offset + length).also { offset += length }
+        }
+        require(offset == key.length)
+        fields
+    }.filter { it[0] == scope.value }
+    check(matching.size <= 1)
+    return matching.singleOrNull()?.let {
+        require(it[2] == ContakoAndroidAccountContract.ACCOUNT_TYPE)
+        Account(it[1], it[2])
+    }
+}

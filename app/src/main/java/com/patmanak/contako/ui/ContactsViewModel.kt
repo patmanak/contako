@@ -158,7 +158,17 @@ class ContactsViewModel(
     /** MUST match the scope the synchronization engine runs on. See [LOCAL_ACCOUNT_ID]. */
     private val accountId: String = LOCAL_ACCOUNT_ID,
     deniedGroupOperations: kotlinx.coroutines.flow.Flow<Set<GroupOperation>> = kotlinx.coroutines.flow.flowOf(emptySet()),
+    private val mutationAdmission: ContactMutationAdmission = UnrestrictedContactMutationAdmission,
 ) : ViewModel() {
+    private val accountGeneration = mutationAdmission.access.value.generation
+    private fun acceptsMutation() = mutationAdmission.accepts(accountGeneration)
+
+    private fun launchMutation(onRejected: () -> Unit = {}, action: suspend () -> Unit) {
+        if (!acceptsMutation()) return
+        viewModelScope.launch {
+            if (!mutationAdmission.run(accountGeneration, action) && acceptsMutation()) onRejected()
+        }
+    }
     private val deniedGroups = deniedGroupOperations.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
     val conflicts = syncRecoveryDataSource.observeConflicts(accountId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -173,30 +183,34 @@ class ContactsViewModel(
     }
 
     fun openConflict(contactId: String) {
+        if (!acceptsMutation()) return
         val generation = ++conflictPanelGeneration
         mutableConflictPanel.value = ConflictPanelState(contactId = contactId, busy = true)
         viewModelScope.launch {
             val detail = try { syncRecoveryDataSource.loadConflict(accountId, contactId) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { null }
-            if (generation == conflictPanelGeneration) {
+            if (acceptsMutation() && generation == conflictPanelGeneration) {
                 mutableConflictPanel.value = ConflictPanelState(contactId, detail, failed = detail == null)
             }
         }
     }
 
     fun chooseConflict(choice: com.patmanak.contako.domain.sync.ContactConflictChoice) {
+        if (!acceptsMutation()) return
         val panel = mutableConflictPanel.value.takeUnless { it.busy } ?: return
         val detail = panel.detail ?: return
         mutableConflictPanel.value = panel.copy(busy = true, failed = false)
-        viewModelScope.launch {
+        launchMutation(onRejected = { mutableConflictPanel.value = panel.copy(failed = true) }) {
             val queued = try { syncRecoveryDataSource.chooseConflict(accountId, detail.summary, choice) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { false }
-            mutableConflictPanel.value = if (queued) ConflictPanelState() else panel.copy(failed = true)
+            if (acceptsMutation()) {
+                mutableConflictPanel.value = if (queued) ConflictPanelState() else panel.copy(failed = true)
+            }
         }
     }
-    private val navigationStore = NavigationStateStore(savedStateHandle)
+    private var navigationStore = NavigationStateStore(savedStateHandle)
     private val navigation = MutableStateFlow(navigationStore.snapshot())
     private val contactEditor = MutableStateFlow<ContactEditorState?>(null)
     private var nextContactEditorGeneration = 0L
@@ -311,6 +325,32 @@ class ContactsViewModel(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ContactsUiState())
 
+    init {
+        viewModelScope.launch {
+            mutationAdmission.access.collect {
+                if (!acceptsMutation()) clearAccountDrafts()
+            }
+        }
+    }
+
+    private fun clearAccountDrafts() {
+        contactEditor.value = null
+        groupEditor.value = null
+        pendingContactDeletion.value = null
+        pendingGroupDeletion.value = null
+        contactDeletionStatus.value = DeletionStatus()
+        groupDeletionStatus.value = DeletionStatus()
+        conflictPanelGeneration++
+        mutableConflictPanel.value = ConflictPanelState()
+        showAccountMenu.value = false
+        showUnsavedConfirmation.value = false
+        showRepairConfirmation.value = false
+        navigationStore = NavigationStateStore()
+        navigation.value = navigationStore.snapshot()
+    }
+
+    override fun onCleared() { clearAccountDrafts() }
+
     fun selectDestination(value: RootDestination) {
         navigationStore.select(value)
         navigation.value = navigationStore.snapshot()
@@ -361,21 +401,22 @@ class ContactsViewModel(
     fun requestContactsPermission() = contactsPermissionBoundary.requestPermission()
 
     fun syncNow() {
-        viewModelScope.launch { syncRecoveryDataSource.requestSync(accountId) }
+        launchMutation { syncRecoveryDataSource.requestSync(accountId) }
     }
 
     fun startRepair() {
-        viewModelScope.launch {
-            showRepairConfirmation.value = syncRecoveryDataSource.beginRepair(
+        launchMutation {
+            val result = syncRecoveryDataSource.beginRepair(
                 accountId,
                 mobileDataConfirmed = false,
-            ) == RepairStartResult.CONFIRMATION_REQUIRED
+            )
+            if (acceptsMutation()) showRepairConfirmation.value = result == RepairStartResult.CONFIRMATION_REQUIRED
         }
     }
 
     fun confirmRepair() {
         showRepairConfirmation.value = false
-        viewModelScope.launch {
+        launchMutation {
             syncRecoveryDataSource.beginRepair(accountId, mobileDataConfirmed = true)
         }
     }
@@ -383,10 +424,11 @@ class ContactsViewModel(
     fun dismissRepairConfirmation() { showRepairConfirmation.value = false }
 
     fun cancelRepair() {
-        viewModelScope.launch { syncRecoveryDataSource.cancelRepair(accountId) }
+        launchMutation { syncRecoveryDataSource.cancelRepair(accountId) }
     }
 
     fun editContact(contact: CanonicalContact? = null) {
+        if (!acceptsMutation()) return
         val normalizedContact = contact?.copy(values = contact.values.map(PostalAddressPolicy::normalize))
         val initialAssignments = normalizedContact?.let { editedContact ->
             allGroups.value.flatMap { group ->
@@ -411,6 +453,7 @@ class ContactsViewModel(
     }
 
     fun updateContactEditor(value: ContactEditorState) {
+        if (!acceptsMutation()) return
         val current = contactEditor.value ?: return
         if (current.saving || current.draftGeneration != value.draftGeneration) return
         contactEditor.value = value.copy(validationError = null, fieldErrors = emptyMap())
@@ -447,6 +490,7 @@ class ContactsViewModel(
     }
 
     fun saveContact() {
+        if (!acceptsMutation()) return
         val editor = contactEditor.value?.takeUnless { it.saving } ?: return
         if (editor.saving) return
         val original = editor.original
@@ -507,7 +551,11 @@ class ContactsViewModel(
             return
         }
         contactEditor.value = editor.copy(saving = true, validationError = null)
-        viewModelScope.launch {
+        launchMutation(onRejected = {
+            if (contactEditor.value?.draftGeneration == editor.draftGeneration) {
+                contactEditor.value = editor.copy(validationError = UiMessage.SAVE_FAILED)
+            }
+        }) {
             val result = try {
                 repository.saveContactWithGroupAssignments(
                     contact = contact,
@@ -521,11 +569,12 @@ class ContactsViewModel(
                 throw cancelled
             } catch (_: Exception) {
                 // Keep the draft and surface failure; never log contact data or exception text.
-                if (contactEditor.value?.draftGeneration == editor.draftGeneration) {
+                if (acceptsMutation() && contactEditor.value?.draftGeneration == editor.draftGeneration) {
                     contactEditor.value = editor.copy(validationError = UiMessage.SAVE_FAILED)
                 }
-                return@launch
+                return@launchMutation
             }
+            if (!acceptsMutation()) return@launchMutation
             when (result) {
                 is SaveResult.Saved -> {
                     if (contactEditor.value?.draftGeneration == editor.draftGeneration) contactEditor.value = null
@@ -585,6 +634,7 @@ class ContactsViewModel(
     }
 
     fun requestContactDeletion(contact: CanonicalContact) {
+        if (!acceptsMutation()) return
         if (contactDeletionStatus.value.inProgress) return
         contactDeletionStatus.value = DeletionStatus()
         pendingContactDeletion.value = contact
@@ -796,6 +846,7 @@ class ContactsViewModel(
     )
 
     fun editGroup(group: ContactGroup? = null) {
+        if (!acceptsMutation()) return
         if (group == null && GroupOperation.CREATE in deniedGroups.value) return
         val options = allContacts.value.flatMap { contact ->
             contact.valuesOf(ContactValueKind.EMAIL).map { email ->
@@ -821,6 +872,7 @@ class ContactsViewModel(
     }
 
     fun updateGroupEditor(value: GroupEditorState) {
+        if (!acceptsMutation()) return
         val current = groupEditor.value ?: return
         if (current.saving || current.draftGeneration != value.draftGeneration) return
         if ((value.name != current.name || value.color != current.color) &&
@@ -844,6 +896,7 @@ class ContactsViewModel(
     }
 
     fun saveGroup() {
+        if (!acceptsMutation()) return
         val editor = groupEditor.value ?: return
         if (editor.saving) return
         val required = buildSet {
@@ -866,17 +919,22 @@ class ContactsViewModel(
                 memberships = editor.selectedMemberships.toList(),
             )
         groupEditor.value = editor.copy(saving = true, validationError = null)
-        viewModelScope.launch {
+        launchMutation(onRejected = {
+            if (groupEditor.value?.draftGeneration == editor.draftGeneration) {
+                groupEditor.value = editor.copy(validationError = UiMessage.SAVE_FAILED)
+            }
+        }) {
             val result = try {
                 repository.saveGroup(group)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                if (groupEditor.value?.draftGeneration == editor.draftGeneration) {
+                if (acceptsMutation() && groupEditor.value?.draftGeneration == editor.draftGeneration) {
                     groupEditor.value = editor.copy(validationError = UiMessage.SAVE_FAILED)
                 }
-                return@launch
+                return@launchMutation
             }
+            if (!acceptsMutation()) return@launchMutation
             val ownsEditor = groupEditor.value?.draftGeneration == editor.draftGeneration
             when (result) {
                 is SaveResult.Saved -> {
@@ -898,6 +956,7 @@ class ContactsViewModel(
     }
 
     fun requestGroupDeletion(group: ContactGroup) {
+        if (!acceptsMutation()) return
         if (GroupOperation.DELETE in deniedGroups.value) return
         if (groupDeletionStatus.value.inProgress) return
         groupDeletionStatus.value = DeletionStatus()
@@ -922,20 +981,22 @@ class ContactsViewModel(
         id: (T) -> String,
         delete: suspend (T) -> Unit,
     ) {
+        if (!acceptsMutation()) return
         val target = pending.value ?: return
         if (status.value.inProgress) return
         // Set before launching: rapid taps cannot submit the same intent twice.
         status.value = DeletionStatus(inProgress = true)
-        viewModelScope.launch {
+        launchMutation(onRejected = { status.value = DeletionStatus(failed = true) }) {
             try {
                 delete(target)
             } catch (cancelled: CancellationException) {
-                status.value = DeletionStatus()
+                if (acceptsMutation()) status.value = DeletionStatus()
                 throw cancelled
             } catch (_: Exception) {
-                status.value = DeletionStatus(failed = true)
-                return@launch
+                if (acceptsMutation()) status.value = DeletionStatus(failed = true)
+                return@launchMutation
             }
+            if (!acceptsMutation()) return@launchMutation
             pending.value = null
             status.value = DeletionStatus()
             navigationStore.clearSelection(destination, id(target))
@@ -996,6 +1057,8 @@ class ContactsViewModel(
             onMutationCommitted: () -> Unit = {},
             accountId: String = LOCAL_ACCOUNT_ID,
             deniedGroupOperations: kotlinx.coroutines.flow.Flow<Set<GroupOperation>> = kotlinx.coroutines.flow.flowOf(emptySet()),
+            mutationAdmission: ContactMutationAdmission = UnrestrictedContactMutationAdmission,
+            navigationState: SavedStateHandle? = null,
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
@@ -1006,8 +1069,9 @@ class ContactsViewModel(
                         syncRecoveryDataSource = syncRecoveryDataSource,
                         contactsPermissionBoundary = contactsPermissionBoundary,
                         onMutationCommitted = onMutationCommitted,
-                        savedStateHandle = extras.createSavedStateHandle(),
+                        savedStateHandle = navigationState ?: extras.createSavedStateHandle(),
                         accountId = accountId,
+                        mutationAdmission = mutationAdmission,
                     ) as T
             }
     }

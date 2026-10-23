@@ -41,6 +41,7 @@ interface AndroidAccountPlatform {
 
 /** Durable side of provisioning, narrowed to what this coordinator needs. */
 internal interface AndroidAccountBindingStore {
+    suspend fun boundAccountName(scope: AccountScope): String?
     suspend fun ensureAccountRevision(scope: AccountScope): Long
     suspend fun bind(scope: AccountScope, expectedRevision: Long, androidAccountName: String): AndroidAccountBindingResult
     suspend fun providerEpoch(scope: AccountScope): Long?
@@ -49,6 +50,9 @@ internal interface AndroidAccountBindingStore {
 internal class RoomAndroidAccountBindingStore(
     private val ledger: RoomAndroidProjectionLedger,
 ) : AndroidAccountBindingStore {
+    override suspend fun boundAccountName(scope: AccountScope): String? =
+        ledger.loadBoundAccountName(scope)
+
     override suspend fun ensureAccountRevision(scope: AccountScope): Long =
         ledger.ensureAccount(scope).revision
 
@@ -77,6 +81,22 @@ internal class AndroidAccountProvisioningCoordinator(
     private val bindingStore: AndroidAccountBindingStore,
     private val platform: AndroidAccountPlatform,
 ) {
+    /**
+     * A binding is written before Android creation and therefore is not proof that creation succeeded.
+     * Retry the missing account under its durable name, even if the current display address changed.
+     * A null result means an existing bound account needed no provisioning; it MUST NOT trigger import.
+     */
+    suspend fun retryMissing(
+        scope: AccountScope,
+        currentAccountAddress: suspend () -> String?,
+    ): AccountProvisioningResult? {
+        val boundName = bindingStore.boundAccountName(scope)
+        if (boundName != null && boundName in platform.existingAccountNames()) return null
+        val name = boundName ?: currentAccountAddress() ?: return AccountProvisioningResult.UNAVAILABLE
+        // provision revalidates the durable binding before every platform side effect.
+        return provision(scope, name)
+    }
+
     suspend fun provision(scope: AccountScope, protonAccountAddress: String): AccountProvisioningResult {
         if (protonAccountAddress.isBlank() || protonAccountAddress.length > MAX_ACCOUNT_NAME_LENGTH) {
             return AccountProvisioningResult.UNAVAILABLE

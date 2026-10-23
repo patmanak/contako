@@ -8,6 +8,7 @@ import com.patmanak.contako.android.account.AccountRemovalCoordinator
 import com.patmanak.contako.android.account.AndroidAccountRemovalCoordinator
 import com.patmanak.contako.BuildConfig
 import com.patmanak.contako.android.account.AccountSignOutCoordinator
+import com.patmanak.contako.android.account.AccountLifecycleAdmission
 import com.patmanak.contako.android.account.AndroidAccountProvisioningCoordinator
 import com.patmanak.contako.android.account.RoomAndroidAccountBindingStore
 import com.patmanak.contako.data.android.provider.FrameworkAndroidAccountPlatform
@@ -16,6 +17,8 @@ import com.patmanak.contako.android.account.FrameworkAccountPlatformCleanup
 import com.patmanak.contako.android.account.PendingMutationReader
 import com.patmanak.contako.android.account.InAppAccountRemoval
 import com.patmanak.contako.android.account.SharedPreferencesAccountRemovalCheckpointStore
+import com.patmanak.contako.android.account.SharedPreferencesUnprovisionedRemovalCheckpointStore
+import com.patmanak.contako.data.local.hasAccountScopedData
 import com.patmanak.contako.android.sync.AndroidAccountSyncRunnerResolver
 import com.patmanak.contako.data.android.AndroidRuntimeAccountPreflight
 import com.patmanak.contako.data.android.RoomAndroidDurableAccountContextReader
@@ -71,6 +74,7 @@ internal class ProductionSharedSyncRuntime(
     val accountRemovalCoordinator: AccountRemovalCoordinator,
     val accountSignOutCoordinator: AccountSignOutCoordinator,
     val accountProvisioningCoordinator: AndroidAccountProvisioningCoordinator,
+    val accountLifecycleAdmission: AccountLifecycleAdmission,
 )
 
 internal data class ProductionSyncDependencies(
@@ -89,6 +93,9 @@ internal data class ProductionSyncDependencies(
     val releaseOwnerAfterLocalDataCleared: suspend () -> Unit = {},
     val invalidateGroupCapabilities: () -> Unit = {},
     val canCleanOwnedScope: suspend () -> Boolean = { false },
+    val localOwnerIdentity: suspend () -> String? = { null },
+    val hasNoCoreAccount: suspend () -> Boolean = { false },
+    val isAccountReady: suspend () -> Boolean = { false },
     val capabilityInvalidationGeneration: () -> Long = { 0 },
 )
 
@@ -148,6 +155,9 @@ internal fun composeProductionSharedSyncRuntime(
             invalidateGroupCapabilities = { proton.invalidateGroupCapabilities(
                 com.patmanak.contako.data.proton.ContactGroupCapabilityInvalidationReason.MANUAL_REFRESH) },
             canCleanOwnedScope = proton.canCleanOwnedScope,
+            localOwnerIdentity = proton.localOwnerIdentity,
+            hasNoCoreAccount = proton.hasNoCoreAccount,
+            isAccountReady = { proton.readyOwnerUserId() != null },
             capabilityInvalidationGeneration = proton.capabilityInvalidationGeneration,
         ),
         runnerScope,
@@ -418,9 +428,17 @@ internal fun composeProductionSharedSyncRuntime(
         fullRepairCoordinator = RoomFullRepairExecutionCoordinator(account, fullRepairStore),
     )
     completionDetails = executor
-    val runner = AccountSyncRunner(runnerScope, syncRunnerObserver, executor)
+    val removalCheckpoints = SharedPreferencesAccountRemovalCheckpointStore(applicationContext)
+    val unprovisionedCheckpoints = SharedPreferencesUnprovisionedRemovalCheckpointStore(applicationContext)
+    val hasPendingCleanup = {
+        removalCheckpoints.pendingAccount(account) != null || unprovisionedCheckpoints.load(account) != null
+    }
+    // Close admission before exposing the runner to SyncAdapter, workers or UI callers.
+    val cleanupPending = runCatching(hasPendingCleanup).getOrDefault(true)
+    val lifecycleAdmission = AccountLifecycleAdmission(dependencies.isAccountReady, hasPendingCleanup)
+    val runner = AccountSyncRunner(runnerScope, syncRunnerObserver, initiallyInvalidated = cleanupPending, executor = executor)
     runnerScope.launch {
-        if (fullRepairStore.load(account) != null) {
+        if (!cleanupPending && fullRepairStore.load(account) != null) {
             runner.request(
                 com.patmanak.contako.domain.sync.SyncTrigger.MANUAL,
                 com.patmanak.contako.domain.sync.SyncScope.FULL_REPAIR,
@@ -435,7 +453,7 @@ internal fun composeProductionSharedSyncRuntime(
             dependencies.localSessionCleanup,
             runner,
             FrameworkAccountPlatformCleanup(applicationContext, stopScheduling),
-            SharedPreferencesAccountRemovalCheckpointStore(applicationContext),
+            removalCheckpoints,
             releaseOwnerAfterLocalDataCleared = dependencies.releaseOwnerAfterLocalDataCleared,
         )
     val noAndroidBinding: suspend () -> Boolean = {
@@ -457,16 +475,21 @@ internal fun composeProductionSharedSyncRuntime(
             }
         },
         releaseOwner = dependencies.releaseOwnerAfterLocalDataCleared,
+        ownerIdentity = dependencies.localOwnerIdentity,
+        hasNoCoreAccount = dependencies.hasNoCoreAccount,
+        isLocalDataEmpty = { !database.hasAccountScopedData() },
+        checkpoints = unprovisionedCheckpoints,
         stopScheduling = stopScheduling,
     )
     return ProductionSharedSyncRuntime(
         runner,
         resolver,
-        removal,
+        AccountRemovalCoordinator { androidAccount -> lifecycleAdmission.cleanup { removal.remove(androidAccount) } },
         accountProvisioningCoordinator = AndroidAccountProvisioningCoordinator(
             RoomAndroidAccountBindingStore(RoomAndroidProjectionLedger(database)),
             FrameworkAndroidAccountPlatform(applicationContext),
         ),
+        accountLifecycleAdmission = lifecycleAdmission,
         accountSignOutCoordinator = AccountSignOutCoordinator(
             account,
             PendingMutationReader { scope ->
@@ -474,7 +497,7 @@ internal fun composeProductionSharedSyncRuntime(
                     val binding = RoomAndroidDurableAccountContextReader(database).load(scope)
                     check(binding == null || !binding.hasCrossAccountBinding)
                     val roomPending = database.accountRemovalDao().countPending(scope.value)
-                    val name = binding?.androidAccountName
+                    val name = binding?.androidAccountName ?: removalCheckpoints.pendingAccount(scope)?.name
                     roomPending + if (name == null) 0 else
                         FrameworkAndroidAccountProjectionCleaner(applicationContext.contentResolver)
                             .pendingChanges(name, ContakoAndroidAccountContract.ACCOUNT_TYPE)
@@ -483,11 +506,13 @@ internal fun composeProductionSharedSyncRuntime(
             BoundAndroidAccountReader { scope ->
                 database.androidProjectionLedgerDao().getAccount(scope.value)?.androidAccountName?.let {
                     Account(it, ContakoAndroidAccountContract.ACCOUNT_TYPE)
-                }
+                } ?: removalCheckpoints.pendingAccount(scope)
             },
             runner,
             InAppAccountRemoval(removal::removeFromApp),
             noAndroidRemoval = unprovisionedSignOut::remove,
+            hasIncompleteRemoval = { hasPendingCleanup() },
+            lifecycleAdmission = lifecycleAdmission,
         ),
     )
 }

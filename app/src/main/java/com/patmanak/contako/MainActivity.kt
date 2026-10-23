@@ -19,6 +19,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +30,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.patmanak.contako.data.proton.ProtonAuthenticationFlowAdapter
 import com.patmanak.contako.ui.ContakoApp
 import com.patmanak.contako.ui.ContactsViewModel
+import com.patmanak.contako.ui.AccountContactsViewModelStore
 import com.patmanak.contako.ui.ContactsPermissionBoundary
 import com.patmanak.contako.ui.ContactsPermissionAction
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,10 +39,11 @@ import com.patmanak.contako.ui.auth.AuthenticationDestination
 import com.patmanak.contako.ui.auth.AuthenticationScreen
 import com.patmanak.contako.ui.auth.AuthenticationViewModel
 import com.patmanak.contako.ui.auth.HumanVerificationScreen
+import com.patmanak.contako.ui.auth.SignOutRecoveryScreen
+import com.patmanak.contako.ui.auth.AuthenticatedAccountEffect
 import com.patmanak.contako.ui.locale.AndroidLanguagePreferenceStore
 import com.patmanak.contako.ui.theme.ContakoTheme
 import com.patmanak.contako.ui.theme.resolveDarkTheme
-import com.patmanak.contako.android.account.SignOutResult
 import com.patmanak.contako.android.account.ContakoAndroidAccountContract
 import com.patmanak.contako.data.sync.AuthenticatedSyncLifecycle
 
@@ -119,7 +122,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val hasContactAccess by contactsPermissionGranted.collectAsState()
+                val mutationAccess by application.contactMutationAdmission.access.collectAsState()
+                val accountStores: AccountContactsViewModelStore = viewModel()
+                val accountStore = accountStores.forGeneration(mutationAccess.generation)
                 val contactsViewModel: ContactsViewModel = viewModel(
+                    viewModelStoreOwner = accountStore,
                     factory = ContactsViewModel.factory(
                         application.contactRepository,
                         application.syncRecoveryDataSource,
@@ -131,6 +138,8 @@ class MainActivity : ComponentActivity() {
                         // mutations landed in a partition no sync pass ever drained.
                         accountId = application.protonGateCRuntime.accountScope.value,
                         deniedGroupOperations = application.protonGateCRuntime.gateD.groups.deniedOperations,
+                        mutationAdmission = application.contactMutationAdmission,
+                        navigationState = accountStore.navigationState,
                     ),
                 )
                 val authenticationPort = remember(application) {
@@ -142,7 +151,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 val authenticationViewModel: AuthenticationViewModel = viewModel(
-                    factory = AuthenticationViewModel.factory(authenticationPort),
+                    factory = AuthenticationViewModel.factory(authenticationPort, application.accountSignOutCoordinator::requiresRecovery),
                 )
                 val authenticationState by authenticationViewModel.state.collectAsState()
                 LaunchedEffect(application.protonGateCRuntime, authenticationViewModel) {
@@ -162,11 +171,11 @@ class MainActivity : ComponentActivity() {
                 // The Android account only exists once a Proton account is connected, so it is
                 // provisioned here rather than at startup. Idempotent, and non-fatal on failure:
                 // D-062 keeps local and Proton work usable when Android interoperability degrades.
-                LaunchedEffect(authenticationState.destination, hasContactAccess) {
-                    if (authenticationState.destination == AuthenticationDestination.READY) {
+                AuthenticatedAccountEffect(authenticationState, hasContactAccess,
+                    onAuthenticated = onAuthenticated@{
                         // A prior sign-out invalidates the process-scoped runner. Reopen it from
                         // validated Proton ownership before scheduling, independently of Android.
-                        application.reactivateAuthenticatedProtonAccount()
+                        if (!application.reactivateAuthenticatedProtonAccount()) return@onAuthenticated
                         authenticatedSyncLifecycle.onAuthenticationReady()
                         val address = application.protonGateCRuntime.currentAccountAddress()
                             ?: AccountManager.get(this@MainActivity)
@@ -176,17 +185,18 @@ class MainActivity : ComponentActivity() {
                         signedInAddress = address
                         // Proton readiness opens remote work even if Android provisioning fails.
                         if (address != null) application.provisionAndroidAccount(address)
-                    } else {
+                    }, onUnavailable = {
                         signedInAddress = null
                         authenticatedSyncLifecycle.onAuthenticationUnavailable()
-                    }
-                }
+                    },
+                )
                 if (humanVerificationState.isRequired) {
                     HumanVerificationScreen(
                         coordinator = application.humanVerification,
                         generation = humanVerificationState.generation,
                     )
                 } else if (authenticationState.destination == AuthenticationDestination.READY) {
+                    key(mutationAccess.generation) {
                     ContakoApp(
                         contactsViewModel,
                         accountAddress = signedInAddress,
@@ -197,10 +207,12 @@ class MainActivity : ComponentActivity() {
                             application.languagePreferences.setLanguage(it)
                             if (Build.VERSION.SDK_INT < 33) recreate()
                         },
+                        signOutInProgress = authenticationState.isSigningOut,
+                        accountMutationsBlocked = mutationAccess.blocked,
+                        signOutResult = authenticationState.signOutResult,
+                        onDismissSignOutResult = authenticationViewModel::dismissSignOutResult,
                         onSignOut = { choice ->
-                            application.accountSignOutCoordinator.signOut(choice).also {
-                                if (it == SignOutResult.SignedOut) authenticationViewModel.signOut()
-                            }
+                            authenticationViewModel.signOut(choice, application.accountSignOutCoordinator::signOut)
                         },
                         onReauthenticate = {
                             authenticationViewModel.reauthenticate(application.protonGateCRuntime.prepareReauthentication)
@@ -218,6 +230,11 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                     )
+                    }
+                } else if (authenticationState.destination == AuthenticationDestination.SIGN_OUT_RECOVERY) {
+                    SignOutRecoveryScreen(authenticationState) { choice ->
+                        authenticationViewModel.signOut(choice, application.accountSignOutCoordinator::signOut)
+                    }
                 } else {
                     AuthenticationScreen(
                         state = authenticationState,

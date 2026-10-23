@@ -148,6 +148,9 @@ internal class RoomAndroidProjectionLedger(
     suspend fun loadAccount(account: AccountScope): AndroidProjectionAccountSnapshot? =
         dao.getAccount(account.value)?.toSnapshot()
 
+    suspend fun loadBoundAccountName(account: AccountScope): String? =
+        dao.getAccount(account.value)?.androidAccountName
+
     suspend fun bindAndroidAccountName(
         account: AccountScope,
         expectedAccountRevision: Long,

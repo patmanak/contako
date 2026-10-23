@@ -4,6 +4,8 @@ import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.patmanak.contako.android.account.SignOutChoice
+import com.patmanak.contako.android.account.SignOutResult
 import com.patmanak.contako.domain.auth.AuthenticationFailure
 import com.patmanak.contako.domain.auth.AuthenticationFlowPort
 import com.patmanak.contako.domain.auth.AuthenticationSecret
@@ -12,8 +14,10 @@ import com.patmanak.contako.domain.auth.PasswordPurpose
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +29,7 @@ internal enum class AuthenticationDestination {
     PASSWORD,
     SECURITY_KEY_UNSUPPORTED,
     HUMAN_VERIFICATION_UNAVAILABLE,
+    SIGN_OUT_RECOVERY,
     READY,
 }
 
@@ -49,6 +54,9 @@ internal data class AuthenticationUiState(
     val retryAfterMillis: Long? = null,
     val retryBlockedUntilElapsedRealtimeMillis: Long? = null,
     val message: AuthenticationMessage? = null,
+    val isSigningOut: Boolean = false,
+    val signOutResult: SignOutResult? = null,
+    val isSignOutRecoveryRequired: Boolean = false,
 )
 
 internal fun interface AuthenticationMonotonicClock {
@@ -67,6 +75,7 @@ private val SystemAuthenticationMonotonicClock =
 internal class AuthenticationViewModel(
     private val port: AuthenticationFlowPort,
     private val monotonicClock: AuthenticationMonotonicClock = SystemAuthenticationMonotonicClock,
+    private val requiresSignOutRecovery: suspend () -> Boolean = { false },
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(AuthenticationUiState())
     val state: StateFlow<AuthenticationUiState> = mutableState.asStateFlow()
@@ -78,7 +87,7 @@ internal class AuthenticationViewModel(
     private var activeSecrets: List<AuthenticationSecret> = emptyList()
 
     init {
-        launchOperation(AuthenticationDestination.RESTORING) { port.restore() }
+        launchOperation(AuthenticationDestination.RESTORING, checkSignOutRecovery = true) { port.restore() }
     }
 
     fun submitSignIn(username: CharArray, password: CharArray) {
@@ -161,7 +170,8 @@ internal class AuthenticationViewModel(
     }
 
     fun cancelAuthentication() {
-        if (mutableState.value.isCleanupInProgress) return
+        if (mutableState.value.isCleanupInProgress || mutableState.value.isSigningOut ||
+            mutableState.value.isSignOutRecoveryRequired) return
         val preservedRetryDeadline = mutableState.value
             .takeIf(AuthenticationUiState::isRetryBlocked)
             ?.retryBlockedUntilElapsedRealtimeMillis
@@ -206,16 +216,64 @@ internal class AuthenticationViewModel(
         }
     }
 
-    fun signOut() = cancelAuthentication()
+    /** The operation belongs to the activity ViewModel, never to the disposable app composition. */
+    fun signOut(choice: SignOutChoice, removeAccount: suspend (SignOutChoice) -> SignOutResult) {
+        if (mutableState.value.destination !in setOf(AuthenticationDestination.READY, AuthenticationDestination.SIGN_OUT_RECOVERY)) return
+        val revision = admitOrClear(allowSignOutRecovery = true) ?: return
+        mutableState.value = mutableState.value.copy(isSigningOut = true, signOutResult = null)
+        activeOperation = viewModelScope.launch {
+            var result: SignOutResult = SignOutResult.CleanupFailed
+            try {
+                result = removeAccount(choice)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Retain a visible recovery path even if Core has already removed the session.
+            } finally {
+                // CleanupFailed also covers refusals before destructive work starts. Only the
+                // durable removal checkpoint makes exclusive recovery necessary. Read it even
+                // after cancellation so progress cannot remain stuck or expose partial cleanup.
+                val needsRecovery = result != SignOutResult.SignedOut && withContext(NonCancellable) {
+                    try {
+                        requiresSignOutRecovery()
+                    } catch (_: Exception) {
+                        true
+                    }
+                }
+                if (revision == operationRevision) {
+                    operationAdmitted.set(false)
+                    mutableState.value = if (result == SignOutResult.SignedOut) {
+                        AuthenticationUiState(destination = AuthenticationDestination.SIGN_IN)
+                    } else mutableState.value.copy(
+                        destination = when {
+                            needsRecovery -> AuthenticationDestination.SIGN_OUT_RECOVERY
+                            mutableState.value.destination == AuthenticationDestination.SIGN_OUT_RECOVERY ->
+                                AuthenticationDestination.SIGN_IN
+                            else -> mutableState.value.destination
+                        },
+                        isSigningOut = false,
+                        signOutResult = result,
+                        isSignOutRecoveryRequired = needsRecovery,
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissSignOutResult() {
+        mutableState.value = mutableState.value.copy(signOutResult = null)
+    }
 
     /** Re-evaluate revocation/key-lock changes without deleting canonical data or durable intent. */
     fun onSessionChanged() {
-        if (mutableState.value.destination == AuthenticationDestination.READY) {
+        if (mutableState.value.destination == AuthenticationDestination.READY &&
+            !mutableState.value.isSigningOut && !mutableState.value.isSignOutRecoveryRequired) {
             launchOperation(AuthenticationDestination.RESTORING) { port.restore() }
         }
     }
 
     fun reauthenticate(clearSession: suspend () -> Unit) {
+        if (mutableState.value.isSigningOut || mutableState.value.isSignOutRecoveryRequired) return
         launchOperation(AuthenticationDestination.RESTORING) {
             clearSession()
             port.restore()
@@ -228,10 +286,11 @@ internal class AuthenticationViewModel(
 
     private fun launchOperation(
         destination: AuthenticationDestination,
+        checkSignOutRecovery: Boolean = false,
         block: suspend () -> AuthenticationStep,
     ) {
         val revision = admitOrClear() ?: return
-        launchAdmittedOperation(revision, destination, block = block)
+        launchAdmittedOperation(revision, destination, checkSignOutRecovery = checkSignOutRecovery, block = block)
     }
 
     private fun launchAdmittedOperation(
@@ -240,6 +299,7 @@ internal class AuthenticationViewModel(
         passwordPurpose: PasswordPurpose? = null,
         secrets: List<AuthenticationSecret> = emptyList(),
         rejectSilentSignInResult: Boolean = false,
+        checkSignOutRecovery: Boolean = false,
         block: suspend () -> AuthenticationStep,
     ) {
         mutableState.value = AuthenticationUiState(
@@ -250,6 +310,23 @@ internal class AuthenticationViewModel(
         activeSecrets = secrets
         activeOperation = viewModelScope.launch {
             try {
+                if (checkSignOutRecovery) {
+                    val needsRecovery = try {
+                        requiresSignOutRecovery()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        true // Damaged cleanup metadata MUST NOT expose a fresh login.
+                    }
+                    if (needsRecovery) {
+                        if (revision == operationRevision) mutableState.value = AuthenticationUiState(
+                            destination = AuthenticationDestination.SIGN_OUT_RECOVERY,
+                            isSignOutRecoveryRequired = true,
+                            signOutResult = SignOutResult.CleanupFailed,
+                        )
+                        return@launch
+                    }
+                }
                 val returnedStep = block()
                 val step = if (rejectSilentSignInResult && returnedStep == AuthenticationStep.SignIn) {
                     // An explicit credential submission MUST never return silently to the welcome
@@ -368,8 +445,8 @@ internal class AuthenticationViewModel(
         -> AuthenticationMessage.TRY_AGAIN
     }
 
-    private fun admitOrClear(vararg sources: CharArray): Long? {
-        if (mutableState.value.isRetryBlocked) {
+    private fun admitOrClear(vararg sources: CharArray, allowSignOutRecovery: Boolean = false): Long? {
+        if (mutableState.value.isRetryBlocked || (!allowSignOutRecovery && mutableState.value.isSignOutRecoveryRequired)) {
             sources.forEach { it.clearSecret() }
             return null
         }
@@ -415,11 +492,11 @@ internal class AuthenticationViewModel(
         private const val DEFAULT_RATE_LIMIT_DELAY_MILLIS = 30_000L
         private const val MAX_RATE_LIMIT_TIMER_SLICE_MILLIS = 15 * 60_000L
 
-        fun factory(port: AuthenticationFlowPort): ViewModelProvider.Factory =
+        fun factory(port: AuthenticationFlowPort, requiresSignOutRecovery: suspend () -> Boolean = { false }): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    AuthenticationViewModel(port) as T
+                    AuthenticationViewModel(port, requiresSignOutRecovery = requiresSignOutRecovery) as T
             }
     }
 }

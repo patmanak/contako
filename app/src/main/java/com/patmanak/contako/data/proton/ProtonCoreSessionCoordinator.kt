@@ -133,7 +133,13 @@ internal class ProtonCoreSessionCoordinator(
         if (!loginAttemptLock.tryLock()) return false
         return try {
             if (sessionStateLock.withLock {
-                    sessionCleanupGenerations.isEmpty() && accountRepository.getAccounts().first().isEmpty()
+                    if (sessionCleanupGenerations.isNotEmpty() || accountRepository.getAccounts().first().isNotEmpty()) {
+                        false
+                    } else {
+                        // Recover a crash between the empty-partition reservation and Core persistence.
+                        owner?.releaseAbandonedReservation()
+                        true
+                    }
                 }) {
                 true
             } else {
@@ -155,7 +161,7 @@ internal class ProtonCoreSessionCoordinator(
         require(sessionInfo.sessionId.id !in invalidatedSessionIds)
         val existing = accountRepository.getAccounts().first()
         require(existing.isEmpty() || existing.single().userId == sessionInfo.userId)
-        owner?.requireOwner(sessionInfo.userId, existingSession = existing.singleOrNull()?.userId == sessionInfo.userId)
+        owner?.reserveForLogin(sessionInfo.userId, existingSession = existing.singleOrNull()?.userId == sessionInfo.userId)
         val secondFactorRequired = sessionInfo.secondFactor is SecondFactor.Enabled
         val account = Account(
             userId = sessionInfo.userId,
@@ -211,7 +217,7 @@ internal class ProtonCoreSessionCoordinator(
         sessionStateLock.withLock {
             val account = accountRepository.getAccounts().first().singleOrNull()
             check(account != null && account.userId == userId && account.sessionId?.id !in invalidatedSessionIds)
-            owner?.requireOwner(userId, existingSession = true)
+            owner?.confirmActivation(userId)
             accountRepository.updateSessionState(userId, SessionState.Authenticated)
             accountRepository.updateAccountState(userId, AccountState.Ready)
             publishSessionChanged()
@@ -222,7 +228,7 @@ internal class ProtonCoreSessionCoordinator(
         val account = accountRepository.getAccounts().first().singleOrNull()
             ?: return@withLock GateCStoredSessionState.ABSENT
         if (account.sessionId?.id in invalidatedSessionIds) return@withLock GateCStoredSessionState.ABSENT
-        owner?.requireOwner(account.userId, existingSession = true)
+        requireStoredOwner(account)
         when {
             account.sessionState == SessionState.SecondFactorNeeded -> GateCStoredSessionState.SECOND_FACTOR_REQUIRED
             account.state == AccountState.TwoPassModeNeeded && account.sessionState == SessionState.Authenticated ->
@@ -233,13 +239,21 @@ internal class ProtonCoreSessionCoordinator(
         }
     }
 
-    override suspend fun currentUserId(): UserId? = accountRepository.getAccounts().first().singleOrNull()?.userId?.also {
-        owner?.requireOwner(it, existingSession = true)
+    override suspend fun currentUserId(): UserId? = accountRepository.getAccounts().first().singleOrNull()?.let {
+        requireStoredOwner(it)
+        it.userId
+    }
+
+    suspend fun hasStoredAccount(): Boolean = sessionStateLock.withLock { accountRepository.getAccounts().first().isNotEmpty() }
+
+    private suspend fun requireStoredOwner(account: Account) {
+        owner?.requireStoredSessionOwner(account.userId,
+            ready = account.state == AccountState.Ready && account.sessionState == SessionState.Authenticated)
     }
 
     override suspend fun currentAccountAddress(): String? {
         val account = accountRepository.getAccounts().first().singleOrNull() ?: return null
-        owner?.requireOwner(account.userId, existingSession = true)
+        requireStoredOwner(account)
         val addresses = addressDao
             ?.getByUserId(account.userId)
             ?.map { GateCDisplayAddress(it.email, it.enabled, it.order) }
@@ -326,6 +340,7 @@ internal class ProtonCoreSessionCoordinator(
             } else {
                 accountRepository.getAccounts().first().forEach { accountRepository.deleteAccount(it.userId) }
             }
+            if (accountRepository.getAccounts().first().isEmpty()) owner?.releaseAbandonedReservation()
         } finally {
             transientTargets.forEach { transientSessions.remove(it) }
             publishSessionChanged()
@@ -434,6 +449,7 @@ internal class ProtonCoreSessionCoordinator(
                     if (currentAccount?.sessionId == failed.sessionId && currentAccount.userId == cleanup.second) {
                         accountRepository.deleteAccount(currentAccount.userId)
                     }
+                    if (accountRepository.getAccounts().first().isEmpty()) owner?.releaseAbandonedReservation()
                 } finally {
                     sessionCleanupGenerations -= cleanup.first
                     transientSessions.remove(failed.sessionId.id)

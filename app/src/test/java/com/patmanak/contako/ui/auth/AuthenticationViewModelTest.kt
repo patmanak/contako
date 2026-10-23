@@ -5,6 +5,13 @@ import com.patmanak.contako.domain.auth.AuthenticationFailure
 import com.patmanak.contako.domain.auth.AuthenticationSecret
 import com.patmanak.contako.domain.auth.AuthenticationStep
 import com.patmanak.contako.domain.auth.PasswordPurpose
+import com.patmanak.contako.android.account.SignOutChoice
+import com.patmanak.contako.android.account.SignOutResult
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -36,6 +43,178 @@ class AuthenticationViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test fun `confirm and discard survive cancellation of their UI caller and session revisions`() = runTest(dispatcher) {
+        for (choice in listOf(SignOutChoice.CONFIRM, SignOutChoice.DISCARD)) {
+            var restored: AuthenticationStep = AuthenticationStep.Ready
+            val delegate = FakeAuthenticationFlowPort()
+            val port = object : AuthenticationFlowPort by delegate { override suspend fun restore() = restored }
+            val model = AuthenticationViewModel(port)
+            advanceUntilIdle()
+            val host = CoroutineScope(Job() + dispatcher)
+            val release = CompletableDeferred<Unit>()
+            var finalized = false
+            var calls = 0
+            host.launch {
+                model.signOut(choice) { received ->
+                    calls++
+                    assertEquals(choice, received)
+                    restored = AuthenticationStep.SignIn
+                    model.onSessionChanged()
+                    release.await()
+                    finalized = true
+                    SignOutResult.SignedOut
+                }
+            }
+            runCurrent()
+            host.cancel()
+            model.cancelAuthentication()
+            model.signOut(choice) { error("Duplicate cleanup must not start") }
+            assertTrue(model.state.value.isSigningOut)
+            assertEquals(AuthenticationDestination.READY, model.state.value.destination)
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertTrue(finalized)
+            assertEquals(1, calls)
+            assertEquals(0, delegate.cancelCalls)
+            assertEquals(AuthenticationDestination.SIGN_IN, model.state.value.destination)
+            assertFalse(model.state.value.isSigningOut)
+        }
+    }
+
+    @Test fun `cleanup failure after session deletion remains visible and allows an explicit retry`() = runTest(dispatcher) {
+        var restored: AuthenticationStep = AuthenticationStep.Ready
+        var checkpointPresent = false
+        val port = object : AuthenticationFlowPort by FakeAuthenticationFlowPort() { override suspend fun restore() = restored }
+        val model = AuthenticationViewModel(port, requiresSignOutRecovery = { checkpointPresent })
+        advanceUntilIdle()
+        model.signOut(SignOutChoice.DISCARD) {
+            checkpointPresent = true
+            restored = AuthenticationStep.SignIn
+            model.onSessionChanged()
+            throw IllegalStateException("Synthetic cleanup failure")
+        }
+        advanceUntilIdle()
+        model.onSessionChanged()
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.SIGN_OUT_RECOVERY, model.state.value.destination)
+        assertEquals(SignOutResult.CleanupFailed, model.state.value.signOutResult)
+        assertTrue(model.state.value.isSignOutRecoveryRequired)
+        model.dismissSignOutResult()
+        model.onSessionChanged()
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.SIGN_OUT_RECOVERY, model.state.value.destination)
+        model.signOut(SignOutChoice.DISCARD) { SignOutResult.SignedOut }
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.SIGN_IN, model.state.value.destination)
+        assertFalse(model.state.value.isSignOutRecoveryRequired)
+    }
+
+    @Test fun `unexpected cleanup cancellation does not leave progress stuck or hide recovery`() = runTest(dispatcher) {
+        var checkpointPresent = false
+        val port = object : AuthenticationFlowPort by FakeAuthenticationFlowPort() {
+            override suspend fun restore() = AuthenticationStep.Ready
+        }
+        val model = AuthenticationViewModel(port, requiresSignOutRecovery = { checkpointPresent })
+        advanceUntilIdle()
+        model.signOut(SignOutChoice.CONFIRM) {
+            checkpointPresent = true
+            throw CancellationException("Synthetic cancellation")
+        }
+        advanceUntilIdle()
+        assertFalse(model.state.value.isSigningOut)
+        assertEquals(SignOutResult.CleanupFailed, model.state.value.signOutResult)
+        assertEquals(AuthenticationDestination.SIGN_OUT_RECOVERY, model.state.value.destination)
+        model.signOut(SignOutChoice.DISCARD) { SignOutResult.SignedOut }
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.SIGN_IN, model.state.value.destination)
+    }
+
+    @Test fun `restart with incomplete removal exposes only explicit cleanup recovery`() = runTest(dispatcher) {
+        var restores = 0
+        val delegate = FakeAuthenticationFlowPort()
+        val port = object : AuthenticationFlowPort by delegate {
+            override suspend fun restore(): AuthenticationStep { restores++; return AuthenticationStep.Ready }
+        }
+        val model = AuthenticationViewModel(port, requiresSignOutRecovery = { true })
+        advanceUntilIdle()
+        assertEquals(0, restores)
+        assertEquals(AuthenticationDestination.SIGN_OUT_RECOVERY, model.state.value.destination)
+        model.submitSignIn("foreign-user".toCharArray(), "synthetic".toCharArray())
+        model.reauthenticate { error("Recovery must not expose another session") }
+        advanceUntilIdle()
+        assertEquals(0, delegate.signInCalls)
+        model.signOut(SignOutChoice.CONFIRM) { SignOutResult.PendingChanges }
+        advanceUntilIdle()
+        assertTrue(model.state.value.isSignOutRecoveryRequired)
+        assertEquals(AuthenticationDestination.SIGN_OUT_RECOVERY, model.state.value.destination)
+        model.signOut(SignOutChoice.DISCARD) { SignOutResult.SignedOut }
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.SIGN_IN, model.state.value.destination)
+    }
+
+    @Test fun `pre-destructive refusal keeps ready and permits sync before another signout`() = runTest(dispatcher) {
+        val port = object : AuthenticationFlowPort by FakeAuthenticationFlowPort() {
+            override suspend fun restore() = AuthenticationStep.Ready
+        }
+        val model = AuthenticationViewModel(port, requiresSignOutRecovery = { false })
+        advanceUntilIdle()
+        model.signOut(SignOutChoice.CONFIRM) { SignOutResult.CleanupFailed }
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.READY, model.state.value.destination)
+        assertFalse(model.state.value.isSignOutRecoveryRequired)
+        assertFalse(model.state.value.isSigningOut)
+        assertEquals(SignOutResult.CleanupFailed, model.state.value.signOutResult)
+        model.dismissSignOutResult()
+        assertEquals(null, model.state.value.signOutResult)
+
+        model.signOut(SignOutChoice.CONFIRM) { SignOutResult.PendingChanges }
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.READY, model.state.value.destination)
+        assertEquals(SignOutResult.PendingChanges, model.state.value.signOutResult)
+        var syncNowRequested = false
+        model.signOut(SignOutChoice.SYNC_NOW) { choice ->
+            syncNowRequested = choice == SignOutChoice.SYNC_NOW
+            SignOutResult.SignedOut
+        }
+        advanceUntilIdle()
+        assertTrue(syncNowRequested)
+        assertEquals(AuthenticationDestination.SIGN_IN, model.state.value.destination)
+    }
+
+    @Test fun `cancellation before a cleanup checkpoint does not force destructive recovery`() = runTest(dispatcher) {
+        val port = object : AuthenticationFlowPort by FakeAuthenticationFlowPort() {
+            override suspend fun restore() = AuthenticationStep.Ready
+        }
+        val model = AuthenticationViewModel(port, requiresSignOutRecovery = { false })
+        advanceUntilIdle()
+        model.signOut(SignOutChoice.CONFIRM) { throw CancellationException("Synthetic preflight cancellation") }
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.READY, model.state.value.destination)
+        assertFalse(model.state.value.isSigningOut)
+        assertFalse(model.state.value.isSignOutRecoveryRequired)
+        assertEquals(SignOutResult.CleanupFailed, model.state.value.signOutResult)
+    }
+
+    @Test fun `unreadable cleanup checkpoint after failure stays fail closed`() = runTest(dispatcher) {
+        var checkpointReadable = true
+        val port = object : AuthenticationFlowPort by FakeAuthenticationFlowPort() {
+            override suspend fun restore() = AuthenticationStep.Ready
+        }
+        val model = AuthenticationViewModel(port, requiresSignOutRecovery = {
+            check(checkpointReadable)
+            false
+        })
+        advanceUntilIdle()
+        model.signOut(SignOutChoice.CONFIRM) {
+            checkpointReadable = false
+            SignOutResult.CleanupFailed
+        }
+        advanceUntilIdle()
+        assertEquals(AuthenticationDestination.SIGN_OUT_RECOVERY, model.state.value.destination)
+        assertTrue(model.state.value.isSignOutRecoveryRequired)
+        assertFalse(model.state.value.isSigningOut)
     }
 
     @Test fun `session loss leaves ready without destructive signout and reauthentication preserves intent`() = runTest(dispatcher) {

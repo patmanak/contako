@@ -270,6 +270,13 @@ untouched values independently on each peer:
 - Revoke an active session while changes are pending, then sign in as the same
   owner without discarding data. A different owner MUST NOT see or upload the
   retained partition. Repeat after restart and after Android provisioning fails.
+- On an empty installation, cancel a first login at TOTP, then use another
+  authorized account. Repeat after an unsupported authentication method. No
+  abandoned initial reservation may block the second login; an established
+  owner's retained data MUST remain protected when reauthentication is cancelled.
+- After a platform account-creation refusal, return to the foreground with the
+  same permission state. Verify that the retained binding permits account
+  creation and projection without restarting the complete Proton import.
 - Include a single unreadable remote card among healthy cards. Healthy cards
   MUST reach Room and Android; the failed import MUST remain visible and retry
   without rehydrating all unchanged healthy cards. A later repair or deletion
@@ -317,6 +324,13 @@ untouched values independently on each peer:
 - For FT-23 sign-out: verify remote revocation is attempted before local session
   destruction; offline cleanup succeeds, but pending local/native intent still
   blocks an unconfirmed discard. Test CAPTCHA renderer loss on an isolated target.
+  Refusal before cleanup starts MUST permit Cancel and Sync without requiring
+  discard. A partial cleanup MUST retain exclusive recovery after restart. Open
+  a draft before logout, then use another authorized fixture account: prior-owner
+  contact/group drafts and delayed saves MUST neither appear nor be committed.
+- For FT-01/FT-17 authentication recovery: retain a blocked group or validation intent,
+  then require session renewal or interactive key unlock. The reconnect action
+  MUST remain visible, and resolving it MUST preserve the original pending work.
 - For FT-15/FT-07 composite organization rows: save a title without a company,
   then separately replace the title, add/remove a role and add/remove a company.
   Include a second save before the first projection completes. Verify exact

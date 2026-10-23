@@ -13,7 +13,7 @@ import me.proton.core.domain.entity.UserId
 /** Private scope metadata. This is not a credential and MUST never enter diagnostics. */
 internal interface AccountOwnerStorage {
     suspend fun read(): String?
-    suspend fun write(userId: String)
+    suspend fun write(record: String)
     suspend fun clear()
 }
 
@@ -22,13 +22,14 @@ internal class FileAccountOwnerStorage(private val file: File) : AccountOwnerSto
     override suspend fun read(): String? = withContext(Dispatchers.IO) {
         if (!file.exists()) null else {
             require(file.length() in 1..MAX_OWNER_BYTES)
-            file.readText(Charsets.UTF_8).also { require(it.isNotBlank() && '\n' !in it && '\r' !in it) }
+            file.readText(Charsets.UTF_8).also(::decodeOwner)
         }
     }
 
-    override suspend fun write(userId: String) = withContext(Dispatchers.IO) {
-        val bytes = userId.toByteArray(Charsets.UTF_8)
-        require(bytes.size.toLong() in 1..MAX_OWNER_BYTES && userId.isNotBlank() && '\n' !in userId && '\r' !in userId)
+    override suspend fun write(record: String) = withContext(Dispatchers.IO) {
+        decodeOwner(record)
+        val bytes = record.toByteArray(Charsets.UTF_8)
+        require(bytes.size.toLong() in 1..MAX_OWNER_BYTES)
         check(file.parentFile!!.isDirectory || file.parentFile!!.mkdirs())
         val temporary = File(file.parentFile, "${file.name}.pending")
         FileOutputStream(temporary).use { it.write(bytes); it.fd.sync() }
@@ -52,9 +53,48 @@ internal class DurableAccountOwner(
 ) {
     private val lock = Mutex()
 
+    /** Reserve an empty partition before persisting credentials, without establishing ownership. */
+    suspend fun reserveForLogin(userId: UserId, existingSession: Boolean = false) = lock.withLock {
+        val previous = storage.read()?.let(::decodeOwner)
+        when {
+            previous?.userId == userId.id -> Unit
+            previous != null -> throw LocalAccountOwnerMismatch()
+            else -> {
+                if (!existingSession && hasLocalAccountData()) throw LocalAccountOwnerMismatch()
+                storage.write(if (existingSession) userId.id else RESERVED_PREFIX + userId.id)
+            }
+        }
+    }
+
     /** A pre-existing Core session may migrate legacy ownership; a fresh login cannot claim data. */
     suspend fun requireOwner(userId: UserId, existingSession: Boolean = false) = lock.withLock {
-        when (storage.read()) {
+        requireOwnerLocked(userId, existingSession)
+    }
+
+    /** A legacy incomplete session may reserve an empty partition, but cannot establish its owner. */
+    suspend fun requireStoredSessionOwner(userId: UserId, ready: Boolean) = lock.withLock {
+        val previous = storage.read()?.let(::decodeOwner)
+        when {
+            previous != null && previous.userId != userId.id -> throw LocalAccountOwnerMismatch()
+            previous == null -> {
+                if (!ready && hasLocalAccountData()) throw LocalAccountOwnerMismatch()
+                storage.write(if (ready) userId.id else RESERVED_PREFIX + userId.id)
+            }
+            ready && previous.reserved -> storage.write(userId.id)
+            else -> Unit
+        }
+    }
+
+    suspend fun identity(): String? = lock.withLock { storage.read()?.let(::decodeOwner)?.userId }
+
+    /** Commit ownership before READY can admit any local or remote work. */
+    suspend fun confirmActivation(userId: UserId) = lock.withLock {
+        requireOwnerLocked(userId, existingSession = true)
+        storage.write(userId.id)
+    }
+
+    private suspend fun requireOwnerLocked(userId: UserId, existingSession: Boolean) {
+        when (storage.read()?.let(::decodeOwner)?.userId) {
             userId.id -> Unit
             null -> {
                 if (!existingSession && hasLocalAccountData()) throw LocalAccountOwnerMismatch()
@@ -62,6 +102,13 @@ internal class DurableAccountOwner(
             }
             else -> throw LocalAccountOwnerMismatch()
         }
+    }
+
+    /** Caller MUST hold session admission closed and prove no Core account remains. */
+    suspend fun releaseAbandonedReservation() = lock.withLock {
+        val previous = storage.read()?.let(::decodeOwner) ?: return@withLock
+        // An established owner is never released by revocation or by an aborted reauthentication.
+        if (previous.reserved && !hasLocalAccountData()) storage.clear()
     }
 
     /** Only the serialized, completed explicit sign-out cleanup may release this partition. */
@@ -72,9 +119,20 @@ internal class DurableAccountOwner(
 
     /** Cleanup can resume after Core session removal, but never under a different active user. */
     suspend fun canClean(userId: UserId?): Boolean = lock.withLock {
-        val bound = storage.read() ?: return@withLock false
-        userId == null || bound == userId.id
+        val bound = storage.read()?.let(::decodeOwner) ?: return@withLock false
+        userId == null || bound.userId == userId.id
     }
+}
+
+// Legacy owner records prohibited newlines. The separator therefore cannot collide with a legacy
+// identity, and one atomic file replacement persists both the identity and its activation state.
+private const val RESERVED_PREFIX = "reserved-v1\n"
+private class OwnerRecord(val userId: String, val reserved: Boolean)
+private fun decodeOwner(record: String): OwnerRecord {
+    val reserved = record.startsWith(RESERVED_PREFIX)
+    val userId = if (reserved) record.removePrefix(RESERVED_PREFIX) else record
+    require(userId.isNotBlank() && '\n' !in userId && '\r' !in userId)
+    return OwnerRecord(userId, reserved)
 }
 
 internal class LocalAccountOwnerMismatch : IllegalStateException()

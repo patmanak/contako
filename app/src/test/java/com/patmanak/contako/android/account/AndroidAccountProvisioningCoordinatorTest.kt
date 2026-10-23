@@ -5,6 +5,9 @@ import com.patmanak.contako.data.android.AndroidAccountBindingResult
 import com.patmanak.contako.data.android.AndroidProjectionAccountSnapshot
 import com.patmanak.contako.data.gateway.AccountScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import com.patmanak.contako.data.sync.AuthenticatedSyncLifecycle
 import org.junit.Assert.assertEquals
 import kotlinx.coroutines.CancellationException
 import org.junit.Test
@@ -17,6 +20,81 @@ import org.junit.Test
  * counts and results rather than account fields; the device suite covers the framework side.
  */
 class AndroidAccountProvisioningCoordinatorTest {
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun foregroundReturnRetriesRefusedCreationDespiteRetainedBindingAndDoesNotRestartImport() = runTest {
+        val store = RecordingStore()
+        val platform = RecordingPlatform(acceptAdd = false)
+        val coordinator = AndroidAccountProvisioningCoordinator(store, platform)
+        var firstImports = 0
+        var projectionRequests = 0
+        val lifecycle = AuthenticatedSyncLifecycle(
+            onAccountReady = { firstImports++ },
+            onAuthenticatedStartup = {
+                launch {
+                    if (coordinator.retryMissing(SCOPE) { error("Use the durable bound name") } ==
+                        AccountProvisioningResult.READY) projectionRequests++
+                }
+            },
+        )
+        lifecycle.onActivityStarted()
+        lifecycle.onAuthenticationReady()
+        assertEquals(AccountProvisioningResult.UNAVAILABLE, coordinator.provision(SCOPE, ADDRESS))
+        assertEquals(ADDRESS, store.boundName)
+        assertEquals(emptyList<String>(), platform.existingAccountNames())
+
+        // Same authenticated lifecycle and permission state, with the binding surviving the refusal.
+        platform.acceptAdd = true
+        lifecycle.onActivityStarted()
+        testScheduler.runCurrent()
+        assertEquals(2, platform.addCalls)
+        assertEquals(listOf(ADDRESS), platform.existingAccountNames())
+        assertEquals(listOf(ADDRESS, ADDRESS), store.boundNames)
+        assertEquals(listOf(ADDRESS), platform.epochProofWrites)
+        assertEquals(1, projectionRequests)
+        assertEquals(1, firstImports)
+
+        // An ordinary later foreground event must not recreate, reseed or schedule another import.
+        lifecycle.onActivityStarted()
+        testScheduler.runCurrent()
+        assertEquals(2, platform.addCalls)
+        assertEquals(1, platform.syncEnabledCalls)
+        assertEquals(1, projectionRequests)
+        assertEquals(1, firstImports)
+    }
+
+    @Test
+    fun retryUsesTheDurableNameAfterAddressChangeWithoutRebinding() = runTest {
+        val store = RecordingStore(boundName = ADDRESS)
+        val platform = RecordingPlatform()
+        val coordinator = AndroidAccountProvisioningCoordinator(store, platform)
+        assertEquals(AccountProvisioningResult.READY, coordinator.retryMissing(SCOPE) { "new@example.test" })
+        assertEquals(listOf(ADDRESS), store.boundNames)
+        assertEquals(listOf(ADDRESS), platform.epochProofWrites)
+    }
+
+    @Test
+    fun retryWithoutBindingUsesValidatedSessionAddressAndRechecksConflicts() = runTest {
+        val store = RecordingStore(result = AndroidAccountBindingResult.Conflict)
+        val platform = RecordingPlatform()
+        assertEquals(AccountProvisioningResult.CONFLICT,
+            AndroidAccountProvisioningCoordinator(store, platform).retryMissing(SCOPE) { ADDRESS })
+        assertEquals(listOf(ADDRESS), store.boundNames)
+        assertEquals(0, platform.addCalls)
+        assertEquals(0, platform.syncEnabledCalls)
+    }
+
+    @Test
+    fun retryWithoutBindingOrSessionAddressHasNoPlatformSideEffect() = runTest {
+        val store = RecordingStore()
+        val platform = RecordingPlatform()
+        assertEquals(AccountProvisioningResult.UNAVAILABLE,
+            AndroidAccountProvisioningCoordinator(store, platform).retryMissing(SCOPE) { null })
+        assertEquals(0, store.ensureCalls)
+        assertEquals(0, platform.existingQueries)
+        assertEquals(0, platform.addCalls)
+    }
 
     @Test
     fun anUnusableAddressIsRejectedBeforeAnyDurableOrPlatformAccess() = runTest {
@@ -131,11 +209,14 @@ class AndroidAccountProvisioningCoordinatorTest {
     }
 
     private class RecordingStore(
-        private val result: AndroidAccountBindingResult = AndroidAccountBindingResult.Bound(SNAPSHOT),
+        private val result: AndroidAccountBindingResult? = null,
         private val ensureFailure: Throwable? = null,
+        var boundName: String? = null,
     ) : AndroidAccountBindingStore {
         var ensureCalls = 0
         val boundNames = mutableListOf<String>()
+
+        override suspend fun boundAccountName(scope: AccountScope): String? = boundName
 
         override suspend fun ensureAccountRevision(scope: AccountScope): Long {
             ensureCalls++
@@ -149,7 +230,15 @@ class AndroidAccountProvisioningCoordinatorTest {
             androidAccountName: String,
         ): AndroidAccountBindingResult {
             boundNames += androidAccountName
-            return result
+            val binding = result ?: when (boundName) {
+                null -> AndroidAccountBindingResult.Bound(SNAPSHOT)
+                androidAccountName -> AndroidAccountBindingResult.AlreadyBound(SNAPSHOT)
+                else -> AndroidAccountBindingResult.Conflict
+            }
+            if (binding is AndroidAccountBindingResult.Bound || binding is AndroidAccountBindingResult.AlreadyBound) {
+                boundName = androidAccountName
+            }
+            return binding
         }
 
         override suspend fun providerEpoch(scope: AccountScope): Long = SNAPSHOT.providerEpoch
@@ -157,7 +246,7 @@ class AndroidAccountProvisioningCoordinatorTest {
 
     private class RecordingPlatform(
         private val existing: MutableList<String> = mutableListOf(),
-        private val acceptAdd: Boolean = true,
+        var acceptAdd: Boolean = true,
     ) : AndroidAccountPlatform {
         var existingQueries = 0
         var addCalls = 0
@@ -171,6 +260,7 @@ class AndroidAccountProvisioningCoordinatorTest {
 
         override fun addAccount(account: Account): Boolean {
             addCalls++
+            if (acceptAdd) existing += ADDRESS
             return acceptAdd
         }
 

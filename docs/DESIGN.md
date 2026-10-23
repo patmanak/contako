@@ -35,6 +35,9 @@ pixel offset when its contents are unchanged, including after an alphabet jump.
 Contacts and Groups retain independent positions when switching tabs. Opening a
 directory MUST NOT replay a previous tab reselection; a new tap on the active tab
 still explicitly returns its list to the top.
+Directory state and unsaved editors belong to one account lifetime. Rotation
+preserves that state; logout cleanup resets it. A new process starts with fresh
+navigation rather than restoring a previous account's view.
 
 Under D-136, directory search starts collapsed. The top-bar magnifier before the
 account menu MUST reveal and focus the search field, opening the keyboard. Its

@@ -1,6 +1,8 @@
 package com.patmanak.contako.ui
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModelProvider
+import com.patmanak.contako.android.account.AccountLifecycleAdmission
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactGroup
 import com.patmanak.contako.domain.model.ContactValue
@@ -16,6 +18,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -32,6 +36,213 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ContactsViewModelTest {
+    @Test fun cleanupDestroysAccountDraftsAndStoreBeforeAnotherOwnerUsesTheSamePartition() = runTest(dispatcher) {
+        val original = contact("owner-a", "Owner A", "email", "fixture@example.test")
+        val repository = FakeRepository(listOf(original))
+        val gate = AccountLifecycleAdmission()
+        val stores = AccountContactsViewModelStore()
+        val scopeA = stores.forGeneration(gate.access.value.generation)
+        val model = ViewModelProvider(scopeA, ContactsViewModel.factory(repository,
+            mutationAdmission = gate, navigationState = scopeA.navigationState))[ContactsViewModel::class.java]
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        runCurrent()
+        model.editContact(original)
+        model.editGroup()
+        model.requestContactDeletion(original)
+        model.updateQuery("Owner A private query")
+        model.selectContact(original)
+        runCurrent()
+        val oldDraft = requireNotNull(model.uiState.value.contactEditor)
+        // The Activity-retained owner keeps the exact same model and navigation on rotation.
+        assertTrue(scopeA === stores.forGeneration(gate.access.value.generation))
+        assertEquals("Owner A private query", scopeA.navigationState.get<String>("navigation.CONTACTS.query"))
+        val entered = CompletableDeferred<Unit>()
+        val resume = CompletableDeferred<Unit>()
+        val cleanup = async { gate.cleanup { entered.complete(Unit); resume.await(); repository.contacts.value = emptyList() } }
+        entered.await()
+        runCurrent()
+        assertNull(model.uiState.value.contactEditor)
+        assertNull(model.uiState.value.groupEditor)
+        assertNull(model.uiState.value.pendingContactDeletion)
+        assertEquals(NavigationState(), model.uiState.value.navigation)
+        model.editContact(original)
+        model.updateContactEditor(oldDraft)
+        model.editGroup()
+        model.requestContactDeletion(original)
+        runCurrent()
+        assertNull(model.uiState.value.contactEditor)
+        assertNull(model.uiState.value.groupEditor)
+        assertNull(model.uiState.value.pendingContactDeletion)
+        resume.complete(Unit)
+        cleanup.await()
+        val scopeB = stores.forGeneration(gate.access.value.generation)
+        assertFalse(scopeA === scopeB)
+        val next = ViewModelProvider(scopeB, ContactsViewModel.factory(repository,
+            mutationAdmission = gate, navigationState = scopeB.navigationState))[ContactsViewModel::class.java]
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { next.uiState.collect {} }
+        runCurrent()
+        assertTrue(next.uiState.value.contacts.isEmpty())
+        assertNull(next.uiState.value.contactEditor)
+        assertEquals(NavigationState(), next.uiState.value.navigation)
+        model.updateContactEditor(oldDraft)
+        model.saveContact()
+        runCurrent()
+        assertNull(repository.savedContact)
+        next.editContact()
+        runCurrent()
+        next.updateContactEditor(requireNotNull(next.uiState.value.contactEditor).copy(displayName = "Owner B"))
+        next.saveContact()
+        runCurrent()
+        assertEquals("Owner B", repository.savedContact?.displayName)
+        scopeB.viewModelStore.clear()
+    }
+
+    @Test fun admittedSuspendedSaveCompletesBeforePurgeAndCannotRestoreOldEditorOrWakeNextOwner() = runTest(dispatcher) {
+        val repository = FakeRepository(emptyList())
+        val entered = CompletableDeferred<Unit>()
+        val resume = CompletableDeferred<Unit>()
+        repository.contactSave = { entered.complete(Unit); resume.await(); SaveResult.Saved(it) }
+        val gate = AccountLifecycleAdmission()
+        var wakeUps = 0
+        val model = ContactsViewModel(repository, mutationAdmission = gate, onMutationCommitted = { wakeUps++ })
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        model.editContact()
+        runCurrent()
+        model.updateContactEditor(requireNotNull(model.uiState.value.contactEditor).copy(displayName = "Draft A"))
+        model.saveContact()
+        entered.await()
+        var purged = false
+        val cleanup = async { gate.cleanup { repository.savedContact = null; purged = true } }
+        runCurrent()
+        assertFalse(purged)
+        assertNull(model.uiState.value.contactEditor)
+        resume.complete(Unit)
+        cleanup.await()
+        runCurrent()
+        assertTrue(purged)
+        assertNull(repository.savedContact)
+        assertNull(model.uiState.value.contactEditor)
+        assertNull(model.uiState.value.navigation.current.selectedId)
+        assertEquals(0, wakeUps)
+    }
+
+    @Test fun queuedCreateGroupAndDeletesAreRejectedWhenCleanupClosesTheirGeneration() = runTest(dispatcher) {
+        for (operation in 0..3) {
+            val original = contact("synthetic-contact", "Synthetic", "email", "fixture@example.test")
+            val group = ContactGroup(accountId = LOCAL_ACCOUNT_ID, id = "synthetic-group", name = "Synthetic group")
+            val repository = FakeRepository(listOf(original), listOf(group))
+            val gate = AccountLifecycleAdmission()
+            val model = ContactsViewModel(repository, mutationAdmission = gate)
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+            val entered = CompletableDeferred<Unit>()
+            val resume = CompletableDeferred<Unit>()
+            val provisioning = async { gate.authenticated(Unit) { entered.complete(Unit); resume.await() } }
+            entered.await()
+            when (operation) {
+                0 -> { model.editContact(); runCurrent(); model.saveContact() }
+                1 -> { model.editGroup(group); runCurrent(); model.saveGroup() }
+                2 -> { model.requestContactDeletion(original); model.confirmContactDeletion() }
+                3 -> { model.requestGroupDeletion(group); model.confirmGroupDeletion() }
+            }
+            runCurrent()
+            val cleanup = async { gate.cleanup {} }
+            runCurrent()
+            resume.complete(Unit)
+            provisioning.await()
+            cleanup.await()
+            runCurrent()
+            assertNull(repository.savedContact)
+            assertEquals(0, repository.groupSaveCount)
+            assertEquals(0, repository.deleteCount)
+            assertNull(model.uiState.value.contactEditor)
+            assertNull(model.uiState.value.groupEditor)
+            assertNull(model.uiState.value.pendingContactDeletion)
+            assertNull(model.uiState.value.pendingGroupDeletion)
+        }
+    }
+
+    @Test fun queuedConflictChoiceCannotBecomeAnIntentOfTheNextOwner() = runTest(dispatcher) {
+        val local = contact("conflict", "Local A", "email", "fixture@example.test")
+        val detail = com.patmanak.contako.domain.sync.ContactConflictDetail(
+            com.patmanak.contako.domain.sync.ContactConflictSummary(local.id, "synthetic-generation", 1, "synthetic-remote", null),
+            local, local.copy(displayName = "Proton A"),
+        )
+        var choices = 0
+        val recovery = object : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
+            override suspend fun loadConflict(accountId: String, contactId: String) = detail
+            override suspend fun chooseConflict(accountId: String,
+                expected: com.patmanak.contako.domain.sync.ContactConflictSummary,
+                choice: com.patmanak.contako.domain.sync.ContactConflictChoice): Boolean {
+                choices++
+                return true
+            }
+        }
+        val gate = AccountLifecycleAdmission()
+        val model = ContactsViewModel(FakeRepository(listOf(local)), syncRecoveryDataSource = recovery, mutationAdmission = gate)
+        model.openConflict(local.id)
+        runCurrent()
+        assertEquals(detail, model.conflictPanel.value.detail)
+        val entered = CompletableDeferred<Unit>()
+        val resume = CompletableDeferred<Unit>()
+        val held = async { gate.authenticated(Unit) { entered.complete(Unit); resume.await() } }
+        entered.await()
+        model.chooseConflict(com.patmanak.contako.domain.sync.ContactConflictChoice.LOCAL)
+        runCurrent()
+        val cleanup = async { gate.cleanup {} }
+        runCurrent()
+        resume.complete(Unit)
+        held.await()
+        cleanup.await()
+        runCurrent()
+        assertEquals(0, choices)
+        assertNull(model.conflictPanel.value.detail)
+        assertNull(model.conflictPanel.value.contactId)
+    }
+
+    @Test fun clearingTheOwnerStoreCancelsAnAdmittedSaveBeforeCleanupCanPurge() = runTest(dispatcher) {
+        val gate = AccountLifecycleAdmission()
+        val stores = AccountContactsViewModelStore()
+        val scope = stores.forGeneration(gate.access.value.generation)
+        val repository = FakeRepository(emptyList())
+        val entered = CompletableDeferred<Unit>()
+        val neverResume = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        repository.contactSave = {
+            entered.complete(Unit)
+            try { neverResume.await(); SaveResult.Saved(it) } finally { order += "save-released" }
+        }
+        val model = ViewModelProvider(scope, ContactsViewModel.factory(repository,
+            mutationAdmission = gate, navigationState = scope.navigationState))[ContactsViewModel::class.java]
+        model.editContact()
+        model.saveContact()
+        entered.await()
+        val cleanup = async { gate.cleanup { order += "purge"; repository.savedContact = null } }
+        runCurrent()
+        assertTrue(order.isEmpty())
+        // MainActivity does exactly this when it observes cleanup's new generation.
+        stores.forGeneration(gate.access.value.generation)
+        runCurrent()
+        cleanup.await()
+        assertEquals(listOf("save-released", "purge"), order)
+        assertNull(repository.savedContact)
+    }
+
+    @Test fun unreadableAdmissionPreservesEditableDraftInsteadOfCrashingOrLeavingSavingForever() = runTest(dispatcher) {
+        val gate = AccountLifecycleAdmission(isAuthenticated = { throw java.io.IOException("Synthetic failure") })
+        val repository = FakeRepository(emptyList())
+        val model = ContactsViewModel(repository, mutationAdmission = gate)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        model.editContact()
+        runCurrent()
+        model.updateContactEditor(requireNotNull(model.uiState.value.contactEditor).copy(displayName = "Retained draft"))
+        model.saveContact()
+        runCurrent()
+        assertNull(repository.savedContact)
+        assertEquals("Retained draft", model.uiState.value.contactEditor?.displayName)
+        assertEquals(false, model.uiState.value.contactEditor?.saving)
+        assertEquals(UiMessage.SAVE_FAILED, model.uiState.value.contactEditor?.validationError)
+    }
+
     @Test fun deniedGroupCreationDoesNotBlockContactSaveAndRefreshRestoresAction() = runTest(dispatcher) {
         val original = contact("capability", "Original", "email", "fixture@example.test")
         val repository = FakeRepository(listOf(original))

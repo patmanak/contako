@@ -326,7 +326,7 @@
     <string name="dialog_discard_signout_confirm">Descartar y cerrar sesión</string>
     <string name="dialog_signout_failed_title">No se pudo cerrar sesión</string>
     <string name="dialog_signout_sync_failed">La sincronización no terminó. La sesión sigue abierta y los cambios permanecen en este dispositivo.</string>
-    <string name="dialog_signout_cleanup_failed">La limpieza local no terminó. La sesión sigue abierta; inténtelo de nuevo.</string>
+    <string name="dialog_signout_cleanup_failed">La limpieza local no terminó. Intente cerrar sesión de nuevo.</string>
     <string name="contact_type_home">Casa</string>
     <string name="contact_type_work">Trabajo</string>
     <string name="contact_type_mobile">Móvil</string>

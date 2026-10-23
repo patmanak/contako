@@ -5,9 +5,15 @@
 The local contact partition MUST retain a durable Proton owner independently of
 revocable session records. A fresh login MUST NOT adopt another owner's retained
 contacts or outbox. Same-owner reauthentication MUST preserve pending intent.
-Only completed explicit local cleanup may release ownership. Legacy nonempty
+Only completed explicit local cleanup may release established ownership. An
+initial login MAY reserve an empty partition before second-factor/key validation.
+Abandoning that attempt MUST release only its provisional reservation after
+proving that no local data or surviving session depends on it. Cancellation of
+same-owner reauthentication MUST NOT release established ownership, even when
+the current contact list is empty. Legacy nonempty
 data without an owner or a retained session proving ownership MUST remain
-quarantined; missing evidence MUST NOT be interpreted as an empty partition.
+quarantined; an incomplete legacy login MUST NOT claim a nonempty partition.
+Missing evidence MUST NOT be interpreted as an empty partition.
 
 - Android sandbox/device security protects local contact data. The contact
   database is deliberately not encrypted separately at application level.

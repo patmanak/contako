@@ -70,7 +70,7 @@ class UnprovisionedAccountSignOutTest {
         assertTrue(fixture.cleanup.remove(false))
         assertFalse(fixture.owner)
         assertFalse(fixture.localDataPresent)
-        assertEquals(2, fixture.events.count { it == "revoke-session" })
+        assertEquals(1, fixture.events.count { it == "revoke-session" })
         assertEquals(1, fixture.events.count { it == "release-owner" })
     }
 
@@ -109,22 +109,76 @@ class UnprovisionedAccountSignOutTest {
         assertEquals(listOf("stop", "revoke-session", "commit-local:false", "release-owner"), fixture.events)
     }
 
+    @Test fun failedLocalCleanupSurvivesCoordinatorAndRunnerReconstruction() = runTest {
+        val fixture = fixture().apply { failCommitOnce = true }
+        assertFalse(fixture.cleanup.remove(false))
+        assertEquals(UnprovisionedRemovalPhase.LOCAL_PENDING, fixture.checkpoints.load(ACCOUNT)?.phase)
+        assertFalse(fixture.sessionPresent)
+        val freshRunner = AccountSyncRunner(backgroundScope) { SyncPassOutcome.SUCCESS }
+        assertTrue(fixture.newCleanup(freshRunner).remove(false))
+        assertFalse(fixture.owner)
+        assertNull(fixture.checkpoints.load(ACCOUNT))
+        assertEquals(1, fixture.events.count { it == "revoke-session" })
+        assertEquals(SyncRequestDisposition.ACCOUNT_INVALIDATED, freshRunner.request(SyncTrigger.RETRY))
+    }
+
+    @Test fun crashAfterOwnerReleaseOnlyFinalizesMarkerWithoutRepeatingAnyDeletion() = runTest {
+        val fixture = fixture().apply { failCheckpointClearOnce = true }
+        assertFalse(fixture.cleanup.remove(false))
+        assertFalse(fixture.owner)
+        assertEquals(UnprovisionedRemovalPhase.OWNER_PENDING, fixture.checkpoints.load(ACCOUNT)?.phase)
+        val fresh = fixture.newCleanup(AccountSyncRunner(backgroundScope) { SyncPassOutcome.SUCCESS })
+        assertTrue(fresh.remove(false))
+        assertNull(fixture.checkpoints.load(ACCOUNT))
+        assertEquals(1, fixture.events.count { it == "revoke-session" })
+        assertEquals(1, fixture.events.count { it == "commit-local:false" })
+        assertEquals(1, fixture.events.count { it == "release-owner" })
+    }
+
+    @Test fun finalizationCannotTouchANewOwnerSessionOrLocalData() = runTest {
+        for (newState in listOf("owner", "session", "data")) {
+            val fixture = fixture().apply { failCheckpointClearOnce = true }
+            assertFalse(fixture.cleanup.remove(false))
+            when (newState) {
+                "owner" -> { fixture.owner = true; fixture.ownerName = "different-owner" }
+                "session" -> fixture.sessionPresent = true
+                "data" -> fixture.localDataPresent = true
+            }
+            val eventsBefore = fixture.events.toList()
+            assertFalse(fixture.newCleanup(AccountSyncRunner(backgroundScope) { SyncPassOutcome.SUCCESS }).remove(true))
+            assertEquals(eventsBefore, fixture.events)
+            assertNotNull(fixture.checkpoints.load(ACCOUNT))
+        }
+    }
+
     private fun TestScope.fixture(runner: AccountSyncRunner = AccountSyncRunner(backgroundScope) { SyncPassOutcome.SUCCESS }) =
         Fixture(runner)
 
     private class Fixture(val runner: AccountSyncRunner) {
         var pending = 0
         var owner = true
+        var ownerName = "synthetic-owner"
         var noAndroidBinding = true
         var localDataPresent = true
         var sessionPresent = true
         var injectPendingAtCommit = false
         var failCommitOnce = false
+        var failCheckpointClearOnce = false
         var bindingProbe: suspend () -> Boolean = { noAndroidBinding }
         var revokeBarrier: suspend () -> Unit = {}
         val events = mutableListOf<String>()
+        val checkpoints = object : UnprovisionedRemovalCheckpointStore {
+            private val memory = UnprovisionedRemovalCheckpointStore.Memory()
+            override fun load(scope: AccountScope) = memory.load(scope)
+            override fun save(scope: AccountScope, checkpoint: UnprovisionedRemovalCheckpoint) = memory.save(scope, checkpoint)
+            override fun clear(scope: AccountScope) {
+                if (failCheckpointClearOnce) { failCheckpointClearOnce = false; error("Synthetic marker failure") }
+                memory.clear(scope)
+            }
+        }
         // There is deliberately no provider or AccountManager fake: this path cannot call one.
-        val cleanup = UnprovisionedAccountSignOut(AccountScope("synthetic-owner-scope"), runner,
+        val cleanup = newCleanup(runner)
+        fun newCleanup(activeRunner: AccountSyncRunner) = UnprovisionedAccountSignOut(ACCOUNT, activeRunner,
             ownerIsVerified = { owner },
             hasNoAndroidBinding = { bindingProbe() },
             pendingMutations = PendingMutationReader { pending },
@@ -145,7 +199,12 @@ class UnprovisionedAccountSignOutTest {
                 events += "release-owner"
                 owner = false
             },
+            ownerIdentity = { if (owner) ownerName else null },
+            hasNoCoreAccount = { !sessionPresent },
+            isLocalDataEmpty = { !localDataPresent && pending == 0 },
+            checkpoints = checkpoints,
             stopScheduling = { events += "stop" },
         )
     }
+    private companion object { val ACCOUNT = AccountScope("synthetic-owner-scope") }
 }

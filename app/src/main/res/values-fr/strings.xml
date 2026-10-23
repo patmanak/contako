@@ -326,7 +326,7 @@
     <string name="dialog_discard_signout_confirm">Abandonner et se déconnecter</string>
     <string name="dialog_signout_failed_title">Déconnexion impossible</string>
     <string name="dialog_signout_sync_failed">La synchronisation n\'a pas abouti. Vous êtes toujours connecté et vos modifications restent sur cet appareil.</string>
-    <string name="dialog_signout_cleanup_failed">Le nettoyage local n\'a pas abouti. Vous êtes toujours connecté ; réessayez.</string>
+    <string name="dialog_signout_cleanup_failed">Le nettoyage local n\'a pas abouti. Réessayez de vous déconnecter.</string>
     <string name="contact_type_home">Domicile</string>
     <string name="contact_type_work">Travail</string>
     <string name="contact_type_mobile">Mobile</string>

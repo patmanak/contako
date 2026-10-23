@@ -48,6 +48,23 @@ invented campaign totals or identical copies at every layer.
   preserving validation/conflict blocks, revisions and idempotency keys.
 - `ProtonAccountOwnerIsolationTest`: revoke A with retained mutations, reject B,
   restart and reconnect A; legacy ownership without proof remains quarantined.
+  Initial aborted reservations on empty partitions may be released; cancelling
+  same-owner reauthentication MUST preserve an established owner.
+- `AuthenticationViewModelTest`: session changes and removal of the initiating
+  composition MUST NOT cancel explicit sign-out; failures retain a visible retry.
+  A refusal before destructive cleanup MUST keep normal actions available when
+  no checkpoint remains. Partial cleanup or unreadable checkpoint state MUST
+  retain exclusive recovery, including after cancellation.
+- `AccountLifecycleAdmissionTest`, `ContactsViewModelTest`: cleanup MUST fence
+  queued UI mutations and clear drafts from the previous owner. An already
+  admitted save MUST finish or cancel before purge; delayed saves MUST NOT write under
+  a subsequent owner.
+- `SyncPassActionReasonTest`: a current authentication or interactive-unlock
+  requirement MUST remain visible above older blocked mutation reasons. Resolving
+  authentication MUST expose the retained underlying problem again.
+- `AndroidAccountProvisioningCoordinatorTest`: a retained binding after platform
+  refusal still permits foreground recovery under the bound name, without
+  repeating first import or recreating a present account.
 - `PreferredEmailTransitionTest`: first/last/preferred email changes and a new
   preferred email with distinct existing memberships.
 - `ProtonVCardUnfoldingTest`, `ProtonVCardOpaquePreservationTest`,

@@ -152,7 +152,7 @@
     <string name="dialog_discard_signout_confirm">Discard and sign out</string>
     <string name="dialog_signout_failed_title">Couldn\'t sign out</string>
     <string name="dialog_signout_sync_failed">Sync did not complete. You are still signed in and your pending changes remain on this device.</string>
-    <string name="dialog_signout_cleanup_failed">Local cleanup did not complete. You are still signed in; try again.</string>
+    <string name="dialog_signout_cleanup_failed">Local cleanup did not complete. Try signing out again.</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_delete">Delete</string>
     <string name="action_delete_group">Delete group</string>

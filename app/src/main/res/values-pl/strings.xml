@@ -333,7 +333,7 @@
     <string name="dialog_discard_signout_confirm">Odrzuć i wyloguj</string>
     <string name="dialog_signout_failed_title">Nie można się wylogować</string>
     <string name="dialog_signout_sync_failed">Synchronizacja nie zakończyła się. Nadal jesteś zalogowany, a zmiany pozostają na tym urządzeniu.</string>
-    <string name="dialog_signout_cleanup_failed">Lokalne czyszczenie nie zakończyło się. Nadal jesteś zalogowany; spróbuj ponownie.</string>
+    <string name="dialog_signout_cleanup_failed">Lokalne czyszczenie nie zakończyło się. Spróbuj wylogować się ponownie.</string>
     <string name="contact_type_home">Dom</string>
     <string name="contact_type_work">Praca</string>
     <string name="contact_type_mobile">Komórkowy</string>

@@ -319,7 +319,7 @@
     <string name="dialog_discard_signout_confirm">Verwijderen en afmelden</string>
     <string name="dialog_signout_failed_title">Afmelden mislukt</string>
     <string name="dialog_signout_sync_failed">De synchronisatie is niet voltooid. U bent nog aangemeld en uw wijzigingen blijven op dit apparaat.</string>
-    <string name="dialog_signout_cleanup_failed">De lokale opschoning is niet voltooid. U bent nog aangemeld; probeer het opnieuw.</string>
+    <string name="dialog_signout_cleanup_failed">De lokale opschoning is niet voltooid. Probeer opnieuw af te melden.</string>
     <string name="contact_type_home">Thuis</string>
     <string name="contact_type_work">Werk</string>
     <string name="contact_type_mobile">Mobiel</string>

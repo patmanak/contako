@@ -84,6 +84,7 @@ internal fun AuthenticationScreen(
                 body = stringResource(R.string.auth_human_unavailable),
                 onBack = onCancel,
             )
+            AuthenticationDestination.SIGN_OUT_RECOVERY,
             AuthenticationDestination.READY -> Unit
         }
     }
@@ -443,6 +444,7 @@ internal fun AuthenticationDestination.requiresAuthenticationBackCleanup(): Bool
     AuthenticationDestination.RESTORING,
     AuthenticationDestination.SIGN_IN,
     AuthenticationDestination.READY,
+    AuthenticationDestination.SIGN_OUT_RECOVERY,
     -> false
 }
 
