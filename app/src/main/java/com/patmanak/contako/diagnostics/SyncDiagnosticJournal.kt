@@ -61,7 +61,9 @@ internal object SyncJournalCodes {
         "ingest_codec", "ingest_baseline", "projection_repair", "projection_row", "binding", "photo_write", "canonical",
     ) || (code.startsWith("groups:") && code.substringAfter(':') !in setOf("CANCELLED", "PERMISSION_OR_PLAN_DENIED")) ||
         (code.startsWith("android:") && code.substringAfterLast(':') in
-        setOf("ACTION_REQUIRED", "LOCAL_PERSISTENCE_FAILURE"))
+        setOf("ACTION_REQUIRED", "LOCAL_PERSISTENCE_FAILURE")) ||
+        (code.substringBefore(':') in setOf("outcome", "finished") &&
+            code.substringAfter(':') in setOf("ACTION_REQUIRED", "FAILED"))
 
     private fun names(values: List<Enum<*>>) = values.map { it.name }.toSet()
 }
@@ -139,21 +141,27 @@ internal class SyncDiagnosticBuffer(
     private var lastFailure: SyncJournalEntry? = null
     private var failureRecordedInPass = false
     private var stage: SyncPassStage? = null
+    private var lastWorkStage: SyncPassStage? = null
     private var phase: RemoteImportPhase? = null
 
     @Synchronized fun record(event: SanitizedDiagnosticEvent) {
         val code = SyncJournalCodes.from(event) ?: return
         if (event is SanitizedDiagnosticEvent.PassStarted) {
-            stage = null; phase = null; failureRecordedInPass = false
+            stage = null; lastWorkStage = null; phase = null; failureRecordedInPass = false
         }
         if (event is SanitizedDiagnosticEvent.SyncStage) { stage = event.stage; phase = null }
+        if (event is SanitizedDiagnosticEvent.SyncStage && event.stage !in setOf(
+                SyncPassStage.STATUS_PUBLICATION, SyncPassStage.FULL_REPAIR_FINALIZATION, SyncPassStage.COMPLETE)) {
+            lastWorkStage = event.stage
+        }
         if (event is SanitizedDiagnosticEvent.ImportPhase) phase = event.phase
         val request = event is SanitizedDiagnosticEvent.SyncRequest || event is SanitizedDiagnosticEvent.AndroidCallback
+        val terminal = code.substringBefore(':') in setOf("outcome", "finished")
         val entry = SyncJournalEntry.create(wallClock(), (monotonicClock() - startedAt).coerceAtLeast(0),
-            if (request) null else stage, if (request) null else phase, code)
+            if (request) null else if (terminal) lastWorkStage else stage, if (request) null else phase, code)
         add(entry)
         // A later generic Android/ingestion banner must not hide the latest detailed failure.
-        val generic = code.startsWith("android:") || code.startsWith("ingest_failure:")
+        val generic = code.startsWith("android:") || code.startsWith("ingest_failure:") || terminal
         if (SyncJournalCodes.failure(code) && (!generic || !failureRecordedInPass)) {
             lastFailure = entry
             failureRecordedInPass = true
@@ -171,7 +179,7 @@ internal class SyncDiagnosticBuffer(
     }
 
     @Synchronized fun clear() {
-        events.clear(); lastFailure = null; stage = null; phase = null; failureRecordedInPass = false
+        events.clear(); lastFailure = null; stage = null; lastWorkStage = null; phase = null; failureRecordedInPass = false
         marker("journal:CLEARED")
     }
 

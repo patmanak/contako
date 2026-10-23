@@ -70,6 +70,26 @@ class SyncDiagnosticJournalTest {
         assertEquals("journal:CLEARED", file.read().first.single().encoded.substringAfterLast(','))
     }
 
+    @Test fun genericTerminalFailureSurvivesRotationAndRestartWithoutHidingDetailedCause() {
+        val buffer = SyncDiagnosticBuffer({ time }, { 0 })
+        buffer.record(SanitizedDiagnosticEvent.PassStarted(SyncScope.INCREMENTAL))
+        buffer.record(SanitizedDiagnosticEvent.SyncStage(SyncPassStage.PREREQUISITES))
+        buffer.record(SanitizedDiagnosticEvent.SyncStage(SyncPassStage.COMPLETE))
+        buffer.record(SanitizedDiagnosticEvent.SyncOutcome(SyncPassOutcome.ACTION_REQUIRED))
+        val fallback = requireNotNull(buffer.snapshot(JournalStorage.AVAILABLE).lastFailure)
+        assertTrue(fallback.encoded.contains(",PREREQUISITES,NONE,outcome:ACTION_REQUIRED"))
+        repeat(200) { buffer.record(SanitizedDiagnosticEvent.ImportPhase(RemoteImportPhase.CARD_READ_DONE)) }
+        val file = SyncJournalFile(temporary.newFile())
+        file.write(buffer.snapshot(JournalStorage.AVAILABLE))
+        val restored = SyncDiagnosticBuffer({ time }, { 0 })
+        restored.restore(file.read())
+        assertEquals(fallback, restored.snapshot(JournalStorage.AVAILABLE).lastFailure)
+        restored.record(SanitizedDiagnosticEvent.PassStarted(SyncScope.INCREMENTAL))
+        restored.record(SanitizedDiagnosticEvent.SyncException(SyncPassExceptionCategory.DATABASE))
+        restored.record(SanitizedDiagnosticEvent.SyncOutcome(SyncPassOutcome.FAILED))
+        assertTrue(restored.snapshot(JournalStorage.AVAILABLE).lastFailure!!.encoded.endsWith("failure:DATABASE"))
+    }
+
     @Test fun corruptedOversizedOrPayloadBearingFilesCannotReachExport() {
         val path = temporary.newFile()
         val file = SyncJournalFile(path)
