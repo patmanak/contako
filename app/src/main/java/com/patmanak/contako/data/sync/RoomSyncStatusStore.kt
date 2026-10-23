@@ -202,12 +202,14 @@ internal class RoomSyncPassStatusPublisher(
         val blocked = database.outboxDao().getActionRequired(accountId)
         val failedImports = database.remoteHydrationObligationDao().getAll(accountId)
         val external = externalActionReason()
-        val reason = blocked.outboxActionReason() ?: if (outcome == SyncPassOutcome.ACTION_REQUIRED || failedImports.isNotEmpty()) {
-            external ?: if (failedImports.any { it.category == "CRYPTOGRAPHIC_VERIFICATION_FAILED" })
-                SyncActionReason.CRYPTOGRAPHIC_VERIFICATION_FAILED else SyncActionReason.INTERNAL_FAILURE
-        } else {
-            null
-        }
+        val reason = syncPassActionReason(
+            outcome = outcome,
+            outboxReason = blocked.outboxActionReason(),
+            externalReason = external,
+            failedImportReason = if (failedImports.isEmpty()) null
+                else if (failedImports.any { it.category == "CRYPTOGRAPHIC_VERIFICATION_FAILED" })
+                    SyncActionReason.CRYPTOGRAPHIC_VERIFICATION_FAILED else SyncActionReason.INTERNAL_FAILURE,
+        )
         statusStore.publish(
             accountId,
             wallClock(),
@@ -221,6 +223,21 @@ internal class RoomSyncPassStatusPublisher(
         )
         afterPublish()
     }
+}
+
+/** A current session action must remain reachable while older durable work stays blocked. */
+internal fun syncPassActionReason(
+    outcome: SyncPassOutcome,
+    outboxReason: SyncActionReason?,
+    externalReason: SyncActionReason?,
+    failedImportReason: SyncActionReason?,
+): SyncActionReason? = when {
+    externalReason == SyncActionReason.AUTHENTICATION_REQUIRED ||
+        externalReason == SyncActionReason.INTERACTIVE_AUTHENTICATION_REQUIRED -> externalReason
+    outboxReason != null -> outboxReason
+    outcome == SyncPassOutcome.ACTION_REQUIRED || failedImportReason != null ->
+        externalReason ?: failedImportReason ?: SyncActionReason.INTERNAL_FAILURE
+    else -> null
 }
 
 internal fun List<OutboxMutationEntity>.outboxActionReason(): SyncActionReason? {

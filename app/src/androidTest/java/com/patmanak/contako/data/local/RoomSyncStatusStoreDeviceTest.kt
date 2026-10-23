@@ -3,6 +3,10 @@ package com.patmanak.contako.data.local
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.patmanak.contako.data.gateway.AccountScope
+import com.patmanak.contako.data.sync.NetworkState
+import com.patmanak.contako.data.sync.NetworkStateProvider
+import com.patmanak.contako.data.sync.RoomSyncRecoveryDataSource
 import com.patmanak.contako.data.sync.RoomSyncStatusStore
 import com.patmanak.contako.data.sync.RoomSyncPassStatusPublisher
 import com.patmanak.contako.data.sync.SyncActionReason
@@ -10,8 +14,16 @@ import com.patmanak.contako.data.sync.SyncHealthState
 import com.patmanak.contako.data.sync.SyncNotificationReason
 import com.patmanak.contako.data.sync.SyncStatusUpdate
 import com.patmanak.contako.domain.sync.SyncPassOutcome
+import com.patmanak.contako.domain.sync.AccountSyncRunner
+import com.patmanak.contako.domain.sync.SyncDashboardState
+import com.patmanak.contako.domain.sync.SyncPassExecutor
+import com.patmanak.contako.domain.sync.SyncProblem
 import com.patmanak.contako.domain.model.CanonicalContact
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -196,6 +208,116 @@ class RoomSyncStatusStoreDeviceTest {
             SyncNotificationReason.IMMEDIATE_ACTION_REQUIRED,
             store.claimNotificationIfDue(ACCOUNT, 1_000),
         )
+    }
+
+    @Test
+    fun currentAuthenticationOverridesOldGroupErrorsWithoutDiscardingTheirIntent() = runBlocking {
+        verifyCurrentAuthenticationPriority(
+            SyncActionReason.GROUP_CAPABILITY_REQUIRED,
+            SyncActionReason.AUTHENTICATION_REQUIRED,
+        )
+    }
+
+    @Test
+    fun currentInteractiveUnlockOverridesOldValidationAndImportErrorsAcrossRestart() = runBlocking {
+        verifyCurrentAuthenticationPriority(
+            SyncActionReason.VALIDATION_REJECTED,
+            SyncActionReason.INTERACTIVE_AUTHENTICATION_REQUIRED,
+        )
+    }
+
+    private suspend fun verifyCurrentAuthenticationPriority(
+        olderReason: SyncActionReason,
+        currentReason: SyncActionReason,
+    ) {
+        val blockedContact = OutboxMutationEntity(
+            accountId = ACCOUNT,
+            aggregateType = AggregateType.CONTACT.name,
+            aggregateId = "blocked-contact",
+            operation = MutationOperation.UPSERT.name,
+            revision = 3,
+            createdAtEpochMillis = 100,
+            updatedAtEpochMillis = 100,
+            idempotencyKey = "retained-contact-intent",
+            state = DurableMutationState.ACTION_REQUIRED.name,
+            blockedReason = olderReason.name,
+        )
+        val blockedGroup = blockedContact.copy(
+            aggregateType = AggregateType.GROUP.name,
+            aggregateId = "blocked-group",
+            idempotencyKey = "retained-group-intent",
+            createdAtEpochMillis = 200,
+        )
+        val pendingContact = blockedContact.copy(
+            aggregateId = "pending-contact",
+            idempotencyKey = "retained-pending-intent",
+            state = DurableMutationState.PENDING.name,
+            blockedReason = null,
+            createdAtEpochMillis = 300,
+        )
+        val retainedMutations = listOf(blockedContact, blockedGroup, pendingContact)
+        retainedMutations.forEach { database.outboxDao().upsert(it) }
+        val importFailure = RemoteHydrationObligationEntity(
+            ACCOUNT, "unreadable-contact", "Synthetic import", "CRYPTOGRAPHIC_VERIFICATION_FAILED", null,
+        )
+        database.remoteHydrationObligationDao().upsert(importFailure)
+        var externalReason: SyncActionReason? = null
+        var now = 1_000L
+        fun publisher() = RoomSyncPassStatusPublisher(
+            accountId = ACCOUNT,
+            database = database,
+            statusStore = store,
+            wallClock = { now },
+            externalActionReason = { externalReason },
+        )
+        publisher().publish(SyncPassOutcome.ACTION_REQUIRED)
+        assertEquals(olderReason, store.load(ACCOUNT)?.actionReason)
+        assertEquals(SyncNotificationReason.BLOCKED_FOR_24_HOURS,
+            store.claimNotificationIfDue(ACCOUNT, now + DAY))
+
+        // A current prerequisite failure must replace an already-notified old banner, not its data.
+        now += DAY + 1
+        externalReason = currentReason
+        publisher().publish(SyncPassOutcome.ACTION_REQUIRED)
+        val status = requireNotNull(store.load(ACCOUNT))
+        assertEquals(currentReason, status.actionReason)
+        assertEquals(3, status.pendingMutationCount)
+        assertEquals(3, status.actionRequiredCount)
+        assertFalse(status.notificationClaimed)
+        assertEquals(SyncNotificationReason.IMMEDIATE_ACTION_REQUIRED,
+            store.claimNotificationIfDue(ACCOUNT, now))
+        assertNull(store.claimNotificationIfDue(ACCOUNT, now + 1))
+
+        reopenDatabase()
+        val runner = AccountSyncRunner(CoroutineScope(currentCoroutineContext()),
+            SyncPassExecutor { error("STATUS_OBSERVATION_MUST_NOT_START_SYNC") })
+        val recovery = RoomSyncRecoveryDataSource(database, runner,
+            NetworkStateProvider { NetworkState.WIFI }, AccountScope(ACCOUNT))
+        val dashboard = withTimeout(10_000) { recovery.observeStatus(ACCOUNT).first() }
+        // This state is the production Sync screen's reconnect-button predicate.
+        assertEquals(SyncDashboardState.AUTHENTICATION_REQUIRED, dashboard?.state)
+        assertEquals(SyncProblem.valueOf(currentReason.name), dashboard?.problem)
+        assertEquals(3, dashboard?.pendingMutationCount)
+        assertEquals(3, dashboard?.actionRequiredCount)
+        assertEquals(setOf("blocked-contact"), dashboard?.blockedMutationContactIds)
+        assertEquals("unreadable-contact", dashboard?.importProblems?.single()?.remoteId)
+        assertEquals(SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED,
+            dashboard?.importProblems?.single()?.problem)
+        assertNull(store.claimNotificationIfDue(ACCOUNT, now + 2))
+        assertEquals(retainedMutations, database.outboxDao().getAll(ACCOUNT))
+        assertEquals(listOf(importFailure), database.remoteHydrationObligationDao().getAll(ACCOUNT))
+
+        externalReason = null
+        now++
+        publisher().publish(SyncPassOutcome.ACTION_REQUIRED)
+        assertEquals(olderReason, store.load(ACCOUNT)?.actionReason)
+        val afterAuthentication = withTimeout(10_000) { recovery.observeStatus(ACCOUNT).first() }
+        assertEquals(SyncDashboardState.BLOCKED, afterAuthentication?.state)
+        assertEquals(SyncProblem.valueOf(olderReason.name), afterAuthentication?.problem)
+        assertEquals(setOf("blocked-contact"), afterAuthentication?.blockedMutationContactIds)
+        assertEquals(retainedMutations, database.outboxDao().getAll(ACCOUNT))
+        assertEquals(listOf(importFailure), database.remoteHydrationObligationDao().getAll(ACCOUNT))
+        assertNull(store.claimNotificationIfDue(ACCOUNT, now))
     }
 
     private fun blocked(reason: SyncActionReason) = SyncStatusUpdate(
