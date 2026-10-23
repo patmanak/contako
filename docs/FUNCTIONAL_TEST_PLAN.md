@@ -274,9 +274,26 @@ untouched values independently on each peer:
   authorized account. Repeat after an unsupported authentication method. No
   abandoned initial reservation may block the second login; an established
   owner's retained data MUST remain protected when reauthentication is cancelled.
+- Interrupt a create after Proton accepts it and before its local acknowledgement.
+  Resume ordinary sync and full repair separately. Preserve one local identity
+  and the durable edit, with no duplicate import; resolve any explicit conflict
+  through the normal guarded choice.
+- Where the remote service retains the input, import two distinct contacts sharing
+  a vCard UID. Edit one, then delete the other. Their remote/local identities and
+  owned Android copies MUST remain distinct. If the service rewrites or merges
+  the input, record that variant as unavailable rather than qualifying UID handling.
 - After a platform account-creation refusal, return to the foreground with the
   same permission state. Verify that the retained binding permits account
   creation and projection without restarting the complete Proton import.
+- Edit native phonetic given/middle/family components, then change only a Proton
+  note. Repeat with a family-only phonetic name and an explicit Proton conflict
+  choice. Exact local components and identities MUST survive adoption, restart
+  and a no-change pass; opaque imported extensions remain independently preserved.
+- Add a local custom date and unsupported labels to distinct URL/relation/address
+  values, then change only a Web note. Repeat using the explicit Proton conflict
+  choice. Proven local complements MUST survive; a remotely deleted value MUST
+  remain deleted. Compare the local/owned Android representation separately from
+  fields the Web client can display.
 - Include a single unreadable remote card among healthy cards. Healthy cards
   MUST reach Room and Android; the failed import MUST remain visible and retry
   without rehydrating all unchanged healthy cards. A later repair or deletion
@@ -288,6 +305,9 @@ untouched values independently on each peer:
 - Temporarily deny or fail group-catalog access. Independent contacts MUST
   continue; no group may be deleted from an unavailable catalog. Restore access,
   refresh and verify that retained group intent resumes without reinstallation.
+  Include a contact imported during the outage with per-email group references:
+  known missing memberships MUST recover through verified hydration, without
+  overwriting pending assignments. A no-change pass MUST NOT repeat that hydration.
 
 - Change only a Web note/photo/unknown field, then another local field; public
   directory equality MUST NOT permit a stale upload. Both snapshots survive restart.
@@ -331,6 +351,12 @@ untouched values independently on each peer:
 - For FT-01/FT-17 authentication recovery: retain a blocked group or validation intent,
   then require session renewal or interactive key unlock. The reconnect action
   MUST remain visible, and resolving it MUST preserve the original pending work.
+  Verify immediate notification eligibility even if the earlier non-authentication
+  block already produced a notification; subsequent duplicate alerts remain suppressed.
+- For FT-26 terminal diagnostics: exercise an authorized failure with only a generic
+  final outcome and no detailed failure event. Rotate the journal and restart.
+  The retained record MUST still identify the last work boundary; a later generic
+  banner MUST NOT hide a detailed failure recorded for the relevant pass.
 - For FT-15/FT-07 composite organization rows: save a title without a company,
   then separately replace the title, add/remove a role and add/remove a company.
   Include a second save before the first projection completes. Verify exact

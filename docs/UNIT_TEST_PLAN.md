@@ -41,7 +41,9 @@ invented campaign totals or identical copies at every layer.
   failed storage and disappearance before the first checkpoint.
 - `ContakoSyncPassExecutorTest`, `SyncCompletionClassificationTest`: unavailable
   catalog, remote authentication during a pass, scoped projection/validation
-  errors and fresh completion causes on the next pass.
+  errors and fresh completion causes on the next pass. SQLite, transient I/O,
+  permission and data failures MUST NOT become authentication failures merely
+  because they require action; deferred work MUST remain part of completion.
 - `DurableMutationOrchestratorTest` and the Room execution-store integration
   cases: existing ineligible intent remains part of completion; a new session or
   capability generation permits one guarded recheck of an earlier denial,
@@ -49,7 +51,8 @@ invented campaign totals or identical copies at every layer.
 - `ProtonAccountOwnerIsolationTest`: revoke A with retained mutations, reject B,
   restart and reconnect A; legacy ownership without proof remains quarantined.
   Initial aborted reservations on empty partitions may be released; cancelling
-  same-owner reauthentication MUST preserve an established owner.
+  same-owner reauthentication MUST preserve an established owner. Delayed logout
+  callbacks for an old user, session or token MUST NOT revoke its replacement.
 - `AuthenticationViewModelTest`: session changes and removal of the initiating
   composition MUST NOT cancel explicit sign-out; failures retain a visible retry.
   A refusal before destructive cleanup MUST keep normal actions available when
@@ -62,6 +65,15 @@ invented campaign totals or identical copies at every layer.
 - `SyncPassActionReasonTest`: a current authentication or interactive-unlock
   requirement MUST remain visible above older blocked mutation reasons. Resolving
   authentication MUST expose the retained underlying problem again.
+- `GroupCapabilityCoordinatorTest`: session change, explicit refresh and expiry
+  invalidate cached denials. An older in-flight result MUST NOT restore a denial
+  after invalidation; an ordinary catalog read MUST NOT create a new retry generation.
+- `RetryPolicyTest`, `DurableMutationOrchestratorTest`: a generic DELETE 404 MUST
+  retain reconciliation intent and use bounded retry, without reporting a
+  confirmed deletion. A later targeted absence proof is a distinct boundary.
+- `SyncDiagnosticJournalTest`: when no detailed cause was recorded, a terminal
+  action-required/failure outcome MUST retain the last work boundary through
+  rotation and restart. A generic outcome MUST NOT replace a known detailed cause.
 - `AndroidAccountProvisioningCoordinatorTest`: a retained binding after platform
   refusal still permits foreground recovery under the bound name, without
   repeating first import or recreating a present account.
@@ -69,4 +81,8 @@ invented campaign totals or identical copies at every layer.
   preferred email with distinct existing memberships.
 - `ProtonVCardUnfoldingTest`, `ProtonVCardOpaquePreservationTest`,
   `LocalContactComplementsTest`: bounded linear work, opaque phonetic properties,
-  custom dates and unambiguous local-label preservation.
+  custom dates, complete local phonetic components and unambiguous local-label
+  preservation. Native phonetic deletion MUST NOT be resurrected by adoption.
+  Exercise physical/logical-line, character and UTF-8 byte limits during
+  unfolding, including many tiny continuations. These limits do not qualify
+  native allocations or total process memory.

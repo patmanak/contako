@@ -63,12 +63,26 @@ real notification taps and authenticated navigation remain FT-17 variants.
 Room upgrade coverage MUST include the additive hydration-obligation schema.
 Seed an obligation, reopen the database, verify the retry and remove the account;
 neither upgrade nor failed sign-out may discard unresolved intent.
+SW-02 MUST also exercise persistence failure before cursor acknowledgement,
+healthy-card commits and targeted recovery/confirmed absence. An unfinished import
+MUST NOT advance full repair past canonical reconciliation. Stage/orchestration
+anchors are `IncrementalRemoteHydrationIsolationTest` and
+`ContakoSyncPassExecutorTest`; `RoomRemoteHydrationObligationDeviceTest` covers
+database reopen, rollback and scoped purge of the obligation itself.
 
 Remote reconciliation MUST distinguish two Proton IDs with the same vCard UID.
 Test both arrival orders, unrelated edits and a targeted deletion. UID matching
 may attach only a unique unbound creation with durable ambiguity at its exact
 revision. A generic DELETE 404 MUST retain intent until a targeted absence check
 confirms convergence.
+For a lost creation acknowledgement, obtain `IN_FLIGHT` through the real outbox
+claim without manually setting the reconciliation flag. Reconstruct the pass
+with that creation already present remotely. Both ordinary and repair ordering
+MUST retain one canonical aggregate with its original local identity and a
+recoverable intent; failure to recover durable state MUST precede hydration.
+Include a repair whose projection phase was already checkpointed before the
+create. Fail its first resumed inventory, restart again with the intent already
+recovered, and verify convergence without relying on a nonzero recovery count.
 
 For Android preferred-email transitions, cover first-email addition, last-email
 removal, preferred removal and primary selection, with and without groups. The
@@ -78,6 +92,20 @@ lost acknowledgement, database reopen and a second ordinary edit. After proven
 scope/epoch/ownership, an interrupted baseline/photo failure affects only that
 contact; later contacts and pages MUST still progress without acknowledging the
 unverified row.
+Preference-switch fixtures MUST change the canonical preference selected by the
+production mapper, not only a secondary boolean flag. Exercise the native
+observation through `applyControlledDelta` before committing the transition.
+
+For local phonetic complements, ingest native given/middle/family changes, adopt
+a remote note-only edit and repeat through an explicit Proton conflict choice.
+Verify the exact local components and identities after Room reopen, Android
+projection and a no-change observation, including a family-only phonetic name.
+Anchor: `RoomPhoneticContactComplementsDeviceTest`.
+Repeat adoption with local custom dates and URL/relation/address labels that
+Proton cannot represent. Preserve only proven local labels on unchanged,
+unambiguous occurrences. Remote value deletion or an explicit remote label MUST
+remain authoritative; do not guess between identical repeated values. Anchor:
+`RoomRemoteCanonicalReconciliationStoreDeviceTest`.
 
 For authentication, cancel an initial TOTP attempt and reject an unsupported
 method before signing in as another user on an empty partition. Contrast this
@@ -103,6 +131,15 @@ a new authentication or interactive-unlock requirement. The publisher MUST expos
 the reconnect action and immediate notification across restart while preserving
 all mutations, import obligations and counters. After reconnecting, the original
 unresolved problem MUST remain actionable.
+
+`RoomMutationRecoveryGenerationDeviceTest` MUST reopen eligible session/capability
+blocks once per recovery generation at the exact retained revision. Preserve
+idempotency, attempt history and reconciliation intent; stale revisions,
+validation, crypto and conflict failures MUST remain blocked. Invalidation during
+the transaction MUST roll it back without consuming the new generation's retry.
+Completion MUST still include blocked/ineligible mutations when no new write is
+attempted, including their authentication category. A following successful pass
+MUST NOT inherit the previous pass's failure counts or cause.
 
 For provisioning recovery, refuse platform creation after the binding commits,
 then accept it on an authenticated foreground return with unchanged permissions.
