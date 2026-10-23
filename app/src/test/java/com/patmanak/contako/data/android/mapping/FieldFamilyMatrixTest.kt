@@ -2,6 +2,8 @@ package com.patmanak.contako.data.android.mapping
 
 import com.patmanak.contako.data.proton.ProtonContactVCardCodec
 import com.patmanak.contako.data.proton.ProtonPlainContactCard
+import com.patmanak.contako.data.proton.ProtonMalformedContactResponse
+import com.patmanak.contako.data.proton.readBoundedUtf8
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.policy.ContactValidation
@@ -14,6 +16,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import okhttp3.ResponseBody.Companion.toResponseBody
 
 class FieldFamilyMatrixTest {
     private val vCardCodec = ProtonContactVCardCodec()
@@ -134,14 +137,27 @@ class FieldFamilyMatrixTest {
     @Test
     fun `FX-C-013 committed malformed oversized encoding parameter and crypto-context vectors fail closed`() {
         val artifacts = listOf(
-            resource("fx-c-013-malformed.vcf"),
-            resource("fx-c-013-invalid-utf8.vcf"),
-            resource("fx-c-013-duplicate-parameters.vcf"),
+            "malformed envelope" to resource("fx-c-013-malformed.vcf"),
+            "conflicting parameters" to resource("fx-c-013-duplicate-parameters.vcf"),
         )
-        artifacts.forEachIndexed { index, raw ->
-            assertTrue(runCatching {
+        artifacts.forEachIndexed { index, (name, raw) ->
+            assertTrue(name, runCatching {
                 decode(FieldFixture("FX-C-013-$index", listOf(ContactCardType.Signed to raw)))
             }.isFailure)
+        }
+        // The text fixture contains EF BF BD: valid UTF-8 encoding of the literal U+FFFD.
+        // A String parser cannot decide whether an earlier, unrelated decoder replaced a byte.
+        val literalReplacement = decode(FieldFixture("FX-C-013-literal-replacement",
+            listOf(ContactCardType.Signed to resource("fx-c-013-valid-replacement-character.vcf"))))
+        assertEquals("Literal replacement �", literalReplacement.displayName)
+        val encodedReplacement = vCardCodec.encode(literalReplacement)
+        assertEquals(literalReplacement.displayName,
+            decodePrepared(literalReplacement.id, encodedReplacement).displayName)
+        listOf(byteArrayOf(0xC3.toByte(), 0x28), byteArrayOf(0xFF.toByte()),
+            byteArrayOf(0xE2.toByte(), 0x82.toByte())).forEachIndexed { index, invalidBytes ->
+            assertTrue("Malformed UTF-8 vector $index must fail at the byte decoding boundary",
+                runCatching { invalidBytes.toResponseBody().use { it.readBoundedUtf8(32) } }
+                    .exceptionOrNull() is ProtonMalformedContactResponse)
         }
         val recipe = resource("fx-c-013-oversized.seed")
         assertTrue(recipe.contains("10485761"))

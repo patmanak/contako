@@ -427,6 +427,86 @@ private fun requireBoundedPlainValue(value: String, maxPlainCardBytes: Int = MAX
 
 private const val MAX_PLAIN_CARD_BYTES = 10 * 1_024 * 1_024
 
+/** Payload-free work counters let regressions verify linear unfolding without timing thresholds. */
+internal data class VCardUnfoldingResult(
+    val lines: List<String>,
+    val scannedCharacters: Int,
+    val appendedCharacters: Int,
+    val physicalLines: Int,
+) {
+    override fun toString(): String = "VCardUnfoldingResult(REDACTED)"
+}
+
+/**
+ * Scan each input character once and append each retained character once. In particular, a PHOTO
+ * folded into many small physical lines MUST NOT repeatedly copy its accumulated logical line.
+ * The physical-line budget also bounds empty lines/continuations before allocating their output.
+ */
+internal fun unfoldBoundedVCard(
+    raw: String,
+    maxBytes: Int = MAX_PLAIN_CARD_BYTES,
+    maxLogicalLineChars: Int = MAX_PLAIN_CARD_BYTES,
+    maxPhysicalLines: Int = 200_000,
+    maxLogicalLines: Int = 50_000,
+): VCardUnfoldingResult {
+    require(maxBytes > 0 && maxLogicalLineChars > 0 && maxPhysicalLines > 0 && maxLogicalLines > 0)
+    fun bounded(condition: Boolean) = requireVCardParse(condition, GatewayContactHydrationCategory.VCARD_PARSE_BOUNDS)
+    // UTF-8 requires at least as many bytes as UTF-16 code units (including surrogate pairs).
+    bounded(raw.length <= maxBytes)
+    val result = mutableListOf<String>()
+    var current: StringBuilder? = null
+    var position = 0
+    var bytes = 0L
+    var appended = 0
+    var physicalLines = 0
+    fun flush() {
+        current?.let {
+            bounded(result.size < maxLogicalLines)
+            result += it.toString()
+        }
+        current = null
+    }
+    fun scanCharacter() {
+        val c = raw[position]
+        bytes += when {
+            c.code < 0x80 -> 1
+            c.code < 0x800 -> 2
+            c.isHighSurrogate() -> if (position + 1 < raw.length && raw[position + 1].isLowSurrogate()) 2 else 1
+            c.isLowSurrogate() -> if (position > 0 && raw[position - 1].isHighSurrogate()) 2 else 1
+            else -> 3
+        }
+        bounded(bytes <= maxBytes)
+        position++
+    }
+    while (position < raw.length) {
+        bounded(++physicalLines <= maxPhysicalLines)
+        val start = position
+        while (position < raw.length && raw[position] != '\r' && raw[position] != '\n') scanCharacter()
+        val end = position
+        if (end > start) {
+            val continuation = current != null && (raw[start] == ' ' || raw[start] == '\t')
+            if (!continuation) {
+                flush()
+                bounded(result.size < maxLogicalLines)
+                current = StringBuilder()
+            }
+            val contentStart = start + if (continuation) 1 else 0
+            val length = end - contentStart
+            val builder = requireNotNull(current)
+            bounded(length <= maxLogicalLineChars - builder.length)
+            builder.append(raw, contentStart, end)
+            appended += length
+        }
+        if (position < raw.length) {
+            val carriageReturn = raw[position] == '\r'
+            scanCharacter()
+            if (carriageReturn && position < raw.length && raw[position] == '\n') scanCharacter()
+        }
+    }
+    flush()
+    return VCardUnfoldingResult(result, position, appended, physicalLines)
+}
+
 /**
  * Bounded canonical vCard mapping. Managed fields are replaced on edit while every unmanaged raw
  * property from the hydrated baseline is retained byte-for-text after line unfolding.
@@ -625,8 +705,6 @@ internal class ProtonContactVCardCodec(
     }
 
     private fun parse(raw: String, preservationNamespace: String): ParsedCard {
-        requireVCardParse(raw.toByteArray(Charsets.UTF_8).size <= MAX_CARD_BYTES,
-            GatewayContactHydrationCategory.VCARD_PARSE_BOUNDS)
         // U+FFFD is valid Unicode and may already be stored in an imported contact.
         // Preserve it literally; byte decoding remains strict at the transport/crypto boundary.
         requireVCardParse(raw.none { it in BIDI_CONTROL_CHARACTERS },
@@ -1333,17 +1411,7 @@ internal class ProtonContactVCardCodec(
         append("\r\nEND:VCARD")
     }
 
-    private fun unfold(raw: String): List<String> {
-        val result = mutableListOf<String>()
-        raw.replace("\r\n", "\n").replace('\r', '\n').split('\n').forEach { line ->
-            if ((line.startsWith(' ') || line.startsWith('\t')) && result.isNotEmpty()) {
-                result[result.lastIndex] += line.drop(1)
-            } else if (line.isNotEmpty()) {
-                result += line
-            }
-        }
-        return result
-    }
+    private fun unfold(raw: String): List<String> = unfoldBoundedVCard(raw).lines
 
     private fun contentLine(line: String, preservationKey: String? = null): ContentLine? {
         val colon = line.indexOfOutsideQuotes(':')
@@ -1507,7 +1575,6 @@ internal class ProtonContactVCardCodec(
 
     private companion object {
         const val MAX_CARDS = 16
-        const val MAX_CARD_BYTES = 10 * 1_024 * 1_024
         const val MAX_LINES = 50_000
         const val MAX_LINE_CHARS = 10 * 1_024 * 1_024
         const val MAX_VALUES = 10_000
@@ -1541,7 +1608,6 @@ internal class ProtonContactVCardCodec(
             "NICKNAME", "NOTE", "URL", "ADR", "ORG", "TITLE", "ROLE", "BDAY",
             "ANNIVERSARY", "LANG", "TZ", "GENDER", "MEMBER", "RELATED",
             "X-ABRELATEDNAMES", "X-ABLABEL", "CATEGORIES", "KEY", "PHOTO", "LOGO",
-            "X-PHONETIC-FIRST-NAME",
         )
         val PROTON_PREFERENCE_KINDS = setOf(
             ContactValueKind.STRUCTURED_NAME,
