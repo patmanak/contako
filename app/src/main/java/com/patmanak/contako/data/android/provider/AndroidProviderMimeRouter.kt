@@ -26,6 +26,7 @@ internal data class GroupMembershipRows(
     }
 }
 
+/** Unmapped MIME rows remain opaque in Android; their presence is not a sync failure. */
 internal data class UnsupportedOwnedRows(
     val rows: List<AndroidOwnedDataRow>,
 )
@@ -81,9 +82,13 @@ internal class AndroidProviderMimeRouter {
             when (row.mimeType) {
                 in CONTACT_MIME_TYPES -> contactRows += row
                 ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE -> groupMembershipRows += row
-                // Observed on Samsung. Preserve this exact opaque MIME in the provider; do not
-                // generalize to other vendor fields or remove it from version/scope checks.
-                "vnd.android.cursor.item/rcs_data" -> providerLocalRows += row
+                // Observed Samsung-local metadata. Preserve these exact opaque MIME types in
+                // the provider, including profile cards attached to ordinary photo edits. They
+                // are neither contact photos nor uploadable fields. Do not generalize to other
+                // vendor fields or remove these rows from version/scope checks.
+                "vnd.android.cursor.item/rcs_data",
+                "vnd.sec.cursor.item/profile_card",
+                -> providerLocalRows += row
                 else -> unsupportedOwnedRows += row
             }
         }
@@ -98,10 +103,13 @@ internal class AndroidProviderMimeRouter {
     private fun fail(category: AndroidProviderMimeRouterFailure): Nothing =
         throw AndroidProviderMimeRouterException(category)
 
-    private companion object {
-        const val MAX_ROWS_PER_CONTACT = 128
+    companion object {
+        private const val MAX_ROWS_PER_CONTACT = 128
 
-        val CONTACT_MIME_TYPES = setOf(
+        fun isManagedMimeType(mime: String): Boolean = mime in CONTACT_MIME_TYPES ||
+            mime == ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE
+
+        private val CONTACT_MIME_TYPES = setOf(
             ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE,
             ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE,
             ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE,

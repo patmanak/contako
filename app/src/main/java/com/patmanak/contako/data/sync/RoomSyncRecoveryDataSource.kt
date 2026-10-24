@@ -14,12 +14,16 @@ import com.patmanak.contako.domain.sync.AccountSyncRunner
 import com.patmanak.contako.domain.sync.SyncRunState
 import com.patmanak.contako.domain.sync.SyncScope
 import com.patmanak.contako.domain.sync.SyncTrigger
+import com.patmanak.contako.domain.sync.SyncAndroidContactIssue
+import com.patmanak.contako.domain.sync.SyncAndroidContactIssueKind
+import com.patmanak.contako.domain.sync.SyncBlockedItem
+import com.patmanak.contako.domain.sync.SyncBlockedItemType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
 
 internal class RoomSyncRecoveryDataSource(
-    database: ContakoDatabase,
+    private val database: ContakoDatabase,
     private val runner: AccountSyncRunner,
     private val networkStateProvider: NetworkStateProvider,
     private val expectedAccount: AccountScope,
@@ -48,15 +52,33 @@ internal class RoomSyncRecoveryDataSource(
             projectionDao.observePendingContactIds(boundAccount(accountId).value),
             outboxDao.observeBlockedContactIds(boundAccount(accountId).value),
             hydrationDao.observe(boundAccount(accountId).value),
-        ) { status, pendingIds, blockedIds, importFailures ->
+            database.androidContactIssueDao().observeCurrentWithContacts(boundAccount(accountId).value),
+        ) { status, pendingIds, blockedIds, importFailures, androidFailures ->
             val snapshot = status?.toDomain() ?: SyncDashboardSnapshot(SyncDashboardState.CURRENT)
+            val issues = androidFailures.map { failure -> SyncAndroidContactIssue(
+                failure.issue.canonicalContactId,
+                if (failure.issue.origin == AndroidContactIssueOrigin.INGEST.name)
+                    SyncAndroidContactIssueKind.ANDROID_INGEST else SyncAndroidContactIssueKind.ANDROID_PROJECTION,
+                failure.displayName, failure.isDeleted,
+            ) }
+            val projectionFailures = issues.filter { it.kind == SyncAndroidContactIssueKind.ANDROID_PROJECTION }
+                .map { it.contactId }
+            val localProblem = when {
+                projectionFailures.isNotEmpty() -> SyncProblem.ANDROID_CONTACTS_PARTIALLY_PROJECTED
+                issues.isNotEmpty() -> SyncProblem.ANDROID_INTEROPERABILITY_DEGRADED
+                else -> null
+            }
             snapshot.copy(
                 // A completed older pass cannot qualify a newly outstanding native copy.
                 state = if (importFailures.isNotEmpty() && snapshot.state != SyncDashboardState.AUTHENTICATION_REQUIRED)
                     SyncDashboardState.BLOCKED
+                    else if (issues.isNotEmpty() && snapshot.state in setOf(SyncDashboardState.CURRENT, SyncDashboardState.PENDING))
+                        if (projectionFailures.isEmpty()) SyncDashboardState.ANDROID_DEGRADED else SyncDashboardState.ANDROID_PARTIAL
                     else if (snapshot.state == SyncDashboardState.CURRENT && pendingIds.isNotEmpty())
                     SyncDashboardState.PENDING else snapshot.state,
-                actionRequiredCount = maxOf(snapshot.actionRequiredCount, importFailures.size),
+                problem = snapshot.problem ?: localProblem,
+                actionRequiredCount = maxOf(snapshot.actionRequiredCount,
+                    (blockedIds + issues.map { it.contactId }).toSet().size + importFailures.size),
                 importProblems = importFailures.map {
                     com.patmanak.contako.domain.sync.SyncImportProblem(it.remoteContactId, it.displayName,
                         when (it.category) {
@@ -65,8 +87,50 @@ internal class RoomSyncRecoveryDataSource(
                             else -> SyncProblem.INTERNAL_FAILURE
                         })
                 },
-                androidPendingContactIds = pendingIds.toSet(), blockedMutationContactIds = blockedIds.toSet(),
+                androidPendingContactIds = (pendingIds + projectionFailures).toSet(),
+                blockedMutationContactIds = blockedIds.toSet(), androidContactIssues = issues,
             )
+        }.combine(outboxDao.observeBlockedItems(boundAccount(accountId).value)) { snapshot, blocked ->
+            val items = blocked.map { item ->
+                SyncBlockedItem(item.aggregateId,
+                    if (item.aggregateType == "GROUP") SyncBlockedItemType.GROUP else SyncBlockedItemType.CONTACT,
+                    item.displayName, item.isDeleted,
+                    when (item.blockedReason) {
+                        "AUTHENTICATION_REQUIRED" -> SyncProblem.AUTHENTICATION_REQUIRED
+                        "INTERACTIVE_AUTHENTICATION_REQUIRED" -> SyncProblem.INTERACTIVE_AUTHENTICATION_REQUIRED
+                        "CRYPTOGRAPHIC_VERIFICATION_FAILED" -> SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED
+                        "VALIDATION_REJECTED" -> SyncProblem.VALIDATION_REJECTED
+                        "GROUP_CAPABILITY_REQUIRED" -> if (item.aggregateType == "CONTACT" &&
+                            item.errorCategory == "PERMISSION_OR_PLAN_DENIED") SyncProblem.REMOTE_PERMISSION_REQUIRED
+                            else SyncProblem.GROUP_CAPABILITY_REQUIRED
+                        "REMOTE_PERMISSION_REQUIRED" -> SyncProblem.REMOTE_PERMISSION_REQUIRED
+                        else -> when {
+                            item.blockedReason?.contains("INVALID") == true ||
+                                item.blockedReason?.contains("MISSING") == true -> SyncProblem.VALIDATION_REJECTED
+                            item.blockedReason?.contains("CONFLICT") == true ||
+                                item.blockedReason?.contains("RECOVERY_REQUIRED") == true -> SyncProblem.CONFLICT_RECOVERY_REQUIRED
+                            else -> SyncProblem.INTERNAL_FAILURE
+                        }
+                    })
+            }
+            val priority = listOf(SyncProblem.AUTHENTICATION_REQUIRED, SyncProblem.INTERACTIVE_AUTHENTICATION_REQUIRED,
+                SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED, SyncProblem.VALIDATION_REJECTED,
+                SyncProblem.GROUP_CAPABILITY_REQUIRED, SyncProblem.REMOTE_PERMISSION_REQUIRED,
+                SyncProblem.CONFLICT_RECOVERY_REQUIRED, SyncProblem.INTERNAL_FAILURE)
+            val blockedProblem = priority.firstOrNull { problem -> items.any { it.problem == problem } }
+            val authentication = snapshot.state == SyncDashboardState.AUTHENTICATION_REQUIRED || blockedProblem in
+                setOf(SyncProblem.AUTHENTICATION_REQUIRED, SyncProblem.INTERACTIVE_AUTHENTICATION_REQUIRED)
+            val identities = items.map { it.type to it.id } + snapshot.androidContactIssues.map { SyncBlockedItemType.CONTACT to it.contactId }
+            snapshot.copy(blockedItems = items,
+                state = when {
+                    authentication -> SyncDashboardState.AUTHENTICATION_REQUIRED
+                    items.isNotEmpty() -> SyncDashboardState.BLOCKED
+                    else -> snapshot.state
+                },
+                problem = if (snapshot.state == SyncDashboardState.AUTHENTICATION_REQUIRED) snapshot.problem
+                    else blockedProblem ?: snapshot.problem,
+                actionRequiredCount = maxOf(snapshot.actionRequiredCount,
+                    identities.toSet().size + snapshot.importProblems.size))
         }
 
     override fun observeRepair(accountId: String): Flow<RepairProgress?> =

@@ -101,6 +101,15 @@ failure is reported. Their presence alone MUST NOT populate the attention list o
 its warning count, including during initial sync. Explicit conflicts and blocked
 uploads MUST remain visible while synchronization is active.
 
+An identified Android ingestion or projection failure MUST retain its contact
+independently of the last successful projection state and the overall sync reason.
+The attention list MUST show the affected contact/group and applicable boundary,
+including pending deletions outside the active directory. Search filters MUST NOT
+hide these items. Contact navigation opens read-only details; displaying an item
+MUST NOT acknowledge or retry it. Only verified recovery clears the corresponding
+failure. Generated technical report text SHOULD remain collapsed until requested;
+export and clearing local history remain separate explicit actions.
+
 ## Images, language and accessibility
 
 Retain preferred-image selection, gallery/LOGO distinction, fallbacks and bounded

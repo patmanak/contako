@@ -12,6 +12,8 @@ import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
 import com.patmanak.contako.domain.repository.ContactRepository
 import com.patmanak.contako.domain.repository.SaveResult
+import com.patmanak.contako.domain.sync.SyncAndroidContactIssue
+import com.patmanak.contako.domain.sync.SyncAndroidContactIssueKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -600,6 +602,120 @@ class ContactsViewModelTest {
         recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.CURRENT)
         advanceUntilIdle()
         assertTrue(model.uiState.value.actionContacts.isEmpty())
+    }
+
+    @Test
+    fun explicitAndroidIngestIssueIdentifiesContactWithoutOutboxOrPendingCopyRegardlessOfGlobalProblem() = runTest(dispatcher) {
+        val affected = contact("ingest-fixture", "Affected", "affected-email", "affected@example.test")
+        val untouched = contact("untouched-fixture", "Untouched", "untouched-email", "untouched@example.test")
+        val recovery = FakeSyncRecoveryDataSource()
+        val model = ContactsViewModel(FakeRepository(listOf(affected, untouched)), recovery)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+
+        for (globalState in listOf(SyncDashboardState.ANDROID_DEGRADED, SyncDashboardState.BLOCKED,
+            SyncDashboardState.AUTHENTICATION_REQUIRED)) {
+            recovery.status.value = SyncDashboardSnapshot(globalState,
+                actionRequiredCount = 1,
+                androidContactIssues = listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_INGEST)))
+            advanceUntilIdle()
+
+            assertTrue(model.uiState.value.pendingContacts.isEmpty())
+            assertTrue(model.uiState.value.androidPendingContacts.isEmpty())
+            assertEquals(0, model.uiState.value.syncDashboard.pendingMutationCount)
+            assertEquals(listOf(affected), model.uiState.value.actionContacts)
+            assertEquals(globalState, model.uiState.value.syncDashboard.state)
+        }
+    }
+
+    @Test
+    fun explicitProjectionIssueRemainsVisibleWhenNoPendingCopyAndRemoteProblemIsBlocked() = runTest(dispatcher) {
+        val affected = contact("clean-ledger-fixture", "Projection fixture", "fixture-email", "fixture@example.test")
+        val recovery = FakeSyncRecoveryDataSource()
+        recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.BLOCKED,
+            actionRequiredCount = 1,
+            problem = com.patmanak.contako.domain.sync.SyncProblem.GROUP_CAPABILITY_REQUIRED,
+            androidContactIssues = listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_PROJECTION)))
+        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        advanceUntilIdle()
+
+        assertTrue(model.uiState.value.androidPendingContacts.isEmpty())
+        assertEquals(listOf(affected), model.uiState.value.actionContacts)
+        assertEquals(com.patmanak.contako.domain.sync.SyncProblem.GROUP_CAPABILITY_REQUIRED,
+            model.uiState.value.syncDashboard.problem)
+    }
+
+    @Test
+    fun explicitAndroidIssuesDoNotPromoteEveryOrdinaryPendingCopyToAttention() = runTest(dispatcher) {
+        val affected = contact("failed-copy", "Affected", "affected-email", "affected@example.test")
+        val waiting = contact("ordinary-copy", "Waiting", "waiting-email", "waiting@example.test")
+        val recovery = FakeSyncRecoveryDataSource()
+        recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.ANDROID_PARTIAL,
+            androidPendingContactIds = setOf(affected.id, waiting.id),
+            androidContactIssues = listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_PROJECTION)))
+        val model = ContactsViewModel(FakeRepository(listOf(affected, waiting)), recovery)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(listOf(affected, waiting), model.uiState.value.androidPendingContacts)
+        assertEquals(listOf(affected), model.uiState.value.actionContacts)
+        assertEquals(1, model.uiState.value.syncDashboard.actionRequiredCount)
+    }
+
+    @Test
+    fun multipleAndroidIssueOriginsForOneContactProduceOneAttentionItem() = runTest(dispatcher) {
+        val affected = contact("duplicate-origin-fixture", "Affected", "fixture-email", "fixture@example.test")
+        val recovery = FakeSyncRecoveryDataSource()
+        recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.ANDROID_DEGRADED,
+            androidContactIssues = listOf(
+                SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_INGEST),
+                SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_PROJECTION),
+                SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_INGEST),
+            ))
+        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(listOf(affected), model.uiState.value.actionContacts)
+        assertEquals(1, model.uiState.value.syncDashboard.actionRequiredCount)
+        assertFalse(model.uiState.value.syncDashboard.toString().contains(affected.id))
+        assertTrue(recovery.status.value!!.androidContactIssues.none { it.toString().contains(affected.id) })
+    }
+
+    @Test
+    fun recoveredAndroidIssueDisappearsWhenCurrentSnapshotHasNoIssue() = runTest(dispatcher) {
+        val affected = contact("recovered-fixture", "Recovered", "fixture-email", "fixture@example.test")
+        val recovery = FakeSyncRecoveryDataSource()
+        recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.ANDROID_DEGRADED,
+            actionRequiredCount = 1,
+            androidContactIssues = listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_INGEST)))
+        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        advanceUntilIdle()
+        assertEquals(listOf(affected), model.uiState.value.actionContacts)
+
+        recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.CURRENT)
+        advanceUntilIdle()
+
+        assertTrue(model.uiState.value.actionContacts.isEmpty())
+        assertEquals(0, model.uiState.value.syncDashboard.actionRequiredCount)
+        assertEquals(listOf(affected), model.uiState.value.contacts)
+    }
+
+    @Test
+    fun directorySearchCannotHideExplicitAndroidContactIssue() = runTest(dispatcher) {
+        val affected = contact("search-hidden-issue", "Affected fixture", "fixture-email", "fixture@example.test")
+        val recovery = FakeSyncRecoveryDataSource()
+        recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.ANDROID_DEGRADED,
+            androidContactIssues = listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_INGEST)))
+        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        model.updateQuery("no-matching-directory-entry")
+        advanceUntilIdle()
+
+        assertTrue(model.uiState.value.contacts.isEmpty())
+        assertEquals(1, model.uiState.value.totalContactCount)
+        assertEquals(listOf(affected), model.uiState.value.actionContacts)
     }
 
     private val dispatcher = StandardTestDispatcher()

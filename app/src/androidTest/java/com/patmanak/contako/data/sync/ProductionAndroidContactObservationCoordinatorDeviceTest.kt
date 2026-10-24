@@ -91,14 +91,61 @@ class ProductionAndroidContactObservationCoordinatorDeviceTest {
     }
 
     @Test
-    fun unsupportedCreatedRowStaysPendingWhileFollowingPhotoCreationCommits() = runBlocking {
+    fun opaqueCreatedRowsPreserveSupportedFieldsAndDurableIntentAcrossRestartWithoutBlockingFollowingContact() = runBlocking {
+        val acknowledged = mutableListOf<Long>()
+        val ack = AndroidContactObservationAcknowledger { _, rawId, _, _, _, _ ->
+            acknowledged += rawId
+            AndroidProviderAcknowledgementResult.Acknowledged
+        }
+        val opaqueBinary = byteArrayOf(1, 3, 5, 7)
+        val opaque = row(10, 103, "vnd.fixture/opaque", opaqueBinary, "Provider-only payload")
+            .copy(canonicalValueId = "untrusted-opaque-claim")
+        val vendor = row(10, 104, "vnd.sec.cursor.item/profile_card", opaqueBinary, "Provider-local payload")
+        val created = observation(10, null).let { it.copy(dataRows = it.dataRows + listOf(
+            row(10, 102, "vnd.android.cursor.item/email_v2", null, "retained@example.test"),
+            opaque, vendor, row(10, 105, "vnd.android.cursor.item/im", null, "Provider IM"),
+        )) }
+        val observedPage = page(created, observation(11, jpeg()))
+        assertEquals(AndroidBoundedPageResult.Applied, coordinator(ack).ingest(scope, observedPage))
+        assertEquals(listOf(10L, 11L), acknowledged)
+        val contactId = requireNotNull(database.androidProjectionLedgerDao()
+            .getByRawContactLocator(account.value, 0, 10)).canonicalContactId
+        val stored = requireNotNull(database.contactDao().get(account.value, contactId)).toDomain()
+        assertEquals("Élodie Straße", stored.displayName)
+        assertEquals(listOf("retained@example.test"), stored.valuesOf(ContactValueKind.EMAIL).map { it.value })
+        assertTrue(stored.values.none { it.value.contains("Provider") || it.id == opaque.canonicalValueId })
+        assertNotNull(database.androidProjectionLedgerDao().getByRawContactLocator(account.value, 0, 11))
+        val intents = database.outboxDao().getAll(account.value)
+        assertEquals(2, intents.size)
+        assertNotNull(database.outboxDao().get(account.value, AggregateType.CONTACT.name, contactId))
+        assertNotNull(database.androidProjectionLedgerDao().getUnifiedObservationCommitReceipt(account.value, contactId))
+
+        database.close()
+        database = ContakoDatabase.create(context, DB)
+        assertEquals(AndroidBoundedPageResult.Applied, coordinator(ack).ingest(scope, observedPage))
+        assertEquals(stored, requireNotNull(database.contactDao().get(account.value, contactId)).toDomain())
+        assertEquals(intents, database.outboxDao().getAll(account.value))
+        assertEquals(contactId, requireNotNull(database.androidProjectionLedgerDao()
+            .getByRawContactLocator(account.value, 0, 10)).canonicalContactId)
+        assertArrayEquals(byteArrayOf(1, 3, 5, 7), opaque.binarySlot)
+        assertArrayEquals(byteArrayOf(1, 3, 5, 7), vendor.binarySlot)
+        assertEquals("Provider-only payload", opaque.stringSlots.first())
+        assertEquals("Provider-local payload", vendor.stringSlots.first())
+    }
+
+    @Test
+    fun knownEmailWithUnexpectedBinaryRemainsUnacknowledgedWithoutStrandingFollowingContact() = runBlocking {
         val acknowledged = mutableListOf<Long>()
         val coordinator = coordinator { _, rawId, _, _, _, _ ->
             acknowledged += rawId
             AndroidProviderAcknowledgementResult.Acknowledged
         }
-        val invalid = observation(10, null).let { it.copy(dataRows = it.dataRows + row(10, 103, "vnd.android.cursor.item/im", null)) }
-        assertEquals(AndroidBoundedPageResult.PartiallyApplied, coordinator.ingest(scope, page(invalid, observation(11, jpeg()))))
+        val malformed = observation(10, null).let { it.copy(dataRows = it.dataRows +
+            row(10, 103, "vnd.android.cursor.item/email_v2", byteArrayOf(1, 3), "retained@example.test")) }
+
+        assertEquals(AndroidBoundedPageResult.PartiallyApplied,
+            coordinator.ingest(scope, page(malformed, observation(11, jpeg()))))
+
         assertEquals(listOf(11L), acknowledged)
         assertNull(database.androidProjectionLedgerDao().getByRawContactLocator(account.value, 0, 10))
         assertNotNull(database.androidProjectionLedgerDao().getByRawContactLocator(account.value, 0, 11))

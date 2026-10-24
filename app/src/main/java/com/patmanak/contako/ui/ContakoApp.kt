@@ -928,7 +928,9 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
         item {
             InfoCard(stringResource(syncStateTitle(state.syncDashboard))) {
                 Text(
-                    stringResource(syncStateBody(state.syncDashboard)),
+                    stringResource(if (state.syncDashboard.androidContactIssues.isNotEmpty() &&
+                        state.syncDashboard.state in setOf(SyncDashboardState.ANDROID_DEGRADED, SyncDashboardState.ANDROID_PARTIAL))
+                        R.string.sync_android_issues_body else syncStateBody(state.syncDashboard)),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 HorizontalDivider(color = statusColor.copy(alpha = 0.35f))
@@ -1006,8 +1008,39 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
         if (blockedContacts.isNotEmpty()) {
             item { Text(stringResource(R.string.sync_state_blocked), style = MaterialTheme.typography.titleMedium) }
             items(blockedContacts, key = { "blocked:${it.id}" }) { contact ->
-                ContactRow(contact, onOpen = { viewModel.openContactFromGroup(contact) })
+                Column {
+                    ContactRow(contact, onOpen = { viewModel.openContactFromGroup(contact) })
+                    Text(stringResource(syncProblemBody(state.syncDashboard.copy(problem =
+                        state.syncDashboard.blockedItems.firstOrNull {
+                            it.type == com.patmanak.contako.domain.sync.SyncBlockedItemType.CONTACT && it.id == contact.id
+                        }?.problem ?: state.syncDashboard.problem))), style = MaterialTheme.typography.bodySmall)
+                    AndroidContactIssueText(contact.id, state.syncDashboard)
+                }
             }
+        }
+        val androidIssueContacts = state.actionContacts.filter { contact ->
+            state.syncDashboard.androidContactIssues.any { it.contactId == contact.id } &&
+                blockedContacts.none { it.id == contact.id } && conflicts.none { it.contactId == contact.id }
+        }
+        if (androidIssueContacts.isNotEmpty()) {
+            item { Text(stringResource(R.string.sync_android_issues_title), style = MaterialTheme.typography.titleMedium) }
+            items(androidIssueContacts, key = { "android-issue:${it.id}" }) { contact ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ContactRow(contact, onOpen = { viewModel.openContactFromGroup(contact) })
+                    AndroidContactIssueText(contact.id, state.syncDashboard)
+                }
+            }
+        }
+        val otherBlockedItems = state.syncDashboard.blockedItems.filter { blocked ->
+            blocked.type == com.patmanak.contako.domain.sync.SyncBlockedItemType.GROUP ||
+                state.actionContacts.none { it.id == blocked.id }
+        }
+        items(otherBlockedItems, key = { "blocked-item:${it.type}:${it.id}" }) { item ->
+            BlockedSyncItemCard(item, state, viewModel)
+        }
+        val retainedAndroidItems = unlistedAndroidIssues(state)
+        items(retainedAndroidItems, key = { "android-retained:${it.contactId}" }) { item ->
+            RetainedAndroidIssueCard(item, state.syncDashboard)
         }
         val waitingContacts = state.pendingContacts.filterNot { it.id in state.syncDashboard.blockedMutationContactIds }
         if (waitingContacts.isNotEmpty()) {
@@ -1016,12 +1049,15 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
                 ContactRow(contact, onOpen = { viewModel.openContactFromGroup(contact) })
             }
         }
-        if (state.androidPendingContacts.isNotEmpty()) {
+        val waitingAndroidContacts = state.androidPendingContacts.filter { contact ->
+            state.syncDashboard.androidContactIssues.none { it.contactId == contact.id }
+        }
+        if (waitingAndroidContacts.isNotEmpty()) {
             item {
-                Text(stringResource(R.string.sync_android_pending_contacts, state.androidPendingContacts.size),
+                Text(stringResource(R.string.sync_android_pending_contacts, waitingAndroidContacts.size),
                     style = MaterialTheme.typography.titleMedium)
             }
-            items(state.androidPendingContacts, key = { "android:${it.id}" }) { contact ->
+            items(waitingAndroidContacts, key = { "android:${it.id}" }) { contact ->
                 ContactRow(contact, onOpen = { viewModel.openContactFromGroup(contact) })
             }
         }
@@ -1098,6 +1134,49 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
         }
         item(key = "local-diagnostics") { DiagnosticSettings(state) }
         item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+@Composable
+private fun AndroidContactIssueText(contactId: String, snapshot: com.patmanak.contako.domain.sync.SyncDashboardSnapshot) {
+    snapshot.androidContactIssues.filter { it.contactId == contactId }.map { it.kind }.distinct().forEach { kind ->
+        Text(stringResource(if (kind == com.patmanak.contako.domain.sync.SyncAndroidContactIssueKind.ANDROID_INGEST)
+            R.string.sync_android_read_failed else R.string.sync_android_write_failed),
+            style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun BlockedSyncItemCard(item: com.patmanak.contako.domain.sync.SyncBlockedItem,
+    state: ContactsUiState, viewModel: ContactsViewModel) {
+    val group = item.type == com.patmanak.contako.domain.sync.SyncBlockedItemType.GROUP
+    InfoCard(item.displayName?.takeIf { it.isNotBlank() } ?: stringResource(if (group) R.string.nav_groups else R.string.nav_contacts)) {
+        Text(stringResource(if (group) R.string.nav_groups else R.string.nav_contacts), style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(syncProblemBody(state.syncDashboard.copy(problem = item.problem))))
+        if (item.isDeleted) {
+            Text(stringResource(R.string.sync_deletion_pending), style = MaterialTheme.typography.bodySmall)
+        } else if (group) {
+            if (!item.displayName.isNullOrBlank()) {
+                TextButton(onClick = { viewModel.openAffectedGroup(item.id) }) {
+                    Text(stringResource(R.string.nav_groups))
+                }
+            }
+        }
+    }
+}
+
+private fun unlistedAndroidIssues(state: ContactsUiState) = state.syncDashboard.androidContactIssues
+    .filter { issue -> state.actionContacts.none { it.id == issue.contactId } &&
+        state.syncDashboard.blockedItems.none { it.type == com.patmanak.contako.domain.sync.SyncBlockedItemType.CONTACT &&
+            it.id == issue.contactId } }
+    .distinctBy { it.contactId }
+
+@Composable
+private fun RetainedAndroidIssueCard(issue: com.patmanak.contako.domain.sync.SyncAndroidContactIssue,
+    snapshot: com.patmanak.contako.domain.sync.SyncDashboardSnapshot) {
+    InfoCard(issue.displayName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.nav_contacts)) {
+        if (issue.isDeleted) Text(stringResource(R.string.sync_deletion_pending))
+        else AndroidContactIssueText(issue.contactId, snapshot)
     }
 }
 
@@ -2891,6 +2970,10 @@ private fun SecondaryScreen(
             }
             SecondaryDestination.ACTIONS -> {
                 val contacts = state.actionContacts
+                val otherBlocked = state.syncDashboard.blockedItems.filter { item ->
+                    item.type == com.patmanak.contako.domain.sync.SyncBlockedItemType.GROUP || contacts.none { it.id == item.id }
+                }
+                val retainedAndroid = unlistedAndroidIssues(state)
                 items(state.syncDashboard.importProblems, key = { "import:${it.remoteId}" }) { failure ->
                     InfoCard(failure.displayName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.nav_contacts)) {
                         Text(stringResource(syncProblemBody(
@@ -2898,7 +2981,9 @@ private fun SecondaryScreen(
                         TextButton(onClick = viewModel::syncNow) { Text(stringResource(R.string.sync_now)) }
                     }
                 }
-                if (state.syncDashboard.actionRequiredCount > 0) {
+                if (state.syncDashboard.actionRequiredCount > 0 &&
+                    (state.syncDashboard.state == SyncDashboardState.AUTHENTICATION_REQUIRED ||
+                        contacts.isEmpty() && otherBlocked.isEmpty() && retainedAndroid.isEmpty() && state.syncDashboard.importProblems.isEmpty())) {
                     item {
                         InfoCard(stringResource(syncStateTitle(state.syncDashboard))) {
                             Text(stringResource(syncProblemBody(state.syncDashboard)))
@@ -2909,7 +2994,14 @@ private fun SecondaryScreen(
                         }
                     }
                 }
-                if (contacts.isEmpty() && state.syncDashboard.actionRequiredCount == 0) {
+                items(otherBlocked, key = { "blocked-item:${it.type}:${it.id}" }) { item ->
+                    BlockedSyncItemCard(item, state, viewModel)
+                }
+                items(retainedAndroid, key = { "android-retained:${it.contactId}" }) { issue ->
+                    RetainedAndroidIssueCard(issue, state.syncDashboard)
+                }
+                if (contacts.isEmpty() && otherBlocked.isEmpty() && retainedAndroid.isEmpty() &&
+                    state.syncDashboard.importProblems.isEmpty() && state.syncDashboard.actionRequiredCount == 0) {
                     item {
                         InfoCard(stringResource(R.string.actions_empty_title)) {
                             Text(
@@ -2919,7 +3011,7 @@ private fun SecondaryScreen(
                         }
                     }
                 } else items(contacts, key = CanonicalContact::id) { contact ->
-                    Card(Modifier.fillMaxWidth().clickable { viewModel.editContact(contact) }) {
+                    Card(Modifier.fillMaxWidth().clickable { viewModel.openContactFromGroup(contact) }) {
                         Row(
                             Modifier.fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -2928,6 +3020,7 @@ private fun SecondaryScreen(
                             ContactImageBadge(contact)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(contact.resolvedDisplayName, fontWeight = FontWeight.SemiBold)
+                                AndroidContactIssueText(contact.id, state.syncDashboard)
                                 if (contact.conflictState != null) {
                                     Text(stringResource(R.string.sync_problem_conflict),
                                         style = MaterialTheme.typography.bodySmall)
@@ -2937,7 +3030,10 @@ private fun SecondaryScreen(
                                         style = MaterialTheme.typography.bodySmall)
                                 }
                                 if (contact.id in state.syncDashboard.blockedMutationContactIds) {
-                                    Text(stringResource(R.string.sync_body_blocked),
+                                    Text(stringResource(syncProblemBody(state.syncDashboard.copy(problem =
+                                        state.syncDashboard.blockedItems.firstOrNull {
+                                            it.type == com.patmanak.contako.domain.sync.SyncBlockedItemType.CONTACT && it.id == contact.id
+                                        }?.problem ?: state.syncDashboard.problem))),
                                         style = MaterialTheme.typography.bodySmall)
                                 }
                                 contact.actionRequiredReasons.forEach { reason ->

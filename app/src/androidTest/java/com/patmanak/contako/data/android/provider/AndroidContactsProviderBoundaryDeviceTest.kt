@@ -6,6 +6,7 @@ import android.accounts.AccountManager
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.provider.ContactsContract
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -32,6 +33,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.yield
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -140,21 +142,158 @@ class AndroidContactsProviderBoundaryDeviceTest {
 
     @Test
     fun projectionPreservesOpaqueRcsRowsAndRejectsConcurrentMetadataChanges() = runBlocking {
+        assertOpaqueProviderLocalRowSurvivesProjection("vnd.android.cursor.item/rcs_data")
+    }
+
+    @Test
+    fun projectionPreservesOpaqueProfileCardAndRejectsConcurrentMetadataChanges() = runBlocking {
+        assertOpaqueProviderLocalRowSurvivesProjection("vnd.sec.cursor.item/profile_card")
+    }
+
+    @Test
+    fun projectionPreservesUnknownVendorRowsWithoutInterpretingClaims() = runBlocking {
+        assertOpaqueProviderLocalRowSurvivesProjection("vnd.example.cursor.item/opaque-fixture")
+    }
+
+    @Test
+    fun projectionPreservesUnmanagedImRows() = runBlocking {
+        assertOpaqueProviderLocalRowSurvivesProjection("vnd.android.cursor.item/im")
+    }
+
+    @Test
+    fun projectionPreservesUnmanagedSipRows() = runBlocking {
+        assertOpaqueProviderLocalRowSurvivesProjection("vnd.android.cursor.item/sip_address")
+    }
+
+    @Test
+    fun projectionPreservesUnmanagedIdentityRows() = runBlocking {
+        assertOpaqueProviderLocalRowSurvivesProjection("vnd.android.cursor.item/identity")
+    }
+
+    @Test
+    fun opaqueOversizedTextDoesNotEnterManagedReadBounds() = runBlocking {
+        assertOpaqueProviderLocalRowSurvivesProjection(
+            "vnd.example.cursor.item/custom-text-fixture", opaqueData1 = "x".repeat(20 * 1_024),
+        )
+    }
+
+    @Test
+    fun opaqueData1BlobIsNeverConvertedToTextOrCopiedIntoObservation() = runBlocking {
+        assertOpaqueProviderLocalRowSurvivesProjection(
+            "vnd.example.cursor.item/custom-binary-fixture",
+            opaqueData1Blob = ByteArray(64 * 1_024) { (it % 251).toByte() },
+        )
+    }
+
+    @Test
+    fun managedPayloadReadsSpanChunksAndRetainExactAccountRows() {
+        val firstRaw = insertRawContact(primaryAccount, SOURCE_ID)
+        val secondRaw = insertRawContact(primaryAccount, "second-fixture-source")
+        val foreignRaw = insertRawContact(foreignAccount, FOREIGN_SOURCE_ID)
+        insertStructuredName(foreignAccount, foreignRaw, "Foreign fixture")
+        val expected = buildMap<Long, Pair<Long, String>> {
+            listOf(firstRaw, secondRaw).forEach { raw ->
+                repeat(70) { index ->
+                    val value = "Managed fixture $index"
+                    val uri = requireNotNull(context.contentResolver.insert(
+                        syncAdapterUri(ContactsContract.Data.CONTENT_URI, primaryAccount),
+                        ContentValues().apply {
+                            put(ContactsContract.Data.RAW_CONTACT_ID, raw)
+                            put(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE)
+                            put(ContactsContract.Data.DATA1, value)
+                        },
+                    ))
+                    put(ContentUris.parseId(uri), raw to value)
+                }
+            }
+        }
+        val rows = AndroidContactsProviderReader(context.contentResolver).readDataRows(
+            AndroidProviderAccountName(primaryAccount.name), setOf(firstRaw, secondRaw),
+        )
+        assertEquals(140, rows.size)
+        assertEquals(expected.keys, rows.map { it.dataRowId }.toSet())
+        rows.forEach { row ->
+            assertEquals(expected.getValue(row.dataRowId).first, row.rawContactId)
+            assertEquals(expected.getValue(row.dataRowId).second, row.stringSlots[0])
+        }
+    }
+
+    @Test
+    fun opaqueRowsStillCountTowardPerContactCardinalityBound() {
+        val raw = insertRawContact(primaryAccount, SOURCE_ID)
+        repeat(129) {
+            requireNotNull(context.contentResolver.insert(
+                syncAdapterUri(ContactsContract.Data.CONTENT_URI, primaryAccount),
+                ContentValues().apply {
+                    put(ContactsContract.Data.RAW_CONTACT_ID, raw)
+                    put(ContactsContract.Data.MIMETYPE, "vnd.example.cursor.item/cardinality-fixture")
+                },
+            ))
+        }
+        val failure = assertThrows(AndroidProviderBoundaryException::class.java) {
+            AndroidContactsProviderReader(context.contentResolver).readDataRows(
+                AndroidProviderAccountName(primaryAccount.name), setOf(raw),
+            )
+        }
+        assertEquals(AndroidProviderFailureCategory.BOUND_EXCEEDED, failure.category)
+    }
+
+    private suspend fun assertOpaqueProviderLocalRowSurvivesProjection(
+        opaqueMime: String,
+        opaqueData1: String = "synthetic-opaque-provider-metadata",
+        opaqueData1Blob: ByteArray? = null,
+    ) {
         val rawId = insertRawContact(primaryAccount, SOURCE_ID)
         val account = AndroidProviderAccountName(primaryAccount.name)
         val reader = AndroidContactsProviderReader(context.contentResolver)
         val writer = AndroidContactsProviderWriter(context.contentResolver)
         val mapper = CanonicalAndroidContactMapper()
-        val rcsUri = requireNotNull(context.contentResolver.insert(
+        val opaqueBytes = byteArrayOf(1, 2, 3)
+        val opaqueUri = requireNotNull(context.contentResolver.insert(
             syncAdapterUri(ContactsContract.Data.CONTENT_URI, primaryAccount),
             ContentValues().apply {
                 put(ContactsContract.Data.RAW_CONTACT_ID, rawId)
-                put(ContactsContract.Data.MIMETYPE, "vnd.android.cursor.item/rcs_data")
-                put(ContactsContract.Data.DATA1, "synthetic-opaque-rcs")
+                put(ContactsContract.Data.MIMETYPE, opaqueMime)
+                if (opaqueData1Blob == null) put(ContactsContract.Data.DATA1, opaqueData1)
+                else put(ContactsContract.Data.DATA1, opaqueData1Blob)
                 put(ContactsContract.Data.DATA2, "7")
+                put(ContactsContract.Data.DATA15, opaqueBytes)
+                // These are opaque metadata, including values invalid for Contako claims.
+                put("data_sync1", "x".repeat(4_097))
+                put("data_sync2", "not-a-canonical-order")
+                put("data_sync3", "x".repeat(17 * 1_024))
             },
         ))
         val retained = reader.readDataRows(account, setOf(rawId)).single()
+        assertEquals(null, retained.canonicalValueId)
+        assertEquals(null, retained.canonicalOrder)
+        assertTrue(!retained.canonicalOrderMalformed)
+        assertEquals(null, retained.linkedValueIdsEncoding)
+        assertTrue(retained.stringSlots.all { it == null })
+        assertEquals(null, retained.binarySlot)
+        fun assertOpaquePayloadUnchanged() {
+            context.contentResolver.query(
+                ContactsContract.Data.CONTENT_URI,
+                arrayOf(ContactsContract.Data.DATA1, ContactsContract.Data.DATA2, ContactsContract.Data.DATA15,
+                    "data_sync1", "data_sync2", "data_sync3"),
+                "${ContactsContract.Data._ID} = ? AND ${ContactsContract.Data.RAW_CONTACT_ID} = ? AND " +
+                    "${ContactsContract.Data.MIMETYPE} = ?",
+                arrayOf(ContentUris.parseId(opaqueUri).toString(), rawId.toString(), opaqueMime), null,
+            )!!.use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                if (opaqueData1Blob == null) assertEquals(opaqueData1, cursor.getString(0))
+                else {
+                    assertEquals(Cursor.FIELD_TYPE_BLOB, cursor.getType(0))
+                    assertArrayEquals(opaqueData1Blob, cursor.getBlob(0))
+                }
+                assertEquals("7", cursor.getString(1))
+                assertArrayEquals(opaqueBytes, cursor.getBlob(2))
+                assertEquals("x".repeat(4_097), cursor.getString(3))
+                assertEquals("not-a-canonical-order", cursor.getString(4))
+                assertEquals("x".repeat(17 * 1_024), cursor.getString(5))
+                assertTrue(!cursor.moveToNext())
+            }
+        }
         val original = fixtureContact()
         val edited = original.copy(values = original.values.map {
             if (it.id == EMAIL_VALUE_ID) it.copy(value = "changed@example.test") else it
@@ -168,8 +307,9 @@ class AndroidContactsProviderBoundaryDeviceTest {
                 AndroidExpectedSourceIdentity.Present(SOURCE_ID), SOURCE_ID, plan)
                 is AndroidProviderProjectionResult.Applied)
             val route = AndroidProviderMimeRouter().route(rawId, reader.readDataRows(account, setOf(rawId)))
-            assertEquals(listOf(retained), route.providerLocalRows.rows)
-            assertTrue(route.unsupportedOwnedRows.rows.isEmpty())
+            assertEquals(listOf(retained), route.providerLocalRows.rows + route.unsupportedOwnedRows.rows)
+            assertTrue(route.contactRows.rows.none { it.dataRowId == retained.dataRowId })
+            assertOpaquePayloadUnchanged()
             current = plan.desired.copy(rows = plan.desired.rows.map { row ->
                 row.copy(identity = row.identity.copy(providerRowId = route.contactRows.rows.single {
                     it.canonicalValueId == row.identity.canonicalValueId
@@ -182,10 +322,11 @@ class AndroidContactsProviderBoundaryDeviceTest {
             writer.applyProjectionPlan(account, rawId, before.version,
                 AndroidExpectedSourceIdentity.Present(SOURCE_ID), SOURCE_ID, noChange))
         assertEquals(before, reader.readRawContactPage(account).contacts.single())
+        assertOpaquePayloadUnchanged()
         // Even an opaque metadata change must invalidate a stale observation/acknowledgement.
         context.contentResolver.update(ContactsContract.Data.CONTENT_URI,
             ContentValues().apply { put(ContactsContract.Data.DATA2, "8") },
-            "${ContactsContract.Data._ID} = ?", arrayOf(ContentUris.parseId(rcsUri).toString()))
+            "${ContactsContract.Data._ID} = ?", arrayOf(ContentUris.parseId(opaqueUri).toString()))
         assertEquals(AndroidProviderProjectionResult.ReplanRequired,
             writer.applyProjectionPlan(account, rawId, before.version,
                 AndroidExpectedSourceIdentity.Present(SOURCE_ID), SOURCE_ID, noChange))

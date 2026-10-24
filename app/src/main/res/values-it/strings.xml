@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sync_android_issues_title">Problemi con i contatti del telefono</string>
+    <string name="sync_android_issues_body">Alcune modifiche non sono state scambiate con Android. I contatti interessati sono elencati sotto.</string>
+    <string name="sync_android_read_failed">Impossibile leggere le modifiche del telefono. Restano salvate nei contatti Android.</string>
+    <string name="sync_android_write_failed">Impossibile aggiornare la copia Android. Il contatto resta salvato in Contako.</string>
+    <string name="sync_deletion_pending">La cancellazione è in attesa di sincronizzazione.</string>
+    <string name="diagnostics_show_details">Mostra rapporto tecnico</string>
+    <string name="diagnostics_hide_details">Nascondi rapporto tecnico</string>
     <string name="editor_add_field">Aggiungi un campo</string>
     <string name="editor_email_groups">Gestisci i gruppi delle email</string>
     <string name="field_options">Opzioni del campo</string>
@@ -51,7 +58,7 @@
     <string name="nav_sync">Sincronizzazione</string>
     <string name="nav_account">Account</string>
     <string name="nav_settings">Impostazioni impostazioni</string>
-    <string name="nav_actions">Contatti che richiedono azione</string>
+    <string name="nav_actions">Elementi che richiedono attenzione</string>
     <string name="nav_help">Aiuto e limitazioni note</string>
     <string name="nav_about">Informazioni</string>
     <string name="account_menu">Menu account aperto</string>

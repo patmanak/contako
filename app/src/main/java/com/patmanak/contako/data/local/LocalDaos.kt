@@ -30,6 +30,18 @@ internal data class EmailMembershipRepairCandidate(
     override fun toString() = "EmailMembershipRepairCandidate(REDACTED)"
 }
 
+/** Private presentation data only; never serialized to logs or diagnostic reports. */
+internal data class BlockedSyncItemRecord(
+    @ColumnInfo(name = "aggregate_type") val aggregateType: String,
+    @ColumnInfo(name = "aggregate_id") val aggregateId: String,
+    @ColumnInfo(name = "display_name") val displayName: String?,
+    @ColumnInfo(name = "is_deleted") val isDeleted: Boolean,
+    @ColumnInfo(name = "blocked_reason") val blockedReason: String?,
+    @ColumnInfo(name = "error_category") val errorCategory: String?,
+) {
+    override fun toString() = "BlockedSyncItemRecord(REDACTED, aggregateType=$aggregateType)"
+}
+
 @Dao
 internal interface ContactDao {
     @Query("""
@@ -56,6 +68,10 @@ internal interface ContactDao {
     @Transaction
     @Query("SELECT * FROM contacts WHERE account_id = :accountId AND id = :contactId")
     suspend fun get(accountId: String, contactId: String): ContactWithValues?
+
+    /** Metadata-only lookups must not materialize photo/vCard values. */
+    @Query("SELECT * FROM contacts WHERE account_id = :accountId AND id = :contactId")
+    suspend fun getEntity(accountId: String, contactId: String): ContactEntity?
 
     @Transaction
     @Query("SELECT * FROM contacts WHERE account_id = :accountId AND id IN (:contactIds)")
@@ -265,6 +281,22 @@ internal interface OutboxDao {
         ORDER BY created_at_epoch_millis, aggregate_id
     """)
     fun observeBlockedContactIds(accountId: String): Flow<List<String>>
+
+    @Query("""
+        SELECT o.aggregate_type, o.aggregate_id,
+            CASE WHEN o.aggregate_type = 'CONTACT'
+                THEN COALESCE(NULLIF(c.display_name, ''), TRIM(c.first_name || ' ' || c.last_name)) ELSE g.name END AS display_name,
+            COALESCE(CASE WHEN o.aggregate_type = 'CONTACT' THEN c.is_deleted ELSE g.is_deleted END, 0) AS is_deleted,
+            o.blocked_reason, o.error_category
+        FROM outbox_mutations o
+        LEFT JOIN contacts c ON o.account_id = c.account_id AND o.aggregate_id = c.id
+            AND o.aggregate_type = 'CONTACT'
+        LEFT JOIN contact_groups g ON o.account_id = g.account_id AND o.aggregate_id = g.id
+            AND o.aggregate_type = 'GROUP'
+        WHERE o.account_id = :accountId AND (o.state = 'ACTION_REQUIRED' OR o.blocked_reason IS NOT NULL)
+        ORDER BY o.created_at_epoch_millis, o.aggregate_type, o.aggregate_id
+    """)
+    fun observeBlockedItems(accountId: String): Flow<List<BlockedSyncItemRecord>>
 
     @Query(
         """
@@ -1155,6 +1187,17 @@ internal interface AndroidProviderIdentityDao {
         rawContactLocator: Long,
         dataRowLocator: Long,
     ): List<AndroidProviderRowBindingEntity>
+
+    @Query("""
+        SELECT EXISTS(SELECT 1 FROM android_provider_row_bindings
+            WHERE account_id = :accountId AND canonical_contact_id = :canonicalContactId
+                AND provider_epoch = :providerEpoch AND raw_contact_locator = :rawContactLocator
+                AND data_row_locator IN (:dataRowLocators) AND state = 'ATTACHED')
+    """)
+    fun hasAttachedBindingsAtLocators(
+        accountId: String, canonicalContactId: String, providerEpoch: Long,
+        rawContactLocator: Long, dataRowLocators: List<Long>,
+    ): Boolean
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     fun insertOwners(owners: List<AndroidProviderIdentityOwnerEntity>)

@@ -139,6 +139,26 @@ class RoomBoundedAndroidProjectionCoordinatorDeviceTest {
         assertEquals(AndroidBoundedPageResult.PartiallyApplied, coordinator.projectPage(CONTEXT, null).second)
         assertEquals(1, calls)
         assertEquals(before, database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT))
+        val failure = requireNotNull(database.androidContactIssueDao().get(
+            ACCOUNT.value, CONTACT, AndroidContactIssueOrigin.PROJECTION.name,
+        ))
+        assertEquals(CONTEXT.providerEpoch, failure.providerEpoch)
+        assertEquals("REPAIR_REQUIRED", failure.reason)
+        database.close()
+        database = ContakoDatabase.create(context, DB)
+        assertEquals(failure, database.androidContactIssueDao().get(
+            ACCOUNT.value, CONTACT, AndroidContactIssueOrigin.PROJECTION.name,
+        ))
+        // A later current presence proof clears presentation without authorizing a write.
+        val verified = RoomBoundedAndroidProjectionCoordinator(database, { _, _ ->
+            error("A current clean copy must not be rewritten")
+        }, presenceVerifier = AndroidCleanProjectionPresenceVerifier { _, candidates ->
+            candidates.map { it.canonicalContactId }.toSet()
+        })
+        assertEquals(AndroidBoundedPageResult.Applied, verified.projectPage(CONTEXT, null).second)
+        assertEquals(null, database.androidContactIssueDao().get(
+            ACCOUNT.value, CONTACT, AndroidContactIssueOrigin.PROJECTION.name,
+        ))
     }
 
     @Test fun convergedDetachedDeletionDoesNotRequireProviderPresence() = runBlocking {

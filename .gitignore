@@ -39,3 +39,7 @@ AGENTS.local.md
 AGENTS.override.md
 .agent-local/
 .device-coordination/
+
+# Local conversation attachments and generated distribution copies
+/.codex-remote-attachments/
+/output/

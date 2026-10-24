@@ -2,7 +2,7 @@
 
 Features and improvements by version.
 
-## Unreleased
+## 0.10.2
 
 - Keep verified contacts progressing when another remote card cannot be read;
   retain the rejected card as a durable, visible retry item.
@@ -17,12 +17,18 @@ Features and improvements by version.
 - Require targeted absence proof after an ambiguous remote deletion; distinguish
   authentication, storage, validation and Android projection failures.
 - Bound vCard unfolding work and retain terminal diagnostic context after rotation.
-
+- Preserve unmapped Android fields without blocking supported contact/photo edits;
+  keep their opaque content in Android without uploading it to Proton.
+- Recover photo rows recreated by native editors without Contako's identity/order
+  markers, while retaining exact row ownership and write verification.
+- Identify affected contacts and groups in synchronization errors, including pending
+  deletions, and retain Android failure details across restart and other sync errors.
 - Include a rotating, persistent local sync history in manually exported
   diagnostics: UTC/process-relative timings, request triggers, execution stages,
   known error/field categories, Android-copy backlog and retained failure context.
 - Allow clearing local diagnostic history without removing exported documents;
   report history-storage failures without changing synchronization behavior.
+- Keep generated technical reports expandable within the synchronization page.
 
 ## 0.10.1
 

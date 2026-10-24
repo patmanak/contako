@@ -40,8 +40,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AndroidGroupProviderWriteJournalEntity::class,
         AndroidPhotoProviderWriteJournalEntity::class,
         AndroidPhotoProjectionReceiptEntity::class,
+        AndroidContactIssueEntity::class,
     ],
-    version = 20,
+    version = 21,
     exportSchema = true,
 )
 internal abstract class ContakoDatabase : RoomDatabase() {
@@ -58,6 +59,7 @@ internal abstract class ContakoDatabase : RoomDatabase() {
     abstract fun androidProjectionLedgerDao(): AndroidProjectionLedgerDao
     abstract fun androidGroupProjectionDao(): AndroidGroupProjectionDao
     abstract fun androidProviderIdentityDao(): AndroidProviderIdentityDao
+    abstract fun androidContactIssueDao(): AndroidContactIssueDao
 
     companion object {
         const val DATABASE_NAME = "contako.db"
@@ -85,8 +87,25 @@ internal abstract class ContakoDatabase : RoomDatabase() {
                     MIGRATION_17_18,
                     MIGRATION_18_19,
                     MIGRATION_19_20,
+                    MIGRATION_20_21,
                 )
                 .build()
+
+        val MIGRATION_20_21: Migration = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `android_contact_issues` (
+                        `account_id` TEXT NOT NULL, `canonical_contact_id` TEXT NOT NULL,
+                        `origin` TEXT NOT NULL, `provider_epoch` INTEGER NOT NULL,
+                        `canonical_revision` INTEGER NOT NULL, `reason` TEXT NOT NULL,
+                        PRIMARY KEY(`account_id`, `canonical_contact_id`, `origin`),
+                        FOREIGN KEY(`account_id`, `canonical_contact_id`)
+                        REFERENCES `contacts`(`account_id`, `id`)
+                        ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+            }
+        }
 
         val MIGRATION_19_20: Migration = object : Migration(19, 20) {
             override fun migrate(db: SupportSQLiteDatabase) {

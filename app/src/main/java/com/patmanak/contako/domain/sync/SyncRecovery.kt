@@ -21,6 +21,27 @@ data class SyncImportProblem(val remoteId: String, val displayName: String?, val
     override fun toString() = "SyncImportProblem(REDACTED, problem=$problem)"
 }
 
+enum class SyncAndroidContactIssueKind { ANDROID_INGEST, ANDROID_PROJECTION }
+
+/** Local UI identity only. This is neither a canonical validation error nor diagnostic data. */
+data class SyncAndroidContactIssue(val contactId: String, val kind: SyncAndroidContactIssueKind,
+    val displayName: String? = null, val isDeleted: Boolean = false) {
+    override fun toString() = "SyncAndroidContactIssue(REDACTED, kind=$kind)"
+}
+
+enum class SyncBlockedItemType { CONTACT, GROUP }
+
+/** Includes retained deletion intent, whose entity is intentionally absent from the directory. */
+data class SyncBlockedItem(
+    val id: String,
+    val type: SyncBlockedItemType,
+    val displayName: String?,
+    val isDeleted: Boolean,
+    val problem: SyncProblem,
+) {
+    override fun toString() = "SyncBlockedItem(REDACTED, type=$type, isDeleted=$isDeleted, problem=$problem)"
+}
+
 data class SyncDashboardSnapshot(
     val state: SyncDashboardState,
     val pendingMutationCount: Int = 0,
@@ -32,6 +53,10 @@ data class SyncDashboardSnapshot(
     /** Local UI locators for blocked Proton writes; never exported or logged. */
     val blockedMutationContactIds: Set<String> = emptySet(),
     val importProblems: List<SyncImportProblem> = emptyList(),
+    /** Exact failed Android boundaries, independent of the account's highest-priority banner. */
+    val androidContactIssues: List<SyncAndroidContactIssue> = emptyList(),
+    /** Private names/identities for blocked groups and deleted/missing directory entries. */
+    val blockedItems: List<SyncBlockedItem> = emptyList(),
 ) {
     override fun toString(): String = "SyncDashboardSnapshot(state=$state, pendingMutationCount=$pendingMutationCount, " +
         "actionRequiredCount=$actionRequiredCount, problem=$problem, androidPendingCount=${androidPendingContactIds.size}, " +

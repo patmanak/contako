@@ -12,6 +12,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +45,7 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
     val scope = rememberCoroutineScope()
     var exporting by remember { mutableStateOf(false) }
     var pendingExport by remember { mutableStateOf<LocalDiagnosticReport?>(null) }
+    var showTechnicalReport by remember { mutableStateOf(false) }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         val selectedReport = pendingExport
         pendingExport = null
@@ -109,6 +111,7 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
                     generationFailed = true
                     null
                 }
+                showTechnicalReport = false
                 exportSucceeded = null
             },
         ) { Text(stringResource(R.string.diagnostics_generate)) }
@@ -118,7 +121,10 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
                 Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(generated.content, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { showTechnicalReport = !showTechnicalReport }) {
+                    Text(stringResource(if (showTechnicalReport) R.string.diagnostics_hide_details else R.string.diagnostics_show_details))
+                }
+                if (showTechnicalReport) Text(generated.content, style = MaterialTheme.typography.bodySmall)
                 Button(enabled = !exporting, onClick = {
                     pendingExport = generated
                     exporting = true

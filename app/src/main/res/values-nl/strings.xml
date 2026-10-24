@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sync_android_issues_title">Problemen met telefooncontacten</string>
+    <string name="sync_android_issues_body">Sommige wijzigingen konden niet met Android worden uitgewisseld. De betrokken contacten staan hieronder.</string>
+    <string name="sync_android_read_failed">Wijzigingen op de telefoon konden niet worden gelezen. Ze blijven opgeslagen in Android-contacten.</string>
+    <string name="sync_android_write_failed">De Android-kopie kon niet worden bijgewerkt. Het contact blijft opgeslagen in Contako.</string>
+    <string name="sync_deletion_pending">De verwijdering wacht op synchronisatie.</string>
+    <string name="diagnostics_show_details">Technisch rapport tonen</string>
+    <string name="diagnostics_hide_details">Technisch rapport verbergen</string>
     <string name="editor_add_field">Veld toevoegen</string>
     <string name="editor_email_groups">E-mailgroepen beheren</string>
     <string name="field_options">Veldopties</string>
@@ -51,7 +58,7 @@
     <string name="nav_sync">Synchroniseren</string>
     <string name="nav_account">Account</string>
     <string name="nav_settings">Instellingen</string>
-    <string name="nav_actions">Contacten die actie vereisen</string>
+    <string name="nav_actions">Onderdelen die aandacht vereisen</string>
     <string name="nav_help">Hulp en bekende beperkingen</string>
     <string name="nav_about">Over</string>
     <string name="account_menu">Accountmenu openen</string>

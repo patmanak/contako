@@ -276,9 +276,12 @@ internal class AndroidContactsProviderReader(
             .appendQueryParameter(ContactsContract.LIMIT_PARAM_KEY, requested.toString())
             .build()
         val budget = AndroidProviderReadBudget(MAX_DATA_QUERY_BYTES)
-        val rowsWithoutPhotos = query(
+        // Never project opaque DATA columns into a CursorWindow: an OEM/custom row can
+        // contain a large BLOB even in DATA1. Classify bounded metadata before querying
+        // any managed payload or claim.
+        val metadata = query(
             uri = uri,
-            projection = DATA_PROJECTION,
+            projection = DATA_METADATA_PROJECTION,
             selection = "${ContactsContract.RawContacts.ACCOUNT_NAME} = ? AND " +
                 "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND " +
                 "${ContactsContract.Data.RAW_CONTACT_ID} IN ($placeholders)",
@@ -289,11 +292,58 @@ internal class AndroidContactsProviderReader(
             }.toTypedArray(),
             sortOrder = "${ContactsContract.Data.RAW_CONTACT_ID} ASC, ${ContactsContract.Data._ID} ASC",
             maximumRows = requested,
-        ) { cursor -> cursor.toOwnedDataRow(budget) }
-        if (rowsWithoutPhotos.size > maximumRows) {
+        ) { cursor -> cursor.toDataRowMetadata(budget) }
+        if (metadata.size > maximumRows ||
+            metadata.groupingBy(AndroidOwnedDataRow::rawContactId).eachCount().values.any { it > MAX_DATA_ROWS_PER_CONTACT }
+        ) {
             throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.BOUND_EXCEEDED)
         }
-        return rowsWithoutPhotos.map { row ->
+        if (metadata.any { it.rawContactId !in rawContactIds } ||
+            metadata.map(AndroidOwnedDataRow::dataRowId).distinct().size != metadata.size
+        ) throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.ACCOUNT_SCOPE_MISMATCH)
+        val managed = metadata.filter { AndroidProviderMimeRouter.isManagedMimeType(it.mimeType) }
+        val payloadsById = mutableMapOf<Long, AndroidOwnedDataRow>()
+        managed.chunked(MAX_MANAGED_PAYLOAD_ROWS).forEach { chunk ->
+            val expectedById = chunk.associateBy(AndroidOwnedDataRow::dataRowId)
+            // Pin MIME as well as ID/raw scope. If a row changes type after phase one,
+            // this query MUST NOT load its newly opaque payload before detecting the race.
+            val exactRows = chunk.joinToString(" OR ") {
+                "(${ContactsContract.Data._ID} = ? AND ${ContactsContract.Data.RAW_CONTACT_ID} = ? AND " +
+                    "${ContactsContract.Data.MIMETYPE} = ?)"
+            }
+            val payloads = query(
+                uri = ContactsContract.Data.CONTENT_URI.buildUpon()
+                    .appendQueryParameter(ContactsContract.LIMIT_PARAM_KEY, (chunk.size + 1).toString()).build(),
+                projection = DATA_PROJECTION,
+                selection = "${ContactsContract.RawContacts.ACCOUNT_NAME} = ? AND " +
+                    "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND ($exactRows)",
+                selectionArgs = buildList {
+                    add(accountName.value)
+                    add(ContakoAndroidAccountContract.ACCOUNT_TYPE)
+                    chunk.forEach { row ->
+                        add(row.dataRowId.toString())
+                        add(row.rawContactId.toString())
+                        add(row.mimeType)
+                    }
+                }.toTypedArray(),
+                sortOrder = "${ContactsContract.Data.RAW_CONTACT_ID} ASC, ${ContactsContract.Data._ID} ASC",
+                maximumRows = chunk.size + 1,
+            ) { cursor ->
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.Data._ID))
+                val expected = expectedById[id]
+                    ?: throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.ACCOUNT_SCOPE_MISMATCH)
+                if (cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.Data.RAW_CONTACT_ID)) != expected.rawContactId ||
+                    cursor.boundedString(ContactsContract.Data.MIMETYPE, MAX_MIME_BYTES) != expected.mimeType
+                ) throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.ACCOUNT_SCOPE_MISMATCH)
+                cursor.toOwnedDataRow(budget)
+            }
+            if (payloads.map(AndroidOwnedDataRow::dataRowId).toSet() != expectedById.keys ||
+                payloads.size != chunk.size
+            ) throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PROVIDER_UNAVAILABLE)
+            payloads.forEach { row -> payloadsById[row.dataRowId] = row }
+        }
+        return metadata.map { metadataRow ->
+            val row = payloadsById[metadataRow.dataRowId] ?: metadataRow
             if (row.mimeType == ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE) {
                 row.copy(binarySlot = readBoundedPhoto(accountName, row.rawContactId, budget))
             } else {
@@ -462,7 +512,27 @@ internal class AndroidContactsProviderReader(
             isSuperPrimary = getInt(getColumnIndexOrThrow(ContactsContract.Data.IS_SUPER_PRIMARY)) != 0,
             stringSlots = DATA_STRING_COLUMNS.map { column -> boundedString(column, MAX_TEXT_BYTES) },
             binarySlot = null,
-        ).also { row -> budget.consume(row.encodedTextBytes()) }
+        // MIME bytes were already charged by the metadata phase; all chunks and photo
+        // streams share the remaining query budget.
+        ).also { row -> budget.consume(row.encodedTextBytes() - mimeType.toByteArray(StandardCharsets.UTF_8).size) }
+    }
+
+    private fun Cursor.toDataRowMetadata(budget: AndroidProviderReadBudget): AndroidOwnedDataRow {
+        val mime = boundedString(ContactsContract.Data.MIMETYPE, MAX_MIME_BYTES)
+            ?: throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.MALFORMED_PROVIDER_DATA)
+        budget.consume(mime.toByteArray(StandardCharsets.UTF_8).size)
+        return AndroidOwnedDataRow(
+            dataRowId = getLong(getColumnIndexOrThrow(ContactsContract.Data._ID)),
+            rawContactId = getLong(getColumnIndexOrThrow(ContactsContract.Data.RAW_CONTACT_ID)),
+            mimeType = mime,
+            canonicalValueId = null,
+            canonicalOrder = null,
+            linkedValueIdsEncoding = null,
+            isPrimary = false,
+            isSuperPrimary = false,
+            stringSlots = List(DATA_STRING_COLUMNS.size) { null },
+            binarySlot = null,
+        )
     }
 
     private fun Cursor.nullableString(column: String): String? =
@@ -566,6 +636,7 @@ internal class AndroidContactsProviderReader(
         const val DEFAULT_RAW_CONTACT_PAGE_SIZE = 100
         const val MAX_RAW_CONTACT_PAGE_SIZE = 100
         const val MAX_DATA_ROWS_PER_CONTACT = 128
+        const val MAX_MANAGED_PAYLOAD_ROWS = 128
         const val MAX_DATA_QUERY_BYTES = 24 * 1_024 * 1_024
         const val MAX_MIME_BYTES = 1_024
         const val MAX_SOURCE_ID_BYTES = 4_096
@@ -601,10 +672,13 @@ internal class AndroidContactsProviderReader(
             ContactsContract.Data.DATA13,
             ContactsContract.Data.DATA14,
         )
+        val DATA_METADATA_PROJECTION = arrayOf(
+            ContactsContract.Data._ID,
+            ContactsContract.Data.RAW_CONTACT_ID,
+            ContactsContract.Data.MIMETYPE,
+        )
         val DATA_PROJECTION = buildList {
-            add(ContactsContract.Data._ID)
-            add(ContactsContract.Data.RAW_CONTACT_ID)
-            add(ContactsContract.Data.MIMETYPE)
+            addAll(DATA_METADATA_PROJECTION)
             add(DATA_SYNC1)
             add(DATA_SYNC2)
             add(DATA_SYNC3)

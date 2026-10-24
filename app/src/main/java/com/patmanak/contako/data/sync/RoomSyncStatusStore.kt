@@ -9,6 +9,7 @@ import com.patmanak.contako.data.gateway.GatewayFailureCategory
 import com.patmanak.contako.domain.sync.SyncPassOutcome
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 
 enum class SyncHealthState { IDLE, CHECKING, PENDING, OFFLINE, ACTION_REQUIRED, FAILED }
 
@@ -201,12 +202,19 @@ internal class RoomSyncPassStatusPublisher(
         val all = database.outboxDao().getAll(accountId)
         val blocked = database.outboxDao().getActionRequired(accountId)
         val failedImports = database.remoteHydrationObligationDao().getAll(accountId)
+        val androidIssues = database.androidContactIssueDao().observeCurrent(accountId).first()
         val external = externalActionReason()
+        val retainedAndroidReason = when {
+            androidIssues.any { it.origin == AndroidContactIssueOrigin.PROJECTION.name } ->
+                SyncActionReason.ANDROID_CONTACTS_PARTIALLY_PROJECTED
+            androidIssues.isNotEmpty() -> SyncActionReason.ANDROID_INTEROPERABILITY_DEGRADED
+            else -> null
+        }
         val reason = syncPassActionReason(
             outcome = outcome,
             outboxReason = blocked.outboxActionReason(),
-            externalReason = external,
-            failedImportReason = if (failedImports.isEmpty()) null
+            externalReason = external ?: retainedAndroidReason,
+            failedImportReason = if (failedImports.isEmpty()) retainedAndroidReason
                 else if (failedImports.any { it.category == "CRYPTOGRAPHIC_VERIFICATION_FAILED" })
                     SyncActionReason.CRYPTOGRAPHIC_VERIFICATION_FAILED else SyncActionReason.INTERNAL_FAILURE,
         )
@@ -216,7 +224,9 @@ internal class RoomSyncPassStatusPublisher(
             SyncStatusUpdate(
                 outcome = outcome,
                 pendingMutationCount = all.size,
-                actionRequiredCount = if (reason == null) 0 else maxOf(1, blocked.size + failedImports.size),
+                actionRequiredCount = if (reason == null) 0 else maxOf(1,
+                    (blocked.map { it.aggregateType to it.aggregateId } +
+                        androidIssues.map { "CONTACT" to it.canonicalContactId }).toSet().size + failedImports.size),
                 actionReason = reason,
                 offline = outcome == SyncPassOutcome.RETRY_WAITING && isOffline(),
             ),

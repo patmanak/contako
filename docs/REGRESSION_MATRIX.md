@@ -29,7 +29,7 @@ a listed test is not a claim that its entire case already passes.
 | F-12 Pending Android copies despite visible contact | C02/C09/C10; full/thumbnail, baseline and date variants | UT-05/07 | SW-06/07 | FT-08/17/26 |
 | F-13 Note upload rejects imported public provenance | C05/C06; clear EMAIL and encrypted note | UT-03/04 | SW-04/05 | FT-04/09 |
 | Private-only Web change missed by public index | C04; unchanged name/emails, note-only edit, restart and failed-read replay | ProtonContactEventReaderTest; ContactInventoryPlannerCasTest | IncrementalRemoteContactStageTest; RoomContactInventoryCheckpointStoreTest | FT-09/21 |
-| F-14 Attention count/list mismatch, empty list or ordinary initial copies shown as errors | C03; pending initial copies, blocked outbox/projection, excluding search filter and recovery | UT-11 | SW-11 | FT-17/26 |
+| F-14 Attention count/list mismatch, empty list or ordinary initial copies shown as errors | C03; identified ingestion/projection failures, old CLEAN ledger, zero outbox, authentication priority, blocked/deleted contacts and groups, excluding search filter, restart and scoped recovery | UT-11; ContactsViewModelTest | SW-11; RoomAndroidContactIssueStoreDeviceTest; RoomSyncStatusStoreDeviceTest | FT-17/26 |
 | F-15 Web equivalent PREF/VALUE rejected | C07/N01/N02; valid repeats vs conflicting parameters | UT-04 | SW-04/05 | FT-09 |
 | F-16 Photo then combined Web edit/name/date relocation | C04/C10; A/B/C, unchanged birthday, pending batch | UT-03/07 | SW-07 | FT-08/09/20 |
 | F-17 Creation uploaded but no Android ledger | C01/C02; no existing provider copy | UT-08 | SW-01/03 | FT-03 |
@@ -38,7 +38,8 @@ a listed test is not a claim that its entire case already passes.
 | F-20 Native dirty row missed with empty outbox | C03; recent prior success, auto-sync enabled/disabled | UT-08 | SW-09 | FT-07/10 |
 | F-21 Native given-name edit overwrites alias | C03; explicit alias vs generated concatenation | UT-01/07 | SW-06 | FT-24 |
 | F-22 Framework interruption crash/battery warning | C01/load-300; cancelled wait, locked unplugged idle | UT-08 | SW-09 | FT-11/20 |
-| Samsung RCS and other opaque MIME rows | C03; own/foreign RCS, clean/dirty, unknown lookalike | UT-07 | SW-06 | FT-07/17/24 |
+| Unmapped Android fields block supported edits | C03/C04; arbitrary vendor/custom/IM/SIP MIME, opaque text/BLOB/claims, photo, create/edit/no-change, concurrent metadata change and formerly managed row changing MIME | UT-07; AndroidProviderMimeRouterTest; ProductionAndroidContactObservationCoordinatorTest | SW-06; RoomAndroidProviderIdentityResolverDeviceTest | FT-07/12P/17/24; preserve opaque rows in Android while supported fields converge |
+| Native photo replacement recreates a row without Contako value/order markers | C04; durable native ingestion followed by unchanged photo projection, exact binding, stale/rebound/conflicting marker controls | UT-07 | SW-06/07 | FT-12P; restore only missing metadata under existing write guards, then converge without repeated writes |
 | Samsung unmatched initial name baseline | C03/C14; separate/aggregated sources and first photo | UT-07 | SW-06/07 | FT-08/24/26 |
 | Legacy binary PHOTO/LOGO invisible | C10; explicit binary declaration, replacement MIME | UT-06 | SW-04/07 | FT-08 |
 | Repair final context stale / no resume action | C04; hydration advances account state | UT-08 | SW-09/11 | FT-20 |

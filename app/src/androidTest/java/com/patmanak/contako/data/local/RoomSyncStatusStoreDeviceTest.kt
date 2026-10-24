@@ -18,7 +18,13 @@ import com.patmanak.contako.domain.sync.AccountSyncRunner
 import com.patmanak.contako.domain.sync.SyncDashboardState
 import com.patmanak.contako.domain.sync.SyncPassExecutor
 import com.patmanak.contako.domain.sync.SyncProblem
+import com.patmanak.contako.domain.sync.SyncAndroidContactIssue
+import com.patmanak.contako.domain.sync.SyncAndroidContactIssueKind
+import com.patmanak.contako.domain.sync.SyncBlockedItem
+import com.patmanak.contako.domain.sync.SyncBlockedItemType
+import com.patmanak.contako.domain.sync.SyncDashboardSnapshot
 import com.patmanak.contako.domain.model.CanonicalContact
+import com.patmanak.contako.domain.model.ContactGroup
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
@@ -224,6 +230,183 @@ class RoomSyncStatusStoreDeviceTest {
             SyncActionReason.VALIDATION_REJECTED,
             SyncActionReason.INTERACTIVE_AUTHENTICATION_REQUIRED,
         )
+    }
+
+    @Test
+    fun retainedIngestIssueIdentifiesCleanContactWithoutOutboxOrInventedPendingCopy() = runBlocking {
+        val affected = seedCleanContact("ingest-fixture")
+        seedIssue(affected, "INGEST")
+        val other = seedCleanContact("other-ingest-fixture", OTHER_ACCOUNT)
+        seedIssue(other, "INGEST")
+        RoomSyncPassStatusPublisher(ACCOUNT, database, store, wallClock = { 1_000 })
+            .publish(SyncPassOutcome.ACTION_REQUIRED)
+
+        val dashboard = recoverySnapshot()
+
+        assertEquals(listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_INGEST,
+            displayName = affected.displayName, isDeleted = false)),
+            dashboard.androidContactIssues)
+        assertTrue(dashboard.actionRequiredCount >= 1)
+        assertEquals(SyncDashboardState.ANDROID_DEGRADED, dashboard.state)
+        assertEquals(SyncProblem.ANDROID_INTEROPERABILITY_DEGRADED, dashboard.problem)
+        assertEquals(0, dashboard.pendingMutationCount)
+        assertTrue(dashboard.blockedMutationContactIds.isEmpty())
+        assertTrue(dashboard.androidPendingContactIds.isEmpty())
+        assertTrue(database.outboxDao().getAll(ACCOUNT).isEmpty())
+        assertEquals("CLEAN", database.androidProjectionLedgerDao().get(ACCOUNT, affected.id)?.projectionState)
+    }
+
+    @Test
+    fun retainedProjectionIssueSurvivesAuthenticationPriorityAndRestartDespiteCleanLedger() = runBlocking {
+        val affected = seedCleanContact("projection-fixture")
+        seedIssue(affected, "PROJECTION")
+        assertTrue(database.androidProjectionLedgerDao().observePendingContactIds(ACCOUNT).first().isEmpty())
+        RoomSyncPassStatusPublisher(ACCOUNT, database, store, wallClock = { 1_000 },
+            externalActionReason = { SyncActionReason.AUTHENTICATION_REQUIRED })
+            .publish(SyncPassOutcome.ACTION_REQUIRED)
+        reopenDatabase()
+
+        val dashboard = recoverySnapshot()
+
+        assertEquals(SyncDashboardState.AUTHENTICATION_REQUIRED, dashboard.state)
+        assertEquals(SyncProblem.AUTHENTICATION_REQUIRED, dashboard.problem)
+        assertEquals(listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_PROJECTION,
+            displayName = affected.displayName, isDeleted = false)),
+            dashboard.androidContactIssues)
+        assertEquals(setOf(affected.id), dashboard.androidPendingContactIds)
+        assertTrue(dashboard.actionRequiredCount >= 1)
+        assertEquals(0, dashboard.pendingMutationCount)
+        assertEquals("CLEAN", database.androidProjectionLedgerDao().get(ACCOUNT, affected.id)?.projectionState)
+        assertTrue(database.androidProjectionLedgerDao().observePendingContactIds(ACCOUNT).first().isEmpty())
+    }
+
+    @Test
+    fun blockedDeletedContactAndGroupRetainPrivateNamesAndTypesOutsideActiveDirectoryWithoutCrossAccountLeak() = runBlocking {
+        val deleted = CanonicalContact(ACCOUNT, "shared-contact-id", displayName = "Deleted synthetic contact",
+            revision = 1, isDeleted = true)
+        val group = ContactGroup(ACCOUNT, "shared-group-id", "Blocked synthetic group", revision = 1)
+        database.contactDao().upsert(deleted.toEntity())
+        database.contactGroupDao().upsert(group.toEntity())
+        database.contactDao().upsert(deleted.copy(accountId = OTHER_ACCOUNT, displayName = "Foreign contact").toEntity())
+        database.contactGroupDao().upsert(group.copy(accountId = OTHER_ACCOUNT, name = "Foreign group").toEntity())
+        val contactMutation = OutboxMutationEntity(ACCOUNT, AggregateType.CONTACT.name, deleted.id,
+            MutationOperation.DELETE.name, revision = 1, createdAtEpochMillis = 100,
+            updatedAtEpochMillis = 100, idempotencyKey = "synthetic-contact-delete",
+            state = DurableMutationState.ACTION_REQUIRED.name,
+            blockedReason = SyncActionReason.VALIDATION_REJECTED.name)
+        val groupMutation = contactMutation.copy(aggregateType = AggregateType.GROUP.name,
+            aggregateId = group.id, operation = MutationOperation.UPSERT.name,
+            createdAtEpochMillis = 200, idempotencyKey = "synthetic-group-update",
+            blockedReason = SyncActionReason.GROUP_CAPABILITY_REQUIRED.name)
+        listOf(contactMutation, groupMutation, contactMutation.copy(accountId = OTHER_ACCOUNT,
+            idempotencyKey = "foreign-contact-delete"), groupMutation.copy(accountId = OTHER_ACCOUNT,
+            idempotencyKey = "foreign-group-update")).forEach { database.outboxDao().upsert(it) }
+        RoomSyncPassStatusPublisher(ACCOUNT, database, store, wallClock = { 1_000 })
+            .publish(SyncPassOutcome.ACTION_REQUIRED)
+
+        val dashboard = recoverySnapshot()
+
+        assertTrue(database.contactDao().observeActive(ACCOUNT).first().isEmpty())
+        assertEquals(listOf(
+            SyncBlockedItem(deleted.id, SyncBlockedItemType.CONTACT, deleted.displayName,
+                isDeleted = true, problem = SyncProblem.VALIDATION_REJECTED),
+            SyncBlockedItem(group.id, SyncBlockedItemType.GROUP, group.name,
+                isDeleted = false, problem = SyncProblem.GROUP_CAPABILITY_REQUIRED),
+        ), dashboard.blockedItems)
+        assertEquals(2, dashboard.pendingMutationCount)
+        assertEquals(2, dashboard.actionRequiredCount)
+        assertEquals(setOf(deleted.id), dashboard.blockedMutationContactIds)
+        assertTrue(dashboard.blockedItems.none { it.displayName?.startsWith("Foreign") == true })
+        assertTrue(dashboard.blockedItems.none { it.toString().contains("synthetic") || it.toString().contains(it.id) })
+    }
+
+    @Test
+    fun resolvingRetainedAndroidIssueClearsAttentionWhileOrdinaryInitialCopiesRemainPending() = runBlocking {
+        val affected = seedCleanContact("resolved-fixture")
+        seedIssue(affected, "INGEST")
+        val ordinary = CanonicalContact(ACCOUNT, "ordinary-copy", displayName = "Ordinary pending copy", revision = 1)
+        database.contactDao().upsert(ordinary.toEntity())
+        val publisher = RoomSyncPassStatusPublisher(ACCOUNT, database, store, wallClock = { 1_000 })
+        publisher.publish(SyncPassOutcome.ACTION_REQUIRED)
+        val before = recoverySnapshot()
+        assertEquals(1, before.actionRequiredCount)
+        assertEquals(setOf(ordinary.id), before.androidPendingContactIds)
+        assertEquals(listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_INGEST,
+            displayName = affected.displayName, isDeleted = false)),
+            before.androidContactIssues)
+
+        assertEquals(1, database.androidContactIssueDao().delete(ACCOUNT, affected.id, "INGEST", 1))
+        publisher.publish(SyncPassOutcome.SUCCESS)
+        val after = recoverySnapshot()
+
+        assertTrue(after.androidContactIssues.isEmpty())
+        assertEquals(0, after.actionRequiredCount)
+        assertEquals(0, after.pendingMutationCount)
+        assertEquals(SyncDashboardState.PENDING, after.state)
+        assertEquals(setOf(ordinary.id), after.androidPendingContactIds)
+        assertTrue(after.blockedItems.isEmpty())
+        assertTrue(database.androidContactIssueDao().getAll(ACCOUNT).isEmpty())
+        assertEquals(SyncHealthState.IDLE, store.load(ACCOUNT)?.state)
+    }
+
+    @Test
+    fun durableBlockedGroupOverridesAbsentOrStaleCurrentStatusWithoutPublisherRefresh() = runBlocking {
+        val group = ContactGroup(ACCOUNT, "unpublished-blocked-group", "Retained synthetic group", revision = 1)
+        database.contactGroupDao().upsert(group.toEntity())
+        database.outboxDao().upsert(OutboxMutationEntity(ACCOUNT, AggregateType.GROUP.name, group.id,
+            MutationOperation.UPSERT.name, revision = 1, createdAtEpochMillis = 100,
+            updatedAtEpochMillis = 100, idempotencyKey = "synthetic-unpublished-group-update",
+            state = DurableMutationState.ACTION_REQUIRED.name,
+            blockedReason = SyncActionReason.GROUP_CAPABILITY_REQUIRED.name))
+        assertNull(store.load(ACCOUNT))
+
+        // The durable row is already authoritative before another pass can publish a banner.
+        for (staleCurrentStatus in listOf(false, true)) {
+            if (staleCurrentStatus) {
+                store.publish(ACCOUNT, 1_000, update(SyncPassOutcome.SUCCESS))
+                assertEquals(SyncHealthState.IDLE, store.load(ACCOUNT)?.state)
+                assertEquals(0, store.load(ACCOUNT)?.actionRequiredCount)
+            }
+            val dashboard = recoverySnapshot()
+
+            assertEquals(SyncDashboardState.BLOCKED, dashboard.state)
+            assertEquals(1, dashboard.actionRequiredCount)
+            assertEquals(SyncProblem.GROUP_CAPABILITY_REQUIRED, dashboard.problem)
+            assertEquals(listOf(SyncBlockedItem(group.id, SyncBlockedItemType.GROUP, group.name,
+                isDeleted = false, problem = SyncProblem.GROUP_CAPABILITY_REQUIRED)), dashboard.blockedItems)
+            assertTrue(dashboard.blockedMutationContactIds.isEmpty())
+            assertTrue(dashboard.androidContactIssues.isEmpty())
+            assertTrue(dashboard.androidPendingContactIds.isEmpty())
+        }
+    }
+
+    private suspend fun seedCleanContact(id: String, accountId: String = ACCOUNT): CanonicalContact {
+        val contact = CanonicalContact(accountId, id, displayName = "Synthetic $id", revision = 1,
+            remoteContactId = "remote-$id")
+        database.contactDao().upsert(contact.toEntity())
+        database.androidProjectionLedgerDao().insertAccount(AndroidProjectionAccountEntity(accountId,
+            revision = 1, providerEpoch = 1, androidAccountName = "synthetic-$accountId@example.test"))
+        database.androidProjectionLedgerDao().insert(AndroidProjectionLedgerEntity(accountId, id,
+            revision = 1, providerEpoch = 1, rawContactLocator = 1,
+            sourceIdentity = contact.remoteContactId,
+            canonicalProjectionFingerprint = "a".repeat(64), androidBaselineFingerprint = "a".repeat(64),
+            pendingProjectionFingerprint = null, observedAndroidFingerprint = null,
+            projectionState = "CLEAN", ingestionState = "BASELINED", tombstoneState = "NONE", adoptionState = "ADOPTED"))
+        return contact
+    }
+
+    private suspend fun seedIssue(contact: CanonicalContact, origin: String) {
+        database.androidContactIssueDao().upsert(AndroidContactIssueEntity(contact.accountId, contact.id,
+            origin, providerEpoch = 1, canonicalRevision = contact.revision, reason = "REPAIR_REQUIRED"))
+    }
+
+    private suspend fun recoverySnapshot(): SyncDashboardSnapshot {
+        val runner = AccountSyncRunner(CoroutineScope(currentCoroutineContext()),
+            SyncPassExecutor { error("STATUS_OBSERVATION_MUST_NOT_START_SYNC") })
+        return requireNotNull(withTimeout(10_000) {
+            RoomSyncRecoveryDataSource(database, runner, NetworkStateProvider { NetworkState.WIFI },
+                AccountScope(ACCOUNT)).observeStatus(ACCOUNT).first()
+        })
     }
 
     private suspend fun verifyCurrentAuthenticationPriority(

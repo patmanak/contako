@@ -284,7 +284,9 @@ class ContactsViewModel(
         }
         // Missing/unfinished Android copies are ordinary work during initial sync. Only
         // a published partial-projection failure makes those outstanding copies actionable.
-        val failedAndroidContactIds = if (dashboard.state == SyncDashboardState.ANDROID_PARTIAL) {
+        val failedAndroidContactIds = if (dashboard.androidContactIssues.isNotEmpty()) {
+            dashboard.androidContactIssues.mapTo(linkedSetOf()) { it.contactId }
+        } else if (dashboard.state == SyncDashboardState.ANDROID_PARTIAL) {
             dashboard.androidPendingContactIds
         } else emptySet()
         val actionContacts = contacts.filter { it.actionRequiredReasons.isNotEmpty() || it.conflictState != null ||
@@ -374,6 +376,13 @@ class ContactsViewModel(
     fun selectGroup(group: ContactGroup) {
         navigationStore.selectItem(group.id)
         navigation.value = navigationStore.snapshot()
+    }
+
+    /** Resolve affected groups outside the current directory search filter. */
+    fun openAffectedGroup(groupId: String) {
+        val group = allGroups.value.firstOrNull { it.id == groupId } ?: return
+        selectDestination(RootDestination.GROUPS)
+        selectGroup(group)
     }
 
     /**

@@ -52,6 +52,7 @@ internal class RoomBoundedAndroidProjectionCoordinator(
         AndroidCleanProjectionPresenceVerifier { _, _ -> emptySet() },
 ) : AndroidBoundedProjectionCoordinator {
     init { require(pageSize in 1..MAX_PAGE_SIZE) }
+    private val contactIssues = RoomAndroidContactIssueStore(database)
 
     override suspend fun projectPage(
         context: AndroidInteroperabilityContext,
@@ -102,8 +103,14 @@ internal class RoomBoundedAndroidProjectionCoordinator(
         val presentIds = if (presenceCandidates.isEmpty()) emptySet()
             else presenceVerifier.present(context, presenceCandidates)
         val currentIds = detachedIds + presentIds.intersect(locallyCurrentIds)
+        val retainedIssueIds = if (page.isEmpty()) emptySet() else database.androidContactIssueDao()
+            .getForContactPage(context.account.value, page.map { it.canonicalContactId }, context.providerEpoch)
+            .mapTo(hashSetOf()) { it.canonicalContactId }
         val outcomes = executeContinuously(context, page, currentIds)
         outcomes.forEach { (ledger, result) ->
+                if (ledger.canonicalContactId in retainedIssueIds && (result == null || result == AndroidBoundedPageResult.Applied)) {
+                    contactIssues.clearProjectionFailure(context, ledger.canonicalContactId)
+                }
                 if (result != null) when (result) {
                     // An item executor never reports PartiallyApplied; it is a page-level outcome.
                     AndroidBoundedPageResult.Applied,
@@ -114,6 +121,7 @@ internal class RoomBoundedAndroidProjectionCoordinator(
                     // pass. Repair-required is specific to that contact: record it and continue.
                     AndroidBoundedPageResult.RepairRequired -> {
                         skipped++
+                        contactIssues.recordProjectionFailure(context, ledger, result)
                         skipObserver.onSkipped(ledger.canonicalContactId, result)
                     }
                     // Replan normally means the pass observed stale state and should restart. But
@@ -123,6 +131,7 @@ internal class RoomBoundedAndroidProjectionCoordinator(
                     AndroidBoundedPageResult.ReplanRequired -> {
                         if (ledger.projectionState == AndroidProjectionWriteState.WRITE_PENDING.name) {
                             skipped++
+                            contactIssues.recordProjectionFailure(context, ledger, result)
                             skipObserver.onSkipped(ledger.canonicalContactId, result)
                         } else {
                             return AndroidProjectionPage(null, page.size) to result

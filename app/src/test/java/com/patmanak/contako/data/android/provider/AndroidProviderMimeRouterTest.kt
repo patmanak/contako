@@ -11,6 +11,20 @@ class AndroidProviderMimeRouterTest {
     private val router = AndroidProviderMimeRouter()
 
     @Test
+    fun payloadReadClassificationMatchesTheManagedMappingAndExcludesOpaqueClaims() {
+        (CONTACT_MIMES + GROUP_MEMBERSHIP).forEach { mime ->
+            assertTrue(AndroidProviderMimeRouter.isManagedMimeType(mime))
+        }
+        listOf(PRIVATE_MIME, PROFILE_CARD, "vnd.android.cursor.item/rcs_data",
+            "vnd.android.cursor.item/im", "vnd.android.cursor.item/sip_address",
+            "vnd.android.cursor.item/identity", "vnd.android.cursor.item/contact_user_defined_field",
+            "$EMAIL.extra").forEach { mime ->
+            assertFalse(AndroidProviderMimeRouter.isManagedMimeType(mime))
+            assertTrue(router.route(RAW_CONTACT_ID, listOf(row(1, mime))).contactRows.rows.isEmpty())
+        }
+    }
+
+    @Test
     fun retainsExactRcsRowsWithoutAdmittingUnknownOrLookalikeMimeTypes() {
         val name = row(1, STRUCTURED_NAME)
         val rcs = row(2, "vnd.android.cursor.item/rcs_data").copy(
@@ -28,16 +42,43 @@ class AndroidProviderMimeRouterTest {
     }
 
     @Test
+    fun retainsExactProfileCardOutsideManagedPhotoAndContactRows() {
+        val name = row(1, STRUCTURED_NAME)
+        val photo = row(2, PHOTO).copy(binarySlot = byteArrayOf(0xff.toByte(), 0xd8.toByte()))
+        val profile = row(3, PROFILE_CARD).copy(
+            stringSlots = List(14) { "opaque-profile-fixture-$it" },
+            binarySlot = byteArrayOf(1, 2, 3),
+            canonicalValueId = "opaque-untrusted-claim",
+            canonicalOrder = 9,
+        )
+        val secondProfile = row(4, PROFILE_CARD)
+        val lookalike = row(5, "$PROFILE_CARD.extra")
+        val anotherVendor = row(6, "vnd.sec.cursor.item/unknown-fixture")
+
+        val route = router.route(RAW_CONTACT_ID,
+            listOf(name, profile, photo, secondProfile, lookalike, anotherVendor))
+
+        assertEquals(listOf(name, photo), route.contactRows.rows)
+        assertSame(photo, route.contactRows.rows.last())
+        assertEquals(listOf(profile, secondProfile), route.providerLocalRows.rows)
+        assertSame(profile, route.providerLocalRows.rows.first())
+        assertSame(profile.binarySlot, route.providerLocalRows.rows.first().binarySlot)
+        assertEquals(listOf(lookalike, anotherVendor), route.unsupportedOwnedRows.rows)
+        assertTrue(route.groupMembershipRows.rows.isEmpty())
+    }
+
+    @Test
     fun providerLocalRowsStillParticipateInScopeIdentityAndSizeGuards() {
-        val mime = "vnd.android.cursor.item/rcs_data"
-        assertFailure(AndroidProviderMimeRouterFailure.MIXED_RAW_CONTACTS, mime) {
-            router.route(RAW_CONTACT_ID, listOf(row(1, mime, RAW_CONTACT_ID + 1)))
-        }
-        assertFailure(AndroidProviderMimeRouterFailure.DUPLICATE_PROVIDER_ROW, mime) {
-            router.route(RAW_CONTACT_ID, listOf(row(1, mime), row(1, EMAIL)))
-        }
-        assertFailure(AndroidProviderMimeRouterFailure.BOUND_EXCEEDED, mime) {
-            router.route(RAW_CONTACT_ID, (1L..129L).map { row(it, mime) })
+        for (mime in listOf("vnd.android.cursor.item/rcs_data", PROFILE_CARD)) {
+            assertFailure(AndroidProviderMimeRouterFailure.MIXED_RAW_CONTACTS, mime) {
+                router.route(RAW_CONTACT_ID, listOf(row(1, mime, RAW_CONTACT_ID + 1)))
+            }
+            assertFailure(AndroidProviderMimeRouterFailure.DUPLICATE_PROVIDER_ROW, mime) {
+                router.route(RAW_CONTACT_ID, listOf(row(1, mime), row(1, EMAIL)))
+            }
+            assertFailure(AndroidProviderMimeRouterFailure.BOUND_EXCEEDED, mime) {
+                router.route(RAW_CONTACT_ID, (1L..129L).map { row(it, mime) })
+            }
         }
     }
 
@@ -165,6 +206,7 @@ class AndroidProviderMimeRouterTest {
         const val RELATIONSHIP = "vnd.android.cursor.item/relation"
         const val GROUP_MEMBERSHIP = "vnd.android.cursor.item/group_membership"
         const val PRIVATE_MIME = "vnd.android.cursor.item/private-canary"
+        const val PROFILE_CARD = "vnd.sec.cursor.item/profile_card"
 
         val CONTACT_MIMES = listOf(
             STRUCTURED_NAME,

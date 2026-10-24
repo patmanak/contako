@@ -26,6 +26,7 @@ class FoundationI18nContractTest {
                 // none is untranslated prose presented as a user instruction.
                 "conflict:\${it.contactId}", "blocked:\${it.id}", "pending:\${it.id}", "android:\${it.id}", "local-diagnostics", "contact-editor-save-error",
                 "import:\${it.remoteId}",
+                "android-issue:\${it.id}", "blocked-item:\${it.type}:\${it.id}", "android-retained:\${it.contactId}",
                 "__custom__", "", "home", "work", "cell", "other", "mobile",
                 "contact_editor_top_save", "contact_editor_bottom_save", "group_editor_top_save", "group_editor_bottom_save",
                 "contact_editor_fields", "contact_editor_field_picker", "contact_value_options_\${value.id}",

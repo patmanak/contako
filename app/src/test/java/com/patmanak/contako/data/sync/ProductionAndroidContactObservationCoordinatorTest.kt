@@ -77,10 +77,13 @@ class ProductionAndroidContactObservationCoordinatorTest {
     }
 
     @Test
-    fun `created lifecycle accepts standard photos but rejects unsupported binary families`() {
-        assertEquals(false, createdLifecycleRouteRequiresRepair(false, false))
-        assertEquals(true, createdLifecycleRouteRequiresRepair(false, true))
-        assertEquals(true, createdLifecycleRouteRequiresRepair(true, false))
+    fun `created lifecycle ignores opaque binaries but rejects binaries in recognized text fields`() {
+        val photo = row("vnd.android.cursor.item/photo", binary = byteArrayOf(1))
+        val opaque = row("application/vnd.fixture.unknown", id = 2, binary = byteArrayOf(2))
+        assertEquals(false, createdLifecycleRouteRequiresRepair(route(photo, opaque)))
+        assertEquals(true, createdLifecycleRouteRequiresRepair(route(
+            row("vnd.android.cursor.item/email_v2", binary = byteArrayOf(1)), opaque,
+        )))
     }
 
     @Test
@@ -128,38 +131,47 @@ class ProductionAndroidContactObservationCoordinatorTest {
     }
 
     @Test
-    fun `existing contact diagnostic classifies unsupported rows without exporting MIME values`() {
-        val custom = route(row("vnd.android.cursor.item/contact_user_defined_field"))
-        val vendor = route(row("application/vnd.example.private"))
-        val multiple = route(
-            row("vnd.android.cursor.item/im", id = 1),
-            row("vnd.android.cursor.item/sip_address", id = 2),
-        )
-
-        assertEquals(
-            AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_CUSTOM_FIELD,
-            existingContactUnsupportedRowsRepairReason(custom),
-        )
-        assertEquals(
-            AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_VENDOR_MIME,
-            existingContactUnsupportedRowsRepairReason(vendor),
-        )
-        assertEquals(
-            AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_MULTIPLE_FAMILIES,
-            existingContactUnsupportedRowsRepairReason(multiple),
-        )
+    fun `unmapped field families never enter the supported snapshot or identity resolver`() {
+        val name = row("vnd.android.cursor.item/name").copy(stringSlots = listOf("Fixture") + List(13) { null })
+        val mimes = listOf("vnd.android.cursor.item/contact_user_defined_field", "vnd.android.cursor.item/im",
+            "vnd.android.cursor.item/sip_address", "vnd.android.cursor.item/identity", "application/vnd.example.private",
+            "vnd.android.cursor.item/unknown-fixture", "vnd.sec.cursor.item/profile_card_extra")
+        val opaque = mimes.mapIndexed { index, mime -> row(mime, index.toLong() + 2, byteArrayOf(1)).copy(
+            canonicalValueId = "spoofed-same-claim", canonicalOrderMalformed = true,
+            linkedValueIdsEncoding = "not-a-managed-encoding",
+        ) }
+        val routed = route(name, *opaque.toTypedArray())
+        assertEquals(opaque, routed.unsupportedOwnedRows.rows)
+        assertEquals(false, createdLifecycleRouteRequiresRepair(routed))
+        var resolved = 0
+        val snapshot = com.patmanak.contako.data.android.provider.AndroidProviderRowCodec(
+            com.patmanak.contako.data.android.provider.AndroidProviderIdentityResolver { claims ->
+                resolved += claims.size
+                com.patmanak.contako.data.android.provider.AndroidProviderIdentityResolution.Bound(
+                    claims.associate { it.providerRowId to com.patmanak.contako.data.android.provider.AndroidDurableValueBinding("name", emptyMap()) },
+                )
+            },
+            createdContactPhotoCapture(),
+        ).decode(AndroidProviderAccountName("fixture"), "contact", 7, routed.contactRows.rows)
+        assertEquals(1, resolved)
+        assertEquals("Fixture", snapshot.rows.single().components[com.patmanak.contako.data.android.mapping.AndroidComponent.DISPLAY_NAME])
     }
 
     @Test
-    fun `provider local RCS does not block managed rows but unrelated unknown rows still do`() {
-        val rcs = row("vnd.android.cursor.item/rcs_data", id = 1)
-        assertEquals(null, existingContactUnsupportedRowsRepairReason(route(rcs)))
-        assertEquals(
-            AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_ANDROID_MIME,
-            existingContactUnsupportedRowsRepairReason(route(
-                rcs, row("vnd.android.cursor.item/unknown-fixture", id = 2),
-            )),
-        )
+    fun `profile card does not block a standard photo or become a binary contact field`() {
+        val bytes = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 1, 0xff.toByte(), 0xd9.toByte())
+        val photo = row(ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE, id = 1, binary = bytes)
+        val profile = row("vnd.sec.cursor.item/profile_card", id = 2, binary = byteArrayOf(3, 2, 1))
+        val routed = route(photo, profile)
+
+        assertEquals(listOf(photo), routed.contactRows.rows)
+        assertEquals(listOf(profile), routed.providerLocalRows.rows)
+        assertEquals(false, createdLifecycleRouteRequiresRepair(routed))
+        assertEquals(AndroidProviderPhotoReferenceEncoder.encode(bytes),
+            createdContactPhotoCapture().capture(AndroidProviderAccountName("fixture"), "contact", 7,
+                requireNotNull(routed.contactRows.rows.single().binarySlot)))
+        assertEquals(false, createdLifecycleRouteRequiresRepair(route(photo, profile,
+            row("vnd.sec.cursor.item/profile_card_extra", id = 3, binary = byteArrayOf(9)))))
     }
 
     @Test

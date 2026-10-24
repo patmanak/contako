@@ -225,7 +225,9 @@ internal class ProductionAndroidProjectionItemExecutor(
             return repair(AndroidProjectionRepairCategory.CURRENT_CONTACT_DECODING)
         } ?: return repair(AndroidProjectionRepairCategory.CONTACT_DECODING)
         val contactPlan = try {
-            mapper.planProjection(current, canonical)
+            materializeMissingPhotoClaims(
+                mapper.planProjection(current, canonical), current, rawContactId, currentObservation.dataRows,
+            )
         } catch (_: IllegalArgumentException) {
             return repair(AndroidProjectionRepairCategory.CONTACT_PLANNING)
         }
@@ -625,13 +627,15 @@ internal class ProductionAndroidProjectionItemExecutor(
         desired: AndroidContactSnapshot,
         stage: AndroidProjectionDecodeStage,
     ) = AndroidProviderMimeRouter().route(observation.rawContact.rawContactId, observation.dataRows).let { route ->
-        if (route.unsupportedOwnedRows.rows.isNotEmpty()) null
-        else {
+        run {
             val desiredPhoto = desired.rows.singleOrNull { it.kind == AndroidRowKind.PHOTO }
             val photoReceipt = database.androidGroupProjectionDao().getPhotoProjectionReceipt(context.account.value, canonical.id)
             var identityFailure: Pair<AndroidProviderIdentityFailure, AndroidRowKind?>? = null
             val resolver = RoomAndroidProviderIdentityResolver(database, context.account, context.providerEpoch) { reason, kind ->
                 identityFailure = reason to kind
+            }
+            database.withTransaction {
+                resolver.requireUnmanagedRowsUnbound(canonical.id, observation.rawContact.rawContactId, route)
             }
             val photoCapture = com.patmanak.contako.data.android.provider.AndroidDurablePhotoCapture { _, _, _, _ ->
                 if (photoReceipt != null && photoReceipt.matchesPhoto(context, canonical.id, observation)) {

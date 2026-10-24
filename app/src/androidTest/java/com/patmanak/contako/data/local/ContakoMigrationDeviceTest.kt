@@ -195,7 +195,7 @@ class ContakoMigrationDeviceTest {
     private class SimulatedMigrationProcessDeath : RuntimeException()
 
     private companion object {
-        const val CURRENT_VERSION = 20
+        const val CURRENT_VERSION = 21
         val ALL_MIGRATIONS = arrayOf(
             ContakoDatabase.MIGRATION_1_2,
             ContakoDatabase.MIGRATION_2_3,
@@ -216,6 +216,7 @@ class ContakoMigrationDeviceTest {
             ContakoDatabase.MIGRATION_17_18,
             ContakoDatabase.MIGRATION_18_19,
             ContakoDatabase.MIGRATION_19_20,
+            ContakoDatabase.MIGRATION_20_21,
         )
     }
 }

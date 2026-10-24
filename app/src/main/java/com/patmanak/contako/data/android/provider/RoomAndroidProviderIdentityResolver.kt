@@ -57,6 +57,24 @@ internal class RoomAndroidProviderIdentityResolver(
 
     private val dao get() = database.androidProviderIdentityDao()
 
+    /**
+     * New opaque rows do not participate in mapping. A formerly managed row whose MIME changed
+     * must not masquerade as deletion of its canonical value, even if its SYNC claims were lost.
+     * Only an existing exact physical binding matters; arbitrary opaque claims are ignored.
+     * Call within the same transaction as the managed-row decode/plan.
+     */
+    fun requireUnmanagedRowsUnbound(canonicalContactId: String, rawContactId: Long, route: AndroidProviderMimeRoute) {
+        val opaque = route.providerLocalRows.rows + route.unsupportedOwnedRows.rows
+        if (rawContactId <= 0 || opaque.any { it.rawContactId != rawContactId }) {
+            throw AndroidProviderRowCodecException(AndroidProviderRowCodecFailure.ACCOUNT_SCOPE_MISMATCH)
+        }
+        if (opaque.isNotEmpty() && dao.hasAttachedBindingsAtLocators(
+                account.value, canonicalContactId, providerEpoch, rawContactId, opaque.map { it.dataRowId },
+            )) {
+            throw AndroidProviderRowCodecException(AndroidProviderRowCodecFailure.IDENTITY_BINDING_DIVERGENCE)
+        }
+    }
+
     /** Recover reinserted rows only against a whole durable projection, never DATA_SYNC alone. */
     suspend fun recoverProjectionBindings(
         context: AndroidInteroperabilityContext,
@@ -115,7 +133,7 @@ internal class RoomAndroidProviderIdentityResolver(
 
                 val accountName = AndroidProviderAccountName(context.androidAccountName)
                 val route = AndroidProviderMimeRouter().route(raw.rawContactId, observation.dataRows)
-                if (route.unsupportedOwnedRows.rows.isNotEmpty()) return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.UNSUPPORTED_OWNED_ROWS)
+                requireUnmanagedRowsUnbound(canonicalContactId, raw.rawContactId, route)
                 val moves = mutableListOf<ProjectionBindingMove>()
                 // This resolver is read-only. No pending attachment or fresh identity is persisted
                 // until the complete decoded payload has matched the durable write fingerprint.

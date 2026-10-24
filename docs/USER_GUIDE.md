@@ -78,8 +78,15 @@ version check for the final write.
 
 ## Report a problem safely
 
+Sync separates changes waiting for Proton, pending Android copies and identified
+phone-contact problems. Items requiring attention show the affected contact or
+group when its identity is known, including pending deletions. Another overall
+error or a directory search does not hide these items. Opening a contact shows
+its details without changing it.
+
 In Sync, reproduce the problem, then generate the local diagnostic report, review
-it and export it only if you want to share it. Ordinary builds include a rotating
+it with **Show technical report**, and export it only if you want to share it.
+The technical text is initially collapsed. Ordinary builds include a rotating
 history of up to 128 technical events: UTC times, elapsed milliseconds relative
 to each process, manual/Android/local-change triggers, sync stages and known
 error or field categories. The latest detailed failure is retained separately

@@ -1,26 +1,38 @@
 # Contact field mapping
 
-## Provider-local Android metadata
+## Unmapped Android fields
 
-The exact MIME `vnd.android.cursor.item/rcs_data`, observed on Samsung, is opaque
+Android MIME types outside Contako's contact and group mapping, including Samsung
+`vnd.android.cursor.item/rcs_data` and `vnd.sec.cursor.item/profile_card`, are opaque
 provider-local data. While the raw contact is retained, ingestion and ordinary
 projection MUST preserve these rows in Android without interpreting, uploading,
 rebinding or replacing their values. They MUST NOT enter canonical contact/group
 snapshots or projection write plans. Their presence alone MUST NOT block existing
 contact synchronization. Account scope, complete-observation row bounds and raw-
 contact version guards still apply, including concurrent metadata changes.
-Other unsupported MIME types MUST retain their explicit unsupported handling;
-this is not a general vendor-field allowlist. Native edits to supported contact
+Unmapped MIME types, including custom, IM, SIP and vendor extensions, MUST NOT
+block supported fields on the same contact. Their content and identity claims
+MUST NOT be decoded, uploaded, converted or logged. Native edits to supported
 fields MUST still be durably ingested before acknowledging the observed version.
+An opaque physical row already attached to a managed value is an identity
+inconsistency, not proof that the canonical value was deleted. That ambiguity
+MUST retain the existing value and intent rather than silently dropping it.
 
-Contact-local unsupported payloads MUST remain pending without stopping ingestion
-of unrelated contacts. This does not authorize acknowledging, dropping or uploading
-unknown data. Account/epoch, ownership, catalog and persistence failures MUST remain
+Malformed or unsupported payloads in recognized fields MUST remain pending without
+stopping ingestion of unrelated contacts. Unmapped fields remain Android-only;
+acknowledging the supported delta MUST NOT claim they were synchronized to Proton.
+Account/epoch, ownership, catalog and persistence failures MUST remain
 distinct from contact-local incompatibilities and stop the affected traversal.
 
 Native creation with a supported standard photo MUST capture its bounded bytes
 durably with the contact and outbox before acknowledgement. Lost-ack creation
 replay MUST prove the exact photo content as well as the observed row metadata.
+
+An editor may recreate a standard photo row without Contako's value/order markers.
+After durable ingestion, projection MAY restore missing markers through the
+existing owned-row binding and current version-guarded write authorization.
+Semantic equality alone MUST NOT bypass physical photo-identity verification;
+conflicting nonempty claims MUST NOT be rebound by this recovery.
 
 Android photo projection MUST preserve the canonical original separately from
 the provider's representation. New photo copies use one synchronous, scoped,

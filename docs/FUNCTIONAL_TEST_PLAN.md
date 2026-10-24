@@ -61,7 +61,7 @@ otherwise, apply the common setup, exact field comparison and cleanup above.
 | FT-04 | C03/C04/C08/C09/C12; delete one email while editing another, change name/note/type/primary, use date calendar and manual dd/MM/yyyy or dd/MM. | Reopen and peer values match, other fields survive; invalid date feedback, cancellation preserves input, no invented year. Record yearless Web loss as its known limitation, not a local pass. |
 | FT-05 | C03/C04 with G01–G04; add/remove multiple groups on a secondary email, change preferred email, remove an email; try C13. | Exact per-email memberships in Web; Android preferred-email groups only; unrelated edges survive; C13 cannot acquire invented email/groups. |
 | FT-06 | Create, recolor across the supported palette, rename and delete groups; select members under a search filter; duplicate-name warning and empty G04. | Filter retains selection, group identities stay distinct, deletion removes assignments only. Then add a native phone after the deleted group's receipt remains. |
-| FT-07 | Edit/create/delete own raw contact through the real editor; C03/C14 in separate owned source accounts, standalone and aggregated; clean/dirty own/foreign RCS. | Own intent is durable and uploaded, foreign raw rows untouched, supported opaque RCS preserved; unknown lookalikes fail explicitly. Native foreground pickup works even with empty Room outbox/recent success. |
+| FT-07 | Edit/create/delete own raw contact through the real editor; C03/C14 in separate owned source accounts, standalone and aggregated; add RCS, profile-card, arbitrary vendor, custom, IM/SIP/identity MIME rows, including opaque BLOBs and malformed opaque claims. | Supported intent is durable and uploaded; unmapped fields remain unchanged in Android without blocking the contact or entering Proton. Foreign raw rows remain untouched. A previously managed row that becomes opaque MUST NOT be inferred as deletion. Native foreground pickup works even with empty Room outbox/recent success. |
 | FT-08 | C04/C10/C11; selected A/B/C images and logo, legacy binary import, multiple/preferred images, unrelated edit and no-change pass. | Correct image in all applicable peers, canonical bytes preserved on unrelated edits, full image and thumbnail independently verified, no arbitrary remote-image fetch; single-image gallery omitted but preview accessible. |
 | FT-09 | C04/C05/C06/C07/C08/C09; alternating Web edits, private-only changes and combined-save sequence below. Establish the event cursor, then change only a note on Web, sync normally, restart and repeat; keep the indexed name/emails unchanged. | Intended fields arrive without repair/public-field nudge; maintained signed/unsigned semantics and preservation hold. A failed hydration retains the event for replay; an unchanged follow-up does not hydrate every card. Verify actual imported syntax/type; normalization by Web does not qualify the original wire variant. |
 | FT-10 | C01/C03; local/native edits offline, reconnect, normal foreground return, automatic-sync switches disabled then re-enabled. | Pending intent survives; one eligible serialized runner; automatic convergence when permitted, no false acknowledgement or retry storm. |
@@ -72,7 +72,7 @@ otherwise, apply the common setup, exact field comparison and cleanup above.
 | FT-14 | C01/C03; offline concurrent updates in both orders, edit versus delete and lost acknowledgement. | Private-only Web edits followed by a local edit MUST block upload and retain both versions. Compare and choose each version in Sync, restart before/after choice, change Proton again before resolution, and test a lost acknowledgement. An obsolete choice MUST NOT overwrite new edits; remote deletion invalidates it. No fabricated timestamp or silent membership loss. |
 | FT-15 | Blank and rich drafts: grouped add-field picker, existing fields, photo from avatar, per-email groups, field options; invalid field in a collapsed section, both Save controls, repeated taps, failure/retry and back. | Empty optional families remain hidden until added; existing values remain reachable. Label/preference/order controls and per-email assignments preserve other fields. Invalid field revealed, busy state, no duplicate submit; draft retained until success or explicit discard. |
 | FT-16 | C12 long/accented/non-Latin text entered with the real keyboard, paste and multiline editing. | Exact input before Save and after reopen; do not classify fast ADB injection loss as an IME defect. |
-| FT-17 | Initial sync with pending Android copies (scheduled/running/idle), then real blocked upload/projection, excluding search filter, group/global error, zero-outbox retry, missing permission; then recovery. | Ordinary pending copies MUST NOT create attention items or a warning badge. Published Android partial failure MUST expose outstanding copies; real conflicts and blocked uploads remain visible during sync. Count/list/contact navigation agree without double counting; pending Proton and Android work remain distinct. After recovery, new ordinary pending copies MUST NOT revive the warning. Notification delivery is a separate implementation-dependent variant, not passed by claim-storage tests. |
+| FT-17 | Initial sync with pending Android copies (scheduled/running/idle), then identified ingestion/projection failures, blocked contact/group uploads, deleted contacts, group/global error, zero-outbox retry and missing permission; then restart and recovery. Repeat with an excluding directory search and a higher-priority authentication error. | Ordinary pending copies MUST NOT create attention items or a warning badge. Identified Android failures MUST retain their affected contact even with an old CLEAN ledger, zero outbox or another global reason. Blocked uploads MUST identify the contact or group, including pending deletions. Count/list/read-only navigation agree without double counting or depending on directory search. Pending Proton and Android work remain distinct; resolving one failure MUST NOT clear another. After verified recovery, new ordinary pending copies MUST NOT revive the warning. Notification delivery is a separate implementation-dependent variant, not passed by claim-storage tests. |
 | FT-18 | Dedicated account with unavailable groups, if available; permission grant/revocation and capability refresh. | Ordinary contacts still work, unavailable group mutations explained/disabled, refresh preserves data. No subscription/security-setting changes for setup. |
 | FT-19 | All locales, light/dark/system, manual theme override, portrait/landscape, 200% font, TalkBack, expanded layout and another available OEM. Include a long account address, About and Usage menu entries, GitHub/license actions and contacts with/without unsupported properties. | Menu address aligns and wraps; GitHub opens the project URL and license details open the maintained licensing page. About and Usage menu entries open separate pages directly, without tabs; both scroll fully and Back restores the directory context. Actual preserved fields expose selectable read-only names/values; source-card backups alone create no preserved-field notice. Idle contact detail has no Android-compatibility badge. Readable fields/actions/flags/brand, accessible back/icon labels, no clipped dialogs; launcher mascot and monochrome masks remain usable. No forced personal sign-out for login artwork. |
 | FT-20 | C04 full repair with pending edits; interrupt after hydration/context advancement, resume and cancel at safe boundaries; off-Wi-Fi confirmation. | Fresh guarded projection context, visible resume/finalize cancellation, cached browsing and durable intent preserved; checkpoint cleared only on completion/cancellation. Recovery on a second pass is not first-pass success. |
@@ -102,9 +102,16 @@ intent, and a changed photo MUST NOT replay an old receipt.
 Place an incompatible owned contact before another valid native edit and a
 scoped deletion. The incompatible row MUST retain its intent without being
 acknowledged; later contacts MUST still converge and the result MUST remain
-partial. Repeat for malformed supported content and unsupported MIME, separately
+partial. Repeat for malformed supported content, separately
 from account/epoch, identity, catalog and storage failures, which MUST stop safely.
 Never use an aggregate display or a surviving foreign linked source as the oracle.
+
+Separately repeat the native edit with unmapped MIME rows containing opaque text,
+BLOBs and arbitrary SYNC claims. Known fields MUST still converge; the opaque
+payload MUST remain unchanged and Android-only. Replace an attached known EMAIL
+row's MIME with an unknown one without changing its locator: this identity
+inconsistency MUST retain the canonical email, not infer its deletion. New opaque
+rows with spoofed claims but no matching durable binding MUST NOT block mapping.
 
 Use rich-photo pages whose combined payload exceeds the Android page byte
 budget while each contact remains within individual limits. Acquisition MUST
@@ -119,6 +126,23 @@ the applicable boundary without claiming a group failure for a contact. In an
 isolated provider fault scenario, remove one owned raw copy without a tombstone;
 normal sync MUST NOT report that stored CLEAN binding as a verified current copy
 or adopt another source to replace it.
+
+For FT-12P, repeat a native photo replacement with the exact Samsung
+`vnd.sec.cursor.item/profile_card` row present. The standard photo MUST be captured
+and uploaded while the opaque row remains unchanged. An unrelated edit, restart
+and no-change pass MUST preserve it; a concurrent opaque-row change MUST still
+invalidate a stale write. Do not infer Proton photo delivery from a local preview.
+
+Also replace a photo through an editor that recreates its standard row without
+Contako's value/order markers. After durable native ingestion, projection MUST
+restore missing markers only through the exact owned row's durable binding and
+current write authorization. A stale/rebound row or a nonempty conflicting marker
+MUST NOT be claimed. Verify completion, restart and a no-change pass without
+repeated photo writes.
+
+For FT-26, generating a report MUST leave the technical text collapsed until the
+user requests it. Show/hide MUST NOT regenerate, clear or export the history;
+export and deletion remain explicit actions.
 
 ### Ordered photo replacement regression
 

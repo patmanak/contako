@@ -143,53 +143,6 @@ internal enum class AndroidExistingContactPlanRepairReason {
     INVALID_ARGUMENT,
 }
 
-private enum class AndroidUnsupportedProviderRowFamily {
-    CUSTOM_FIELD,
-    IM,
-    SIP,
-    IDENTITY,
-    ANDROID_MIME,
-    VENDOR_MIME,
-}
-
-/** Payload-free classification for an already account-scoped provider route. */
-internal fun existingContactUnsupportedRowsRepairReason(
-    route: com.patmanak.contako.data.android.provider.AndroidProviderMimeRoute,
-): AndroidExistingContactPlanRepairReason? {
-    val families = route.unsupportedOwnedRows.rows.mapTo(linkedSetOf()) { row ->
-        when (row.mimeType) {
-            "vnd.android.cursor.item/contact_user_defined_field" ->
-                AndroidUnsupportedProviderRowFamily.CUSTOM_FIELD
-            "vnd.android.cursor.item/im" -> AndroidUnsupportedProviderRowFamily.IM
-            "vnd.android.cursor.item/sip_address" -> AndroidUnsupportedProviderRowFamily.SIP
-            "vnd.android.cursor.item/identity" -> AndroidUnsupportedProviderRowFamily.IDENTITY
-            else -> if (row.mimeType.startsWith("vnd.android.cursor.item/")) {
-                AndroidUnsupportedProviderRowFamily.ANDROID_MIME
-            } else {
-                AndroidUnsupportedProviderRowFamily.VENDOR_MIME
-            }
-        }
-    }
-    if (families.isEmpty()) return null
-    if (families.size > 1) {
-        return AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_MULTIPLE_FAMILIES
-    }
-    return when (families.single()) {
-        AndroidUnsupportedProviderRowFamily.CUSTOM_FIELD ->
-            AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_CUSTOM_FIELD
-        AndroidUnsupportedProviderRowFamily.IM ->
-            AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_IM
-        AndroidUnsupportedProviderRowFamily.SIP ->
-            AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_SIP
-        AndroidUnsupportedProviderRowFamily.IDENTITY ->
-            AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_IDENTITY
-        AndroidUnsupportedProviderRowFamily.ANDROID_MIME ->
-            AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_ANDROID_MIME
-        AndroidUnsupportedProviderRowFamily.VENDOR_MIME ->
-            AndroidExistingContactPlanRepairReason.UNSUPPORTED_PROVIDER_VENDOR_MIME
-    }
-}
-
 /**
  * Reuses the durable baseline reference only for an unchanged standard provider photo.
  * A dirty, new, duplicated, or non-photo binary row still requires an explicit repair path.
@@ -214,9 +167,10 @@ internal fun interface AndroidExistingContactPlanRepairObserver {
 }
 
 internal fun createdLifecycleRouteRequiresRepair(
-    hasUnsupportedBinaryRow: Boolean,
-    hasUnsupportedOwnedRow: Boolean,
-): Boolean = hasUnsupportedBinaryRow || hasUnsupportedOwnedRow
+    route: com.patmanak.contako.data.android.provider.AndroidProviderMimeRoute,
+): Boolean = (route.contactRows.rows + route.groupMembershipRows.rows).any {
+    it.binarySlot != null && !it.isStandardPhoto
+}
 
 /** Only payload-local failures may be quarantined; scope, ownership and catalog proofs stop the pass. */
 internal fun isContactLocalPlanFailure(
@@ -292,6 +246,7 @@ internal class ProductionAndroidContactObservationCoordinator(
     ) -> AndroidExistingContactPlanRepairReason? = { _, _, _ -> AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_PROOF_FAILED },
 ) : AndroidProductionContactObservationCoordinator {
     @Volatile private var catalogSession: CatalogSession? = null
+    private val contactIssues = RoomAndroidContactIssueStore(database)
 
     override fun acceptGroupCatalog(
         context: AndroidInteroperabilityContext,
@@ -335,6 +290,9 @@ internal class ProductionAndroidContactObservationCoordinator(
                     return replan(AndroidIngestReplanReason.CONTACT_EXISTING_PLAN_STALE)
                 is ContactPlanResult.Repair -> {
                     runCatching { existingPlanRepairObserver.onRepairRequired(result.reason) }
+                    // Retain the exact, independently validated owner identity for local UI.
+                    // The diagnostic observer deliberately remains identity-free.
+                    contactIssues.recordIngestFailure(context, observation.rawContact, result.reason)
                     val failure = repair(AndroidIngestActionRequiredReason.CONTACT_EXISTING_PLAN)
                     if (isContactLocalPlanFailure(result.reason, result.codecFailure)) {
                         // No intent was committed or acknowledged for this row. Keep its
@@ -368,8 +326,11 @@ internal class ProductionAndroidContactObservationCoordinator(
                 -> Unit
                 RoomAndroidUnifiedObservationResult.ReplanRequired ->
                     return replan(AndroidIngestReplanReason.CONTACT_EXISTING_COMMIT_STALE)
-                RoomAndroidUnifiedObservationResult.RepairRequired ->
+                RoomAndroidUnifiedObservationResult.RepairRequired -> {
+                    contactIssues.recordIngestFailure(context, observation.rawContact,
+                        AndroidIngestActionRequiredReason.CONTACT_EXISTING_COMMIT)
                     return repair(AndroidIngestActionRequiredReason.CONTACT_EXISTING_COMMIT)
+                }
             }
             if (observation.rawContact.dirty) {
                 val authorization = currentAcknowledgement(context, observation, plan)
@@ -387,6 +348,7 @@ internal class ProductionAndroidContactObservationCoordinator(
                         return replan(AndroidIngestReplanReason.CONTACT_PROVIDER_ACK_STALE)
                 }
             }
+            contactIssues.clearIngestFailure(context, observation.rawContact)
         }
         return if (incompleteContacts) AndroidBoundedPageResult.PartiallyApplied else AndroidBoundedPageResult.Applied
     }
@@ -410,14 +372,8 @@ internal class ProductionAndroidContactObservationCoordinator(
             // Routing must prove complete ownership/cardinality before payload isolation.
             return repair(AndroidIngestActionRequiredReason.CONTACT_MIME_ROUTING)
         }
-        if (observation.dataRows.any { it.binarySlot != null && !it.isStandardPhoto }) {
+        if (createdLifecycleRouteRequiresRepair(route)) {
             return contactLocalRepair(AndroidIngestActionRequiredReason.CONTACT_BINARY_ROW)
-        }
-        if (createdLifecycleRouteRequiresRepair(
-                hasUnsupportedBinaryRow = false,
-                hasUnsupportedOwnedRow = route.unsupportedOwnedRows.rows.isNotEmpty(),
-            )) {
-            return contactLocalRepair(AndroidIngestActionRequiredReason.CONTACT_UNSUPPORTED_OWNED_MIME)
         }
         val unified = unified(context)
         val authorization = RoomAndroidCreatedRawContactAuthorization(
@@ -607,7 +563,8 @@ internal class ProductionAndroidContactObservationCoordinator(
             // Establish scope/ownership before classifying an incompatible payload as local.
             // A malformed source claim must not be hidden by an unrelated unsupported MIME.
             val route = AndroidProviderMimeRouter().route(raw.rawContactId, observation.dataRows)
-            existingContactUnsupportedRowsRepairReason(route)?.let { return@withTransaction planRepair(it) }
+            RoomAndroidProviderIdentityResolver(database, context.account, context.providerEpoch)
+                .requireUnmanagedRowsUnbound(entity.canonicalContactId, raw.rawContactId, route)
             var baseline = RoomAndroidProjectionLedger(database).loadBaseline(
                 context.account, entity.canonicalContactId,
             )

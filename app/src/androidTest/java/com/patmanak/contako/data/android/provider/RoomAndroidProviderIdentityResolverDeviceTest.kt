@@ -214,6 +214,86 @@ class RoomAndroidProviderIdentityResolverDeviceTest {
         assertFalse(database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID).isNotEmpty())
     }
 
+    @Test
+    fun attachedManagedEmailCannotBecomeUnknownOrProviderLocalAtSamePhysicalRowWithoutGuardFailure() = runBlocking {
+        attachGuardedEmail()
+        val beforeBindings = database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID)
+        val beforeContact = database.contactDao().get(ACCOUNT.value, CONTACT_ID)
+        val beforeLedger = database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT_ID)
+        val beforeIntent = database.outboxDao().getAll(ACCOUNT.value)
+        reopenDatabase()
+
+        for (mime in listOf("vnd.fixture/opaque", "vnd.sec.cursor.item/profile_card")) {
+            val route = AndroidProviderMimeRouter().route(RAW_CONTACT_ID,
+                listOf(opaqueGuardRow(901, mime, claimedId = "untrusted-replacement")))
+            val failure = runCatching { resolver().requireUnmanagedRowsUnbound(CONTACT_ID, RAW_CONTACT_ID, route) }
+                .exceptionOrNull()
+
+            assertTrue(failure is AndroidProviderRowCodecException)
+            assertEquals(AndroidProviderRowCodecFailure.IDENTITY_BINDING_DIVERGENCE,
+                (failure as AndroidProviderRowCodecException).category)
+            assertEquals(beforeBindings, database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID))
+            assertEquals(beforeContact, database.contactDao().get(ACCOUNT.value, CONTACT_ID))
+            assertEquals(beforeLedger, database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT_ID))
+            assertEquals(beforeIntent, database.outboxDao().getAll(ACCOUNT.value))
+        }
+    }
+
+    @Test
+    fun newOpaqueRowsCannotAttachSpoofedCanonicalClaimsOrChangeExistingManagedBinding() = runBlocking {
+        attachGuardedEmail()
+        val beforeBindings = database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID)
+        val beforeContact = database.contactDao().get(ACCOUNT.value, CONTACT_ID)
+        val beforeLedger = database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT_ID)
+        val opaque = opaqueGuardRow(902, "vnd.fixture/opaque", claimedId = "guarded-email")
+        val providerLocal = opaqueGuardRow(903, "vnd.android.cursor.item/rcs_data", claimedId = "guarded-email")
+        val route = AndroidProviderMimeRouter().route(RAW_CONTACT_ID, listOf(opaque, providerLocal))
+
+        resolver().requireUnmanagedRowsUnbound(CONTACT_ID, RAW_CONTACT_ID, route)
+        reopenDatabase()
+
+        assertEquals(beforeBindings, database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID))
+        assertEquals(beforeContact, database.contactDao().get(ACCOUNT.value, CONTACT_ID))
+        assertEquals(beforeLedger, database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT_ID))
+        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+        assertEquals(listOf(opaque), route.unsupportedOwnedRows.rows)
+        assertEquals(listOf(providerLocal), route.providerLocalRows.rows)
+        assertTrue(route.contactRows.rows.isEmpty())
+    }
+
+    @Test
+    fun unmanagedRowGuardDoesNotTreatOtherAccountCanonicalEpochOrRawScopeAsAttachedProof() = runBlocking {
+        attachGuardedEmail()
+        val beforeBindings = database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID)
+        val route = AndroidProviderMimeRouter().route(RAW_CONTACT_ID,
+            listOf(opaqueGuardRow(901, "vnd.fixture/opaque", claimedId = "guarded-email")))
+
+        resolver(epoch = PROVIDER_EPOCH + 1).requireUnmanagedRowsUnbound(CONTACT_ID, RAW_CONTACT_ID, route)
+        RoomAndroidProviderIdentityResolver(database, AccountScope("foreign-guard-account"), PROVIDER_EPOCH)
+            .requireUnmanagedRowsUnbound(CONTACT_ID, RAW_CONTACT_ID, route)
+        resolver().requireUnmanagedRowsUnbound("other-canonical-contact", RAW_CONTACT_ID, route)
+        val otherRaw = RAW_CONTACT_ID + 1
+        val otherRawRoute = AndroidProviderMimeRouter().route(otherRaw,
+            listOf(opaqueGuardRow(901, "vnd.fixture/opaque", rawContactId = otherRaw, claimedId = "guarded-email")))
+        resolver().requireUnmanagedRowsUnbound(CONTACT_ID, otherRaw, otherRawRoute)
+
+        assertEquals(beforeBindings, database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID))
+        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+    }
+
+    private fun attachGuardedEmail() {
+        assertEquals(AndroidPendingBindingRegistration.Registered, resolver().registerPendingBindings(
+            ANDROID_ACCOUNT, CONTACT_ID, RAW_CONTACT_ID,
+            listOf(AndroidPendingProviderBinding(AndroidRowKind.EMAIL, AndroidDurableValueBinding("guarded-email", emptyMap()))),
+        ))
+        assertTrue(resolver().resolve(listOf(claim(901, AndroidRowKind.EMAIL, "guarded-email")))
+            is AndroidProviderIdentityResolution.Bound)
+    }
+
+    private fun opaqueGuardRow(id: Long, mime: String, rawContactId: Long = RAW_CONTACT_ID, claimedId: String?) =
+        AndroidOwnedDataRow(id, rawContactId, mime, claimedId, null, false, null, false, false,
+            listOf("Opaque provider-only payload") + List(13) { null }, byteArrayOf(1, 3, 5))
+
     private fun resolver(epoch: Long = PROVIDER_EPOCH) =
         RoomAndroidProviderIdentityResolver(database, ACCOUNT, epoch)
 
