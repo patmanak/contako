@@ -12,6 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+. (Join-Path $PSScriptRoot 'descriptor-hash.ps1')
 if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
     $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 }
@@ -246,7 +247,7 @@ function Assert-LegalAndWriteSbom([string[]]$Resolved) {
     foreach ($relative in $descriptorPaths) {
         $entries = @($legal.dependencyDescriptors | Where-Object { $_.file -ceq $relative })
         if ($entries.Count -ne 1) { throw 'LEGAL_DESCRIPTOR_SET_INVALID' }
-        $actualHash = (Get-FileHash -LiteralPath (Join-Path $RepositoryRoot $relative) -Algorithm SHA256).Hash
+        $actualHash = Get-CanonicalTextSha256 (Join-Path $RepositoryRoot $relative)
         if ($entries[0].sha256 -ne $actualHash) { throw "LEGAL_DESCRIPTOR_STALE:$relative" }
     }
     $artifacts = @($legal.artifacts)

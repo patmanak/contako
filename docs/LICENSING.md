@@ -49,6 +49,12 @@ Before distributing a build:
 6. Enable GitHub private vulnerability reporting and verify the route documented
    in [the security policy](../SECURITY.md) before public distribution.
 
+Dependency-descriptor hashes in the runtime inventory use UTF-8 without a BOM
+and LF line endings. Generation and release validation share that normalization,
+so Windows/Linux checkout line endings do not invalidate unchanged text inputs.
+Resolved binary dependencies, APKs, source archives and release checksums MUST
+still use exact byte hashes.
+
 The application ID is com.patmanak.contako; test candidates may use an explicit
 suffix. A debug-signed preview is suitable for dedicated testing, not a final
 public signing identity. APK and store/F-Droid channels may have different

@@ -1,6 +1,24 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $PSScriptRoot 'descriptor-hash.ps1')
+$hashFixtures = Join-Path $repositoryRoot 'app\build\descriptor-hash-contracts'
+[void](New-Item -ItemType Directory -Path $hashFixtures -Force)
+$utf8 = [Text.UTF8Encoding]::new($false)
+$lf = Join-Path $hashFixtures 'lf.txt'
+$crlf = Join-Path $hashFixtures 'crlf.txt'
+$bom = Join-Path $hashFixtures 'bom.txt'
+$changed = Join-Path $hashFixtures 'changed.txt'
+[IO.File]::WriteAllText($lf, "dependency = 1`n", $utf8)
+[IO.File]::WriteAllText($crlf, "dependency = 1`r`n", $utf8)
+[IO.File]::WriteAllText($bom, "dependency = 1`n", [Text.UTF8Encoding]::new($true))
+[IO.File]::WriteAllText($changed, "dependency = 2`n", $utf8)
+$expectedTextHash = Get-CanonicalTextSha256 $lf
+if ($expectedTextHash -cne (Get-CanonicalTextSha256 $crlf) -or
+    $expectedTextHash -cne (Get-CanonicalTextSha256 $bom) -or
+    $expectedTextHash -ceq (Get-CanonicalTextSha256 $changed)) {
+    throw 'DESCRIPTOR_TEXT_HASH_REGRESSION'
+}
 $gate = Join-Path $PSScriptRoot 'check-release.ps1'
 # Load only the trusted parser definition; invoking the whole gate would inspect artifacts.
 $tokens = $null

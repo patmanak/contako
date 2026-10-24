@@ -10,6 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'descriptor-hash.ps1')
 $appDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $repositoryDirectory = [IO.Path]::GetFullPath((Join-Path $appDirectory '..'))
 $gradle = Join-Path $appDirectory 'gradlew.bat'
@@ -377,7 +378,7 @@ try {
     $descriptorHashes = @($descriptorPaths | ForEach-Object {
         $absolute = Join-Path $repositoryDirectory $_
         if (-not (Test-Path -LiteralPath $absolute)) { throw 'DEPENDENCY_DESCRIPTOR_MISSING' }
-        [ordered]@{ file = $_; sha256 = (Get-FileHash -LiteralPath $absolute -Algorithm SHA256).Hash }
+        [ordered]@{ file = $_; sha256 = Get-CanonicalTextSha256 $absolute }
     })
     $publicArtifacts = @($artifacts | ForEach-Object {
         [ordered]@{

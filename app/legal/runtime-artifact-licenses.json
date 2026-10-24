@@ -5,11 +5,11 @@
   "dependencyDescriptors": [
     {
       "file": "app/build.gradle.kts",
-      "sha256": "6098044F98A926764E2E800F3B7FA660CB5A5250143C0197961543674CDDA396"
+      "sha256": "689822D31F5C2A283509BE174662FE038F09ABD2C2C0B0BB4A7D84CB273D80B4"
     },
     {
       "file": "app/settings.gradle.kts",
-      "sha256": "6C609748FEC53B97865F95771C5D60E22F48877874B3A8392510080784CED7BB"
+      "sha256": "2384BBD68999D1F9EF24B89262B613A843C274FA4EF1816A660B89F384CA8B1D"
     },
     {
       "file": "app/gradle.properties",
@@ -17,7 +17,7 @@
     },
     {
       "file": "app/gradle/libs.versions.toml",
-      "sha256": "1E9191EC286B79CB21F63AABD97AB8ECD5B7DCE00F859860FDC5BAF91699C7DE"
+      "sha256": "10A6CC01959B632A734CE909DC0938DABC34647087CE201F57F3F51484B0B06E"
     },
     {
       "file": "app/gradle/wrapper/gradle-wrapper.properties",
@@ -25,7 +25,7 @@
     },
     {
       "file": "app/gradle/verification-metadata.xml",
-      "sha256": "973798B5B80ECD32A00B41B73C9B95DC2CFB090B72F91D83E180D55824E3CC8E"
+      "sha256": "E89BC6210C5FAF128FA35FEB6D5B56A63BFE5536F4F66E37C9781631AA332DC7"
     },
     {
       "file": "app/native/golib/go.mod",
