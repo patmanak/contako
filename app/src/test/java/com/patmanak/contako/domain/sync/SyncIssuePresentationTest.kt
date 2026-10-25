@@ -17,6 +17,62 @@ class SyncIssuePresentationTest {
     }
     private val policy = SyncIssuePresentationPolicy
 
+    @Test fun validationDetailRequiresBothTheMatchingCauseAndContactScope() {
+        for (scope in SyncIssueScope.entries) for (problem in SyncProblem.entries) {
+            val advice = policy.present(problem, scope, knownValidationIssues = SyncValidationIssue.entries.toSet())
+            assertEquals(if (scope == SyncIssueScope.CONTACT && problem == SyncProblem.VALIDATION_REJECTED)
+                SyncValidationIssue.entries.toSet() else emptySet<SyncValidationIssue>(), advice.validationIssues)
+        }
+    }
+
+    @Test fun latestScopedFailureUsesItsKnownCauseWithoutInventingFieldsOrGlobalRetry() {
+        val expected = mapOf(
+            TargetedRecoveryFailure.AUTHENTICATION to (SyncIssueCause.AUTHENTICATION to SyncIssueAction.SIGN_IN),
+            TargetedRecoveryFailure.CRYPTOGRAPHY to (SyncIssueCause.CRYPTOGRAPHY to SyncIssueAction.VIEW_DIAGNOSTICS),
+            TargetedRecoveryFailure.REMOTE_PERMISSION to (SyncIssueCause.REMOTE_PERMISSION to SyncIssueAction.VIEW_DIAGNOSTICS),
+            TargetedRecoveryFailure.VALIDATION to (SyncIssueCause.VALIDATION to SyncIssueAction.VIEW_DIAGNOSTICS),
+            TargetedRecoveryFailure.UNKNOWN to (SyncIssueCause.UNKNOWN to SyncIssueAction.VIEW_DIAGNOSTICS),
+        )
+        for ((failure, mapping) in expected) {
+            val status = TargetedRecoveryStatus(TargetedRecoveryKind.PROTON_CARD, "synthetic-card",
+                TargetedRecoveryState.ACTION_REQUIRED, lastFailure = failure)
+            val advice = requireNotNull(policy.presentTargetedFailure(status))
+            assertEquals(mapping.first, advice.cause)
+            assertEquals(mapping.second, advice.action)
+            assertEquals(SyncIssueScope.PROTON_IMPORT, advice.scope)
+            assertFalse(advice.localIntentSaved)
+            assertTrue(advice.validationIssues.isEmpty())
+            for (terminal in listOf(TargetedRecoveryState.RESOLVED, TargetedRecoveryState.STALE)) {
+                assertNull(policy.presentTargetedFailure(status.copy(state = terminal)))
+            }
+        }
+        for (failure in TargetedRecoveryFailure.entries) {
+            val status = TargetedRecoveryStatus(TargetedRecoveryKind.PROTON_CARD, "synthetic-card",
+                TargetedRecoveryState.DEFERRED, lastFailure = failure)
+            assertNotEquals(SyncIssueAction.RETRY_SYNC, policy.presentTargetedFailure(status)?.action)
+            if (failure != TargetedRecoveryFailure.AUTHENTICATION)
+                assertEquals(SyncIssueAction.WAIT, policy.presentTargetedFailure(status)?.action)
+        }
+    }
+
+    @Test fun currentAndroidPermissionTakesPrecedenceOverAnOlderScopedAttempt() {
+        val status = TargetedRecoveryStatus(TargetedRecoveryKind.ANDROID_COPY, "synthetic-card",
+            TargetedRecoveryState.ACTION_REQUIRED, lastFailure = TargetedRecoveryFailure.UNKNOWN)
+        assertEquals(SyncIssueAction.CONTACTS_PERMISSION,
+            policy.presentTargetedFailure(status, contactsPermissionMissing = true)?.action)
+        assertNull(policy.presentTargetedFailure(status.copy(lastFailure = null)))
+        for (kind in TargetedRecoveryKind.entries) {
+            val permission = status.copy(kind = kind, prerequisite = TargetedRecoveryPrerequisite.ANDROID_PERMISSION,
+                lastFailure = TargetedRecoveryFailure.VALIDATION)
+            val advice = requireNotNull(policy.presentTargetedFailure(permission, contactsPermissionMissing = true))
+            assertEquals(SyncIssueCause.ANDROID, advice.cause)
+            assertEquals(SyncIssueAction.CONTACTS_PERMISSION, advice.action)
+            assertTrue(advice.validationIssues.isEmpty())
+            assertEquals(SyncIssueAction.PREVIEW_TARGETED_RECOVERY,
+                policy.presentTargetedFailure(permission, contactsPermissionMissing = false)?.action)
+        }
+    }
+
     @Test fun everyCurrentProblemHasAnExplicitConservativeMappingInEveryScope() {
         val expected = mapOf(
             SyncProblem.AUTHENTICATION_REQUIRED to (SyncIssueCause.AUTHENTICATION to SyncIssueAction.SIGN_IN),

@@ -25,6 +25,8 @@ internal data class TargetedRecoveryRequestEntity(
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
     @ColumnInfo(name = "claim_token") val claimToken: String?,
     val prerequisite: String?,
+    @ColumnInfo(name = "failure_category") val failureCategory: String? = null,
+    @ColumnInfo(name = "hydration_category") val hydrationCategory: String? = null,
 ) {
     override fun toString() = "TargetedRecoveryRequestEntity(REDACTED, kind=$kind, state=$state)"
 }

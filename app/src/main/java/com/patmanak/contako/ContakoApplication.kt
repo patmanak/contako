@@ -286,8 +286,12 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
             sharedSyncRuntime.runner,
             AndroidNetworkStateProvider(this),
             expectedAccount = protonGateCRuntime.accountScope,
+            androidAvailability = sharedSyncRuntime.androidAvailability,
         )
     }
+
+    /** A permission transition invalidates an observation; it never starts provider or sync work. */
+    internal fun invalidateAndroidAvailability() = sharedSyncRuntime.invalidateAndroidAvailability()
 
     override val androidAccountSyncRunnerResolver: AndroidAccountSyncRunnerResolver
         get() = sharedSyncRuntime.androidAccountSyncRunnerResolver

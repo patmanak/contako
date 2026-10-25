@@ -7,12 +7,21 @@ field or authentication cause. A saved-operation claim requires explicit durable
 intent. Reading a card or returning from settings MUST NOT acknowledge it.
 Historical diagnostics MUST remain distinct from current errors; diagnostics
 generation/export/erasure remain explicit actions.
+Known local validation families MUST retain their specific explanation in Sync
+and Actions. A generic remote refusal MUST NOT inherit a guessed local field.
+The latest scoped recovery failure MUST be distinguishable from the original
+import problem and supply its own admissible action.
 
 The first-import overview MUST be dismissible and keep committed contacts
 accessible. Its persistent Sync summary MUST distinguish local availability,
 the last processed remote inventory, deferred verification and Android copies.
 Only live activity may animate progress; unknown totals MUST remain unknown.
 Dismissal/navigation restoration MUST NOT cancel or restart durable work.
+Android availability MUST distinguish permission, unestablished context,
+unavailability and an unknown or verified prerequisite state. Permission alone
+MUST NOT imply an available provider. Observations from an invalidated runner
+MUST NOT qualify a subsequent owner/session, and consultation MUST NOT start
+a new prerequisite check or synchronization.
 
 The application uses Material 3, Contako's own palette and existing original
 octopus assets. Current packaged assets are the baseline; abandoned image studies

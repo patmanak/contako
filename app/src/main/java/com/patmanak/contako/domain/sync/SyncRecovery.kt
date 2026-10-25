@@ -61,6 +61,8 @@ data class SyncDashboardSnapshot(
     val initialImport: InitialImportSnapshot? = null,
     /** Private request/result locators, excluded from diagnostics. */
     val targetedRecoveries: List<TargetedRecoveryStatus> = emptyList(),
+    /** Live prerequisites only. Neither permission nor backlog establishes provider readiness. */
+    val androidAvailability: AndroidAvailability = AndroidAvailability.UNKNOWN,
 ) {
     override fun toString(): String = "SyncDashboardSnapshot(state=$state, pendingMutationCount=$pendingMutationCount, " +
         "actionRequiredCount=$actionRequiredCount, problem=$problem, androidPendingCount=${androidPendingContactIds.size}, " +

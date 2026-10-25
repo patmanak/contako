@@ -66,6 +66,13 @@ delete a contact. A real conflict remains a conflict. A resolved target MUST NOT
 erase another issue, fabricate an account error or advance global success time.
 Keep coalesced normal/full synchronization distinct from isolated targeted cost;
 check both a queue beyond one batch and a future retry deadline at startup.
+Include a copy pending without a per-contact error: deny Contacts permission,
+request its recovery, then delete the canonical contact and run ordinary sync.
+The recovery MUST NOT claim verified removal while the Android copy remains.
+Reopen and resolve only after the current deletion proof. For a rejected Proton
+card, change the next attempt's refusal to authentication, cryptography or
+permission; the latest scoped cause/action MUST survive restart without changing
+another issue or the last whole-account success time.
 
 For actionable issues, combine an Android issue, rejected Proton card, blocked
 group and account-authentication prerequisite. Each independent scope MUST stay
@@ -77,6 +84,9 @@ taps and navigation/recreation MUST preserve eligibility and intent. A healed
 historical journal entry MUST NOT recreate a current badge. Run these cases
 with long localized text, 200% font and both themes; report physical coverage
 separately from presentation-policy tests.
+Known missing-name and invalid-email causes, including both together, MUST keep
+their specific instructions. An unknown or remote generic validation refusal
+MUST retain conservative advice without inventing a field or email occurrence.
 
 For first import, inspect the dismissible availability overview before and after
 the first durable batch, with Android permission granted and denied. Browse an
@@ -87,6 +97,10 @@ finish without an endless animation. An idle interrupted import MUST NOT show
 live activity merely from an old log/checkpoint. Compare source fields and
 foreign contact rows unchanged; opening/closing the overview MUST make no
 network request or new synchronization intent.
+Also grant Contacts permission while the Android account/context is not ready
+or the provider is unavailable. The overview MUST distinguish those states from
+normal copy backlog and keep committed contacts accessible. A late prerequisite
+result after session invalidation MUST NOT replace the new session's unknown state.
 
 Every row is parameterized by the referenced dataset/state. Unless stated
 otherwise, apply the common setup, exact field comparison and cleanup above.

@@ -305,6 +305,120 @@ class RoomTargetedRecoveryStoreDeviceTest {
         assertEquals("ACTION_REQUIRED", database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().state)
     }
 
+    @Test fun deletionOfAPendingCopyWithoutAnIssueCannotResolveBeforeItsCurrentDeletionReceipt() = runBlocking {
+        val canonical = CanonicalContact(ACCOUNT.value, "pending-copy", displayName = "Synthetic pending",
+            remoteContactId = "synthetic-remote", remoteVersion = "version", revision = 2)
+        database.contactDao().upsert(canonical.toEntity())
+        bindAndroid()
+        val ledger = AndroidProjectionLedgerEntity(ACCOUNT.value, canonical.id, 4, 0, 42,
+            canonical.remoteContactId, null, null, null, null, "DETACHED", "BASELINED", "NONE", "ADOPTED")
+        database.androidProjectionLedgerDao().insert(ledger)
+        assertTrue(database.androidContactIssueDao().getAll(ACCOUNT.value).isEmpty())
+        val preview = store.preview(ACCOUNT, TargetedRecoveryKind.ANDROID_COPY, canonical.id)
+        assertTrue(preview.canQueue)
+        store.queue(ACCOUNT, preview, 0)
+        val claim = requireNotNull(store.claim(database.targetedRecoveryRequestDao().all(ACCOUNT.value).single(), 0))
+        store.finish(claim, TargetedRecoveryWorkResult.Failed(GatewayFailureCategory.VALIDATION_REJECTED,
+            TargetedRecoveryPrerequisite.ANDROID_PERMISSION), 1_000) { false }
+        assertEquals("ACTION_REQUIRED", database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().state)
+        RoomContactRepository(database).deleteContact(ACCOUNT.value, canonical.id)
+        val deleteIntent = requireNotNull(database.outboxDao().get(ACCOUNT.value, "CONTACT", canonical.id))
+        val tombstone = requireNotNull(database.contactDao().getEntity(ACCOUNT.value, canonical.id))
+        assertTrue(tombstone.isDeleted)
+        assertTrue(database.androidContactIssueDao().getAll(ACCOUNT.value).isEmpty())
+        // The ordinary pass did not reach Android because permission was still denied.
+        store.settleAfterOrdinaryPass(ACCOUNT, 2_000) { false }
+        assertEquals("STALE", database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().state)
+        assertEquals(ledger, database.androidProjectionLedgerDao().get(ACCOUNT.value, canonical.id))
+        assertEquals(deleteIntent, database.outboxDao().get(ACCOUNT.value, "CONTACT", canonical.id))
+        database.close(); database = ContakoDatabase.create(context, NAME)
+        assertEquals(TargetedRecoveryState.STALE, store.observe(ACCOUNT).first().single().state)
+        val deletionPreview = store.preview(ACCOUNT, TargetedRecoveryKind.ANDROID_COPY, canonical.id)
+        assertTrue(deletionPreview.canQueue)
+        store.queue(ACCOUNT, deletionPreview, 60_000)
+        val deletionClaim = requireNotNull(store.claim(database.targetedRecoveryRequestDao().all(ACCOUNT.value).single(), 60_000))
+        assertNull(store.validate(deletionClaim))
+        store.finish(deletionClaim, TargetedRecoveryWorkResult.Resolved(tombstone.revision), 61_000) { false }
+        assertEquals("STALE", database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().state)
+        assertEquals(deleteIntent, database.outboxDao().get(ACCOUNT.value, "CONTACT", canonical.id))
+
+        // Controlled representation of the normal projector's proven deletion receipt.
+        // This does not qualify a provider delete; the retained locator is historical evidence.
+        store.queue(ACCOUNT, deletionPreview, 90_000)
+        database.contactDao().upsert(tombstone.copy(pendingMutationRevision = null))
+        database.outboxDao().deleteRevision(ACCOUNT.value, "CONTACT", canonical.id, deleteIntent.revision)
+        database.androidProjectionLedgerDao().update(ledger.copy(revision = 5, tombstoneState = "REMOTE_CONVERGED"))
+        store.settleAfterOrdinaryPass(ACCOUNT, 91_000) { false }
+        assertEquals("RESOLVED", database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().state)
+        assertEquals(42L, database.androidProjectionLedgerDao().get(ACCOUNT.value, canonical.id)?.rawContactLocator)
+    }
+
+    @Test fun aCurrentIssueOrChangedEpochStillBlocksADeletionReceiptFromResolvingAnOldRequest() = runBlocking {
+        val canonical = CanonicalContact(ACCOUNT.value, "deleted", remoteContactId = "synthetic-remote",
+            revision = 2, isDeleted = true)
+        database.contactDao().upsert(canonical.toEntity())
+        bindAndroid()
+        val ledger = AndroidProjectionLedgerEntity(ACCOUNT.value, canonical.id, 4, 0, 42,
+            canonical.remoteContactId, null, null, null, null, "DETACHED", "BASELINED", "REMOTE_CONVERGED", "ADOPTED")
+        database.androidProjectionLedgerDao().insert(ledger)
+        database.androidContactIssueDao().upsert(AndroidContactIssueEntity(ACCOUNT.value, canonical.id,
+            "INGEST", 0, 2, "REPAIR_REQUIRED"))
+        val preview = store.preview(ACCOUNT, TargetedRecoveryKind.ANDROID_COPY, canonical.id)
+        assertTrue(preview.canQueue)
+        store.queue(ACCOUNT, preview, 0)
+        val claim = requireNotNull(store.claim(database.targetedRecoveryRequestDao().all(ACCOUNT.value).single(), 0))
+        assertNull(store.validate(claim))
+        store.finish(claim, TargetedRecoveryWorkResult.Resolved(2), 1_000) { false }
+        assertEquals("STALE", database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().state)
+        store.queue(ACCOUNT, preview, 60_000)
+        val next = requireNotNull(store.claim(database.targetedRecoveryRequestDao().all(ACCOUNT.value).single(), 60_000))
+        val binding = requireNotNull(database.androidProjectionLedgerDao().getAccount(ACCOUNT.value))
+        database.androidProjectionLedgerDao().advanceProviderEpoch(ACCOUNT.value, binding.revision)
+        assertTrue(store.validate(next) is TargetedRecoveryWorkResult.Stale)
+        store.settleAfterOrdinaryPass(ACCOUNT, 61_000) { false }
+        assertEquals("STALE", database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().state)
+    }
+
+    @Test fun theLatestTargetedReadFailureSurvivesReopenWithoutReplacingIndependentImportOrAccountState() = runBlocking {
+        val cases = listOf(
+            GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED to TargetedRecoveryFailure.CRYPTOGRAPHY,
+            GatewayFailureCategory.AUTHENTICATION_REQUIRED to TargetedRecoveryFailure.AUTHENTICATION,
+            GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED to TargetedRecoveryFailure.REMOTE_PERMISSION,
+            GatewayFailureCategory.UNKNOWN to TargetedRecoveryFailure.UNKNOWN,
+        )
+        val statusStore = RoomSyncStatusStore(database)
+        statusStore.publish(ACCOUNT.value, 42, SyncStatusUpdate(SyncPassOutcome.SUCCESS, 0, 0))
+        defer()
+        val originalImport = database.remoteHydrationObligationDao().getAll(ACCOUNT.value)
+        val originalStatus = statusStore.load(ACCOUNT.value)
+        for ((index, pair) in cases.withIndex()) {
+            val (category, expected) = pair
+            val now = index * 100_000L
+            val preview = store.preview(ACCOUNT, TargetedRecoveryKind.PROTON_CARD, TARGET)
+            store.queue(ACCOUNT, preview, now)
+            val claim = requireNotNull(store.claim(database.targetedRecoveryRequestDao().all(ACCOUNT.value).single(), now))
+            val hydration = if (category == GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED)
+                GatewayContactHydrationCategory.SIGNATURE_VERIFICATION else null
+            store.finish(claim, TargetedRecoveryWorkResult.Failed(category, hydrationCategory = hydration), now + 1_000) { false }
+            val stored = database.targetedRecoveryRequestDao().all(ACCOUNT.value).single()
+            assertEquals(category.name, stored.failureCategory)
+            assertEquals(hydration?.name, stored.hydrationCategory)
+            assertEquals(expected, store.observe(ACCOUNT).first().single().lastFailure)
+            database.close(); database = ContakoDatabase.create(context, NAME)
+            assertEquals(stored, database.targetedRecoveryRequestDao().all(ACCOUNT.value).single())
+            assertEquals(expected, store.observe(ACCOUNT).first().single().lastFailure)
+            assertEquals(originalImport, database.remoteHydrationObligationDao().getAll(ACCOUNT.value))
+            assertEquals(originalStatus, RoomSyncStatusStore(database).load(ACCOUNT.value))
+            assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+        }
+        val preview = store.preview(ACCOUNT, TargetedRecoveryKind.PROTON_CARD, TARGET)
+        store.queue(ACCOUNT, preview, 500_000)
+        val claim = requireNotNull(store.claim(database.targetedRecoveryRequestDao().all(ACCOUNT.value).single(), 500_000))
+        store.completeVerified(claim, card(), 501_000) { false }
+        assertNull(store.observe(ACCOUNT).first().single().lastFailure)
+        assertNull(database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().hydrationCategory)
+    }
+
     private suspend fun bindAndroid() {
         RoomAndroidProjectionLedger(database).ensureAccount(ACCOUNT)
         val binding = requireNotNull(database.androidProjectionLedgerDao().getAccount(ACCOUNT.value))

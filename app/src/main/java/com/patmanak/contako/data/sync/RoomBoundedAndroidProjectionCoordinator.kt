@@ -4,7 +4,6 @@ import android.database.sqlite.SQLiteException
 import androidx.room.withTransaction
 import com.patmanak.contako.data.android.AndroidProjectionWriteState
 import com.patmanak.contako.data.android.AndroidAdoptionState
-import com.patmanak.contako.data.android.AndroidTombstoneState
 import com.patmanak.contako.data.android.RoomAndroidProjectionLedger
 import com.patmanak.contako.data.android.mapping.AndroidGroupMembershipSnapshotBinaryCodec
 import com.patmanak.contako.data.android.mapping.AndroidGroupProjectionPolicy
@@ -271,11 +270,8 @@ internal class RoomBoundedAndroidProjectionCoordinator(
         val policy = AndroidGroupProjectionPolicy()
         page.mapNotNull { ledger ->
             val canonical = contacts[ledger.canonicalContactId]?.toDomain() ?: return@mapNotNull null
-            if (ledger.tombstoneState == AndroidTombstoneState.REMOTE_CONVERGED.name &&
-                ledger.projectionState == AndroidProjectionWriteState.DETACHED.name &&
-                canonical.isDeleted && canonical.pendingMutationRevision == null &&
-                canonical.conflictState == null && canonical.remoteContactId == ledger.sourceIdentity
-            ) return@mapNotNull ledger.canonicalContactId
+            if (hasCompletedAndroidContactDeletion(contacts.getValue(ledger.canonicalContactId).contact,
+                    ledger, context.providerEpoch)) return@mapNotNull ledger.canonicalContactId
             if (ledger.projectionState != AndroidProjectionWriteState.CLEAN.name ||
                 ledger.adoptionState != AndroidAdoptionState.ADOPTED.name ||
                 ledger.pendingProjectionFingerprint != null || ledger.rawContactLocator == null ||

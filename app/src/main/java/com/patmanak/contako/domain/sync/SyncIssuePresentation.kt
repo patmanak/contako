@@ -13,12 +13,16 @@ enum class SyncIssueAction {
     PREVIEW_TARGETED_RECOVERY,
 }
 
+/** Only field families established by canonical validation, never inferred from a remote refusal. */
+enum class SyncValidationIssue { MISSING_NAME, INVALID_EMAIL }
+
 data class SyncIssueAdvice(
     val cause: SyncIssueCause,
     val scope: SyncIssueScope,
     val action: SyncIssueAction,
     /** True only when the caller supplies evidence of the relevant durable local intent. */
     val localIntentSaved: Boolean,
+    val validationIssues: Set<SyncValidationIssue> = emptySet(),
 )
 
 /**
@@ -41,11 +45,14 @@ object SyncIssuePresentationPolicy {
         contactsPermissionMissing: Boolean = false,
         conflictChoiceQueued: Boolean = false,
         canTarget: Boolean = false,
+        knownValidationIssues: Set<SyncValidationIssue> = emptySet(),
     ): SyncIssueAdvice {
         fun advice(cause: SyncIssueCause, action: SyncIssueAction) = SyncIssueAdvice(cause, scope,
             if (action == SyncIssueAction.VIEW_DIAGNOSTICS && canTarget &&
                 scope in setOf(SyncIssueScope.PROTON_IMPORT, SyncIssueScope.ANDROID_COPY))
-                SyncIssueAction.PREVIEW_TARGETED_RECOVERY else action, hasDurableIntent)
+                SyncIssueAction.PREVIEW_TARGETED_RECOVERY else action, hasDurableIntent,
+            if (cause == SyncIssueCause.VALIDATION && scope == SyncIssueScope.CONTACT)
+                knownValidationIssues else emptySet())
 
         if (scope == SyncIssueScope.ANDROID_COPY && contactsPermissionMissing) {
             return advice(SyncIssueCause.ANDROID, SyncIssueAction.CONTACTS_PERMISSION)
@@ -82,5 +89,46 @@ object SyncIssuePresentationPolicy {
                 advice(SyncIssueCause.NETWORK, SyncIssueAction.RETRY_SYNC)
             } else advice(SyncIssueCause.UNKNOWN, SyncIssueAction.VIEW_DIAGNOSTICS)
         }
+    }
+
+    /** The last scoped attempt can change its advice without reclassifying the account or import. */
+    fun presentTargetedFailure(status: TargetedRecoveryStatus,
+        contactsPermissionMissing: Boolean = false): SyncIssueAdvice? {
+        if (status.state !in setOf(TargetedRecoveryState.DEFERRED, TargetedRecoveryState.ACTION_REQUIRED)) return null
+        val scope = if (status.kind == TargetedRecoveryKind.PROTON_CARD) SyncIssueScope.PROTON_IMPORT else SyncIssueScope.ANDROID_COPY
+        if (contactsPermissionMissing && (scope == SyncIssueScope.ANDROID_COPY ||
+                status.prerequisite == TargetedRecoveryPrerequisite.ANDROID_PERMISSION)) {
+            return SyncIssueAdvice(SyncIssueCause.ANDROID, scope, SyncIssueAction.CONTACTS_PERMISSION, false)
+        }
+        // Native capture may be a prerequisite of a Proton read as well as an Android retry.
+        // Its technical gateway category never establishes a malformed contact field.
+        when (status.prerequisite) {
+            TargetedRecoveryPrerequisite.ANDROID_PERMISSION, TargetedRecoveryPrerequisite.ANDROID_CONTEXT,
+            TargetedRecoveryPrerequisite.GROUP_CONTEXT -> return SyncIssueAdvice(SyncIssueCause.ANDROID,
+                scope, if (status.state == TargetedRecoveryState.DEFERRED) SyncIssueAction.WAIT
+                    else SyncIssueAction.PREVIEW_TARGETED_RECOVERY, false)
+            TargetedRecoveryPrerequisite.AUTHENTICATION -> return SyncIssueAdvice(SyncIssueCause.AUTHENTICATION,
+                scope, SyncIssueAction.SIGN_IN, false)
+            else -> Unit
+        }
+        val failure = status.lastFailure ?: return null
+        val cause = when (failure) {
+            TargetedRecoveryFailure.AUTHENTICATION -> SyncIssueCause.AUTHENTICATION
+            TargetedRecoveryFailure.NETWORK, TargetedRecoveryFailure.RATE_LIMITED -> SyncIssueCause.NETWORK
+            TargetedRecoveryFailure.VALIDATION -> SyncIssueCause.VALIDATION
+            TargetedRecoveryFailure.CRYPTOGRAPHY -> SyncIssueCause.CRYPTOGRAPHY
+            TargetedRecoveryFailure.REMOTE_PERMISSION -> SyncIssueCause.REMOTE_PERMISSION
+            TargetedRecoveryFailure.CONFLICT -> SyncIssueCause.CONFLICT
+            TargetedRecoveryFailure.REMOTE_SERVICE, TargetedRecoveryFailure.MALFORMED_RESPONSE,
+            TargetedRecoveryFailure.UNKNOWN -> SyncIssueCause.UNKNOWN
+        }
+        val action = when {
+            failure == TargetedRecoveryFailure.AUTHENTICATION -> SyncIssueAction.SIGN_IN
+            status.state == TargetedRecoveryState.DEFERRED -> SyncIssueAction.WAIT
+            failure in setOf(TargetedRecoveryFailure.NETWORK, TargetedRecoveryFailure.RATE_LIMITED,
+                TargetedRecoveryFailure.REMOTE_SERVICE) -> SyncIssueAction.PREVIEW_TARGETED_RECOVERY
+            else -> SyncIssueAction.VIEW_DIAGNOSTICS
+        }
+        return SyncIssueAdvice(cause, scope, action, false)
     }
 }

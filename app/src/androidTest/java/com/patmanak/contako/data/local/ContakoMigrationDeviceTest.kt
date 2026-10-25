@@ -42,6 +42,37 @@ class ContakoMigrationDeviceTest {
         } finally { context.deleteDatabase(name) }
     }
 
+    @Test fun targetedFailureMigrationPreservesRequestsAndDoesNotInventHistoricalCauses() {
+        val name = "migration-targeted-failure.db"
+        context.deleteDatabase(name)
+        migrations.createDatabase(name, 22).use { old ->
+            old.execSQL("""
+                INSERT INTO targeted_recovery_requests
+                    (account_id,kind,target_id,request_generation,source_generation,expected_revision,
+                     expected_epoch,state,attempt_count,next_eligible_at,created_at,updated_at,claim_token,prerequisite)
+                VALUES ('synthetic-owner','PROTON_CARD','synthetic-card','request','source',3,2,
+                        'DEFERRED',4,12345,100,200,NULL,'UNAVAILABLE')
+            """.trimIndent())
+        }
+        try {
+            migrations.runMigrationsAndValidate(name, 23, true, ContakoDatabase.MIGRATION_22_23).use { upgraded ->
+                assertEquals("1", upgraded.scalar("SELECT COUNT(*) FROM targeted_recovery_requests"))
+                upgraded.query("SELECT state,attempt_count,next_eligible_at,request_generation,source_generation," +
+                    "failure_category,hydration_category FROM targeted_recovery_requests").use { row ->
+                    assertTrue(row.moveToFirst())
+                    assertEquals("DEFERRED", row.getString(0))
+                    assertEquals(4, row.getInt(1))
+                    assertEquals(12345L, row.getLong(2))
+                    assertEquals("request", row.getString(3))
+                    assertEquals("source", row.getString(4))
+                    assertTrue(row.isNull(5))
+                    assertTrue(row.isNull(6))
+                }
+                upgraded.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
+            }
+        } finally { context.deleteDatabase(name) }
+    }
+
     @Test
     fun photoReceiptMigrationPreservesJournalWithoutInventingReadbackProof() {
         val name = "migration-photo-receipt.db"
@@ -213,7 +244,7 @@ class ContakoMigrationDeviceTest {
     private class SimulatedMigrationProcessDeath : RuntimeException()
 
     private companion object {
-        const val CURRENT_VERSION = 22
+        const val CURRENT_VERSION = 23
         val ALL_MIGRATIONS = arrayOf(
             ContakoDatabase.MIGRATION_1_2,
             ContakoDatabase.MIGRATION_2_3,
@@ -236,6 +267,7 @@ class ContakoMigrationDeviceTest {
             ContakoDatabase.MIGRATION_19_20,
             ContakoDatabase.MIGRATION_20_21,
             ContakoDatabase.MIGRATION_21_22,
+            ContakoDatabase.MIGRATION_22_23,
         )
     }
 }

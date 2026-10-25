@@ -43,6 +43,7 @@ class ContactCompatibilityBenchTest {
             CompatibilityGenerator.seeds(profile).forEach { seed ->
                 val actual = mutableMapOf<Int, CanonicalContact>()
                 val expected = mutableMapOf<Int, Expected>()
+                var liveNoChangePasses = 0
                 val foreign = fixture(11, 5, false)
                 val foreignBefore = foreign.copy(values = foreign.values.toList())
                 CompatibilityGenerator.generate(seed, profile.steps).steps.forEachIndexed { index, step ->
@@ -82,11 +83,25 @@ class ContactCompatibilityBenchTest {
                             expected[step.slot] = expected.getValue(step.slot).copy(note = note)
                         }
                         Action.DELETE -> { actual.remove(step.slot); expected.remove(step.slot) }
-                        Action.NO_CHANGE -> actual.values.forEach { contact ->
-                            val snapshot = mapper.project(contact).let { projected -> projected.copy(rows = projected.rows.mapIndexed { i, row ->
-                                row.copy(identity = row.identity.copy(providerRowId = i + 1L))
-                            }) }
-                            repeat(2) { assertTrue(mapper.planProjection(snapshot, contact).operations.isEmpty()) }
+                        Action.NO_CHANGE -> {
+                            assertTrue("No-change mapping must exercise a live contact", actual.isNotEmpty())
+                            val before = actual.toMap()
+                            val snapshots = actual.mapValues { (_, contact) ->
+                                mapper.project(contact).let { projected -> projected.copy(rows = projected.rows.mapIndexed { i, row ->
+                                    row.copy(identity = row.identity.copy(providerRowId = i + 1L))
+                                }) }
+                            }
+                            repeat(2) {
+                                actual.toMap().forEach { (slot, contact) ->
+                                    val snapshot = snapshots.getValue(slot)
+                                    assertTrue(mapper.planProjection(snapshot, contact).operations.isEmpty())
+                                    actual[slot] = mapper.applyControlledDelta(contact, snapshot, snapshot).contact
+                                    verify(slot, actual.getValue(slot), expected.getValue(slot))
+                                }
+                                // Full canonical equality includes value identities and revision, not just labels.
+                                assertEquals(before, actual)
+                                liveNoChangePasses++
+                            }
                         }
                         else -> error("Unsupported mapping command")
                     }
@@ -95,6 +110,7 @@ class ContactCompatibilityBenchTest {
                     assertEquals(foreignBefore, foreign)
                     evidence.checkBudget()
                 }
+                assertTrue("Generated mapping must include two live no-change passes", liveNoChangePasses >= 2)
             }
             evidence.finish("PASS")
         } catch (failure: Throwable) {

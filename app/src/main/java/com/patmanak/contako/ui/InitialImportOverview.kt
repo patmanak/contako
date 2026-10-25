@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.patmanak.contako.R
 import com.patmanak.contako.domain.sync.InitialImportSnapshot
+import com.patmanak.contako.domain.sync.AndroidAvailability
 import com.patmanak.contako.domain.sync.SyncActivity
 
 /** A read-only view of durable availability, never a second synchronization driver. */
@@ -28,7 +29,7 @@ import com.patmanak.contako.domain.sync.SyncActivity
 internal fun InitialImportOverview(
     progress: InitialImportSnapshot,
     activity: SyncActivity,
-    androidAvailable: Boolean,
+    androidAvailability: AndroidAvailability,
     hasProblems: Boolean,
     onViewContacts: () -> Unit,
     onViewProblems: () -> Unit,
@@ -53,10 +54,13 @@ internal fun InitialImportOverview(
         if (progress.deferredContactCount > 0) {
             Text(stringResource(R.string.initial_import_deferred, progress.deferredContactCount))
         }
-        Text(stringResource(when {
-            !androidAvailable -> R.string.initial_import_android_unavailable
-            progress.androidPendingContactCount > 0 -> R.string.initial_import_android_pending
-            else -> R.string.initial_import_android_no_pending
+        Text(stringResource(when (androidAvailability) {
+            AndroidAvailability.PERMISSION_REQUIRED -> R.string.initial_import_android_permission
+            AndroidAvailability.CONTEXT_NOT_ESTABLISHED -> R.string.initial_import_android_context
+            AndroidAvailability.UNAVAILABLE -> R.string.initial_import_android_unavailable
+            AndroidAvailability.UNKNOWN -> R.string.initial_import_android_unknown
+            AndroidAvailability.READY -> if (progress.androidPendingContactCount > 0)
+                R.string.initial_import_android_pending else R.string.initial_import_android_no_pending
         }, progress.androidPendingContactCount))
         if (progress.localContactCount > 0) {
             Button(onClick = onViewContacts) { Text(stringResource(R.string.initial_import_view_contacts)) }
@@ -71,7 +75,7 @@ internal fun InitialImportOverview(
 internal fun InitialImportDialog(
     progress: InitialImportSnapshot,
     activity: SyncActivity,
-    androidAvailable: Boolean,
+    androidAvailability: AndroidAvailability,
     hasProblems: Boolean,
     onDismiss: () -> Unit,
     onViewContacts: () -> Unit,
@@ -81,7 +85,7 @@ internal fun InitialImportDialog(
         Surface(shape = MaterialTheme.shapes.large) {
             Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                InitialImportOverview(progress, activity, androidAvailable, hasProblems, onViewContacts, onViewProblems)
+                InitialImportOverview(progress, activity, androidAvailability, hasProblems, onViewContacts, onViewProblems)
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
             }
         }

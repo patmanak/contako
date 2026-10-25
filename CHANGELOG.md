@@ -4,6 +4,10 @@ Features and improvements by version.
 
 ## 0.14.0
 
+- Keep Android-copy recovery unresolved until deletion is proven, and retain the
+  latest scoped failure cause across restarts with an appropriate action.
+- Distinguish Android availability from Contacts permission during initial import,
+  and keep known local validation instructions visible in synchronization issues.
 - Add previewed, durable recovery requests for one rejected Proton card or one
   Android copy, processed by the existing account-scoped synchronization engine.
 - Revalidate ownership, source generation, revision and provider context; retain

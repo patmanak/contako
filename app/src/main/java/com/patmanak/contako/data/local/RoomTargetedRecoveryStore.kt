@@ -9,6 +9,8 @@ import com.patmanak.contako.data.sync.RemoteMutationOperation
 import com.patmanak.contako.data.sync.RetryDecision
 import com.patmanak.contako.data.sync.TargetedRecoveryExecutionStore
 import com.patmanak.contako.data.sync.TargetedRecoveryWorkResult
+import com.patmanak.contako.data.sync.hasCompletedAndroidContactDeletion
+import com.patmanak.contako.data.sync.toTargetedRecoveryFailure
 import com.patmanak.contako.domain.sync.*
 import java.security.MessageDigest
 import java.util.UUID
@@ -41,16 +43,18 @@ internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
         val issues = listOfNotNull(database.androidContactIssueDao().get(account, target, "PROJECTION"),
             database.androidContactIssueDao().get(account, target, "INGEST"))
             .filter { it.providerEpoch == binding?.providerEpoch }
-        val pending = (!contact.isDeleted && (ledger == null || ledger.projectionState != "CLEAN" ||
-            ledger.pendingProjectionFingerprint != null)) || issues.isNotEmpty()
+        val pending = if (contact.isDeleted) {
+            !hasCompletedAndroidContactDeletion(contact, ledger, binding?.providerEpoch) || issues.isNotEmpty()
+        } else (ledger == null || ledger.projectionState != "CLEAN" ||
+            ledger.pendingProjectionFingerprint != null || issues.isNotEmpty())
         val source = listOf(contact.revision, binding?.providerEpoch, ledger?.revision, ledger?.projectionState,
             ledger?.pendingProjectionFingerprint, issues.map { "${it.origin}:${it.canonicalRevision}:${it.reason}" }).joinToString("|")
         val generation = MessageDigest.getInstance("SHA-256").digest(source.toByteArray(Charsets.UTF_8))
             .joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }
         return TargetedRecoveryPreview(kind, target, generation, contact.revision, binding?.providerEpoch,
-            when { !pending -> TargetedRecoveryPrerequisite.NO_OBLIGATION
-                binding?.androidAccountName == null || binding.providerRepairPending ||
+            when { binding?.androidAccountName == null || binding.providerRepairPending ||
                     (ledger != null && ledger.providerEpoch != binding.providerEpoch) -> TargetedRecoveryPrerequisite.ANDROID_CONTEXT
+                !pending -> TargetedRecoveryPrerequisite.NO_OBLIGATION
                 else -> null }, contact.displayName, contact.isDeleted)
     }
 
@@ -69,7 +73,13 @@ internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
             dao.upsert(TargetedRecoveryRequestEntity(account.value, expected.kind.name, expected.targetId,
                 UUID.randomUUID().toString(), current.obligationGeneration, current.canonicalRevision, current.providerEpoch,
                 TargetedRecoveryState.REQUESTED.name, existing?.attemptCount ?: 0, maxOf(now, existing?.nextEligibleAt ?: now),
-                existing?.createdAt ?: now, now, null, null))
+                existing?.createdAt ?: now, now, null, null,
+                failureCategory = existing?.takeIf {
+                    sameSource(current, it.sourceGeneration, it.expectedRevision, it.expectedEpoch)
+                }?.failureCategory,
+                hydrationCategory = existing?.takeIf {
+                    sameSource(current, it.sourceGeneration, it.expectedRevision, it.expectedEpoch)
+                }?.hydrationCategory))
             TargetedRecoveryQueueResult.QUEUED
         }
 
@@ -78,7 +88,9 @@ internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
         TargetedRecoveryStatus(TargetedRecoveryKind.valueOf(request.kind), request.targetId,
             TargetedRecoveryState.valueOf(request.state), request.nextEligibleAt.takeIf {
                 request.state == TargetedRecoveryState.DEFERRED.name },
-            request.prerequisite?.let(TargetedRecoveryPrerequisite::valueOf), row.displayName)
+            request.prerequisite?.let(TargetedRecoveryPrerequisite::valueOf), row.displayName,
+            request.failureCategory?.let { stored -> GatewayFailureCategory.entries.firstOrNull { it.name == stored }
+                ?.toTargetedRecoveryFailure() ?: TargetedRecoveryFailure.UNKNOWN })
     } }
 
     suspend fun hasEligible(account: AccountScope, now: Long) = dao.all(account.value).any {
@@ -103,6 +115,8 @@ internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
         if (!claimed(request)) return@withTransaction TargetedRecoveryWorkResult.Cancelled
         val preview = previewCurrent(request.accountId, TargetedRecoveryKind.valueOf(request.kind), request.targetId)
         when {
+            request.kind == TargetedRecoveryKind.ANDROID_COPY.name && preview.providerEpoch != request.expectedEpoch ->
+                TargetedRecoveryWorkResult.Stale(TargetedRecoveryPrerequisite.ANDROID_CONTEXT)
             preview.prerequisite == TargetedRecoveryPrerequisite.NO_OBLIGATION -> TargetedRecoveryWorkResult.Resolved(preview.canonicalRevision)
             preview.prerequisite != null -> TargetedRecoveryWorkResult.Stale(preview.prerequisite)
             !sameSource(preview, request.sourceGeneration, request.expectedRevision, request.expectedEpoch) -> TargetedRecoveryWorkResult.Stale()
@@ -132,7 +146,8 @@ internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
         val conflict = database.contactDao().getEntitiesByRemoteContactId(request.accountId, request.targetId)
             .any { it.conflictState != null }
         dao.upsert(request.copy(state = if (conflict) "ACTION_REQUIRED" else "RESOLVED", claimToken = null,
-            prerequisite = if (conflict) TargetedRecoveryPrerequisite.CONTACT_CHANGED.name else null, updatedAt = now))
+            prerequisite = if (conflict) TargetedRecoveryPrerequisite.CONTACT_CHANGED.name else null, updatedAt = now,
+            failureCategory = if (conflict) GatewayFailureCategory.CONFLICT.name else null, hydrationCategory = null))
         if (conflict) TargetedRecoveryWorkResult.Failed(GatewayFailureCategory.CONFLICT, TargetedRecoveryPrerequisite.CONTACT_CHANGED)
         else TargetedRecoveryWorkResult.Resolved()
     }
@@ -146,7 +161,8 @@ internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
                 current.canonicalRevision == request.expectedRevision && current.providerEpoch == request.expectedEpoch
             if (!sameSource(current, request.sourceGeneration, request.expectedRevision, request.expectedEpoch) && !internalAndroidReplan) {
                 dao.upsert(request.copy(state = "STALE", claimToken = null,
-                    prerequisite = TargetedRecoveryPrerequisite.CONTACT_CHANGED.name, updatedAt = now))
+                    prerequisite = TargetedRecoveryPrerequisite.CONTACT_CHANGED.name, updatedAt = now,
+                    failureCategory = null, hydrationCategory = null))
                 return@withTransaction
             }
         }
@@ -180,7 +196,16 @@ internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
         val source = if (request.kind == TargetedRecoveryKind.ANDROID_COPY.name && result is TargetedRecoveryWorkResult.Failed)
             previewCurrent(request.accountId, TargetedRecoveryKind.ANDROID_COPY, request.targetId).obligationGeneration else request.sourceGeneration
         dao.upsert(request.copy(state = state, claimToken = null, nextEligibleAt = next, sourceGeneration = source,
-            prerequisite = prerequisite?.name, updatedAt = now))
+            prerequisite = prerequisite?.name, updatedAt = now,
+            failureCategory = when {
+                state in TERMINAL -> null
+                result is TargetedRecoveryWorkResult.Failed -> result.category.name
+                else -> request.failureCategory
+            }, hydrationCategory = when {
+                state in TERMINAL -> null
+                result is TargetedRecoveryWorkResult.Failed -> result.hydrationCategory?.name
+                else -> request.hydrationCategory
+            }))
     }
 
     override suspend fun settleAfterOrdinaryPass(account: AccountScope, now: Long, isCancelled: () -> Boolean) {
@@ -193,13 +218,19 @@ internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
                     database.contactDao().getEntitiesByRemoteContactId(account.value, request.targetId).any { it.conflictState != null }
                 val state = when {
                     conflict -> "ACTION_REQUIRED"
+                    request.kind == TargetedRecoveryKind.ANDROID_COPY.name && preview.providerEpoch != request.expectedEpoch -> "STALE"
                     preview.prerequisite == TargetedRecoveryPrerequisite.NO_OBLIGATION -> "RESOLVED"
                     !sameSource(preview, request.sourceGeneration, request.expectedRevision, request.expectedEpoch) -> "STALE"
                     request.state == "ACTION_REQUIRED" -> "ACTION_REQUIRED"
                     else -> "DEFERRED"
                 }
                 dao.upsert(request.copy(state = state, claimToken = null, updatedAt = now,
-                    nextEligibleAt = maxOf(request.nextEligibleAt, now + 5_000), prerequisite = preview.prerequisite?.name))
+                    nextEligibleAt = maxOf(request.nextEligibleAt, now + 5_000), prerequisite = preview.prerequisite?.name,
+                    failureCategory = when {
+                        state in TERMINAL -> null
+                        conflict -> GatewayFailureCategory.CONFLICT.name
+                        else -> request.failureCategory
+                    }, hydrationCategory = if (state in TERMINAL || conflict) null else request.hydrationCategory))
             }
         }
     }

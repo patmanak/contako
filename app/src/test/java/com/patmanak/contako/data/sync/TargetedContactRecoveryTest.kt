@@ -85,6 +85,29 @@ class TargetedContactRecoveryTest {
         }
     }
 
+    @Test fun targetedReadRetainsItsCurrentFailureAndHydrationBoundaryWithoutAdoptingAnUnverifiedCard() = runTest {
+        val cases = listOf(
+            GatewayOutcome.Failure(GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED,
+                contactHydrationCategory = GatewayContactHydrationCategory.SIGNATURE_VERIFICATION),
+            GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE,
+                contactHydrationCategory = GatewayContactHydrationCategory.VCARD_PARSE),
+            GatewayOutcome.Failure(GatewayFailureCategory.AUTHENTICATION_REQUIRED),
+            GatewayOutcome.Failure(GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED),
+            GatewayOutcome.Failure(GatewayFailureCategory.UNKNOWN),
+        )
+        for (failure in cases) {
+            val store = MemoryStore()
+            val recovery = TargetedContactRecovery(store, ProtonVerifiedContactCardGateway { _, _ -> failure },
+                TargetedAndroidRecovery { _, _, _, _, _ -> error("No Android write") },
+                prepareProton = { _, _ -> TargetedRecoveryWorkResult.Resolved() })
+            recovery.run(ACCOUNT) { false }
+            val observed = store.finished as TargetedRecoveryWorkResult.Failed
+            assertEquals(failure.category, observed.category)
+            assertEquals(failure.contactHydrationCategory, observed.hydrationCategory)
+            assertEquals(0, store.commits)
+        }
+    }
+
     @Test fun offlinePrerequisiteDefersTheCommandAndNeverPublishesAccountSuccess() = runTest {
         val store = MemoryStore()
         val recovery = TargetedContactRecovery(store, ProtonVerifiedContactCardGateway { _, _ -> error("Offline") },

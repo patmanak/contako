@@ -8,6 +8,12 @@ enum class TargetedRecoveryPrerequisite {
 }
 enum class TargetedRecoveryQueueResult { QUEUED, ALREADY_PENDING, STALE, UNAVAILABLE }
 
+/** Closed presentation of the latest scoped attempt, separate from the initial import cause. */
+enum class TargetedRecoveryFailure {
+    AUTHENTICATION, NETWORK, RATE_LIMITED, VALIDATION, CRYPTOGRAPHY, REMOTE_PERMISSION,
+    CONFLICT, REMOTE_SERVICE, MALFORMED_RESPONSE, UNKNOWN,
+}
+
 /** A private local preview, revalidated on queue and execution; never a write capability. */
 data class TargetedRecoveryPreview(
     val kind: TargetedRecoveryKind,
@@ -31,6 +37,7 @@ data class TargetedRecoveryStatus(
     val nextEligibleAtEpochMillis: Long? = null,
     val prerequisite: TargetedRecoveryPrerequisite? = null,
     val displayName: String? = null,
+    val lastFailure: TargetedRecoveryFailure? = null,
 ) {
     override fun toString() = "TargetedRecoveryStatus(REDACTED, kind=$kind, state=$state)"
 }

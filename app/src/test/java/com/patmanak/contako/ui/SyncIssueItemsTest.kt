@@ -2,11 +2,48 @@ package com.patmanak.contako.ui
 
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.sync.*
+import com.patmanak.contako.R
 import org.junit.Assert.*
 import org.junit.Test
 
 class SyncIssueItemsTest {
     private val contact = CanonicalContact("synthetic-owner", "one", displayName = "Chloë Groß")
+
+    @Test fun knownLocalValidationFamiliesSurviveBothDirectAndBlockedIssueAggregation() {
+        val expected = mapOf(
+            setOf("MISSING_NAME") to listOf(R.string.actions_missing_name_body),
+            setOf("INVALID_EMAIL") to listOf(R.string.actions_invalid_email_body),
+            setOf("MISSING_NAME", "INVALID_EMAIL") to listOf(R.string.actions_missing_name_body, R.string.actions_invalid_email_body),
+        )
+        for ((reasons, messages) in expected) for (blocked in listOf(false, true)) {
+            val invalid = contact.copy(actionRequiredReasons = reasons, pendingMutationRevision = 3)
+            val snapshot = SyncDashboardSnapshot(SyncDashboardState.BLOCKED, blockedItems = if (blocked)
+                listOf(SyncBlockedItem(contact.id, SyncBlockedItemType.CONTACT, contact.displayName, false,
+                    SyncProblem.VALIDATION_REJECTED)) else emptyList())
+            val state = ContactsUiState(actionContacts = listOf(invalid), syncDashboard = snapshot)
+            val issue = currentSyncIssues(state, emptyList()).single()
+            assertEquals(messages, syncIssueBodyResources(issue.advice))
+            assertEquals(SyncIssueAction.REVIEW_ITEM, issue.advice.action)
+            assertTrue(issue.advice.localIntentSaved)
+            assertEquals(setOf(invalid), state.actionContacts.toSet())
+            assertEquals(snapshot, state.syncDashboard)
+        }
+    }
+
+    @Test fun unknownLocalReasonsAndGenericRemoteValidationNeverInventAField() {
+        val opaqueReason = "unknown synthetic detail must not be displayed"
+        val local = contact.copy(actionRequiredReasons = setOf(opaqueReason))
+        val localIssue = currentSyncIssues(ContactsUiState(actionContacts = listOf(local)), emptyList()).single()
+        assertTrue(localIssue.advice.validationIssues.isEmpty())
+        assertEquals(listOf(R.string.sync_issue_validation), syncIssueBodyResources(localIssue.advice))
+        assertFalse(localIssue.toString().contains(opaqueReason))
+        val state = ContactsUiState(actionContacts = listOf(contact.copy(actionRequiredReasons = setOf("INVALID_EMAIL"))),
+            syncDashboard = SyncDashboardSnapshot(SyncDashboardState.BLOCKED,
+                importProblems = listOf(SyncImportProblem(contact.id, null, SyncProblem.VALIDATION_REJECTED))))
+        val imported = currentSyncIssues(state, emptyList()).single { it.advice.scope == SyncIssueScope.PROTON_IMPORT }
+        assertTrue(imported.advice.validationIssues.isEmpty())
+        assertEquals(listOf(R.string.sync_issue_validation), syncIssueBodyResources(imported.advice))
+    }
 
     @Test fun reviewingAnAffectedGroupDoesNotDependOnTheDirectorySearch() {
         val group = com.patmanak.contako.domain.model.ContactGroup("synthetic-owner", "group", "Synthetic group")

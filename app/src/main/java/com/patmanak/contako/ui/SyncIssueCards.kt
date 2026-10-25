@@ -38,7 +38,9 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
             SyncIssuePresentationPolicy.present(problem, scope, snapshot.state, durable, compare, review,
                 contactsPermissionMissing = !state.contactsPermissionGranted,
                 conflictChoiceQueued = queuedChoice,
-                canTarget = id != null && scope in setOf(SyncIssueScope.PROTON_IMPORT, SyncIssueScope.ANDROID_COPY)), review, deleted)
+                canTarget = id != null && scope in setOf(SyncIssueScope.PROTON_IMPORT, SyncIssueScope.ANDROID_COPY),
+                knownValidationIssues = if (scope == SyncIssueScope.CONTACT) SyncValidationIssue.entries
+                    .filter { it.name in contacts[id]?.actionRequiredReasons.orEmpty() }.toSet() else emptySet()), review, deleted)
     }
     conflicts.forEach { conflict ->
         val contact = contacts[conflict.contactId]
@@ -95,6 +97,27 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
     return result
 }
 
+/** Resources are selected from closed facts; no raw validation string reaches user-facing copy. */
+internal fun syncIssueBodyResources(advice: SyncIssueAdvice): List<Int> {
+    if (advice.cause == SyncIssueCause.VALIDATION && advice.validationIssues.isNotEmpty()) {
+        return SyncValidationIssue.entries.filter { it in advice.validationIssues }.map { when (it) {
+            SyncValidationIssue.MISSING_NAME -> R.string.actions_missing_name_body
+            SyncValidationIssue.INVALID_EMAIL -> R.string.actions_invalid_email_body
+        } }
+    }
+    return listOf(when (advice.cause) {
+        SyncIssueCause.AUTHENTICATION -> R.string.sync_issue_auth
+        SyncIssueCause.NETWORK -> R.string.sync_issue_network
+        SyncIssueCause.CONFLICT -> R.string.sync_issue_conflict
+        SyncIssueCause.VALIDATION -> R.string.sync_issue_validation
+        SyncIssueCause.CRYPTOGRAPHY -> R.string.sync_issue_crypto
+        SyncIssueCause.GROUP_CAPABILITY -> R.string.sync_issue_groups
+        SyncIssueCause.REMOTE_PERMISSION -> R.string.sync_issue_remote_permission
+        SyncIssueCause.ANDROID -> R.string.sync_issue_android_body
+        SyncIssueCause.UNKNOWN -> R.string.sync_issue_unknown
+    })
+}
+
 @Composable
 internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewModel: ContactsViewModel,
     onReauthenticate: () -> Unit) {
@@ -107,7 +130,10 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
     val targetedStatus = state.syncDashboard.targetedRecoveries.firstOrNull {
         it.kind == targetedKind && it.targetId == item.targetId
     }
-    val targetIsPrimary = targetedKind != null && item.targetId != null && advice.action == SyncIssueAction.PREVIEW_TARGETED_RECOVERY
+    val actionAdvice = targetedStatus?.let {
+        SyncIssuePresentationPolicy.presentTargetedFailure(it, !state.contactsPermissionGranted)
+    } ?: advice
+    val targetIsPrimary = targetedKind != null && item.targetId != null && actionAdvice.action == SyncIssueAction.PREVIEW_TARGETED_RECOVERY
     val scopeLabel = stringResource(when (advice.scope) {
         SyncIssueScope.ACCOUNT -> R.string.sync_issue_account
         SyncIssueScope.CONTACT -> R.string.contact_detail_title
@@ -123,17 +149,7 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
     fun diagnostics() { viewModel.openSecondary(SecondaryDestination.DIAGNOSTICS) }
     InfoCard(item.name?.takeIf(String::isNotBlank) ?: scopeLabel) {
         Text(scopeLabel, style = MaterialTheme.typography.labelMedium)
-        Text(stringResource(when (advice.cause) {
-            SyncIssueCause.AUTHENTICATION -> R.string.sync_issue_auth
-            SyncIssueCause.NETWORK -> R.string.sync_issue_network
-            SyncIssueCause.CONFLICT -> R.string.sync_issue_conflict
-            SyncIssueCause.VALIDATION -> R.string.sync_issue_validation
-            SyncIssueCause.CRYPTOGRAPHY -> R.string.sync_issue_crypto
-            SyncIssueCause.GROUP_CAPABILITY -> R.string.sync_issue_groups
-            SyncIssueCause.REMOTE_PERMISSION -> R.string.sync_issue_remote_permission
-            SyncIssueCause.ANDROID -> R.string.sync_issue_android_body
-            SyncIssueCause.UNKNOWN -> R.string.sync_issue_unknown
-        }))
+        syncIssueBodyResources(advice).forEach { Text(stringResource(it)) }
         if (advice.localIntentSaved) Text(stringResource(R.string.sync_issue_saved),
             style = MaterialTheme.typography.bodySmall)
         if (item.isDeleted) Text(stringResource(R.string.sync_deletion_pending))
@@ -144,10 +160,12 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
                 Text(stringResource(if (targetedKind == TargetedRecoveryKind.PROTON_CARD) R.string.targeted_proton_title
                     else R.string.targeted_android_title))
             }
-        } else if (advice.action == SyncIssueAction.WAIT) Text(stringResource(R.string.conflict_queued))
-        else Button(enabled = advice.action != SyncIssueAction.RETRY_SYNC || state.syncActivity == SyncActivity.IDLE,
+        } else if (actionAdvice.action == SyncIssueAction.WAIT) {
+            if (targetedStatus == null) Text(stringResource(R.string.conflict_queued))
+        }
+        else Button(enabled = actionAdvice.action != SyncIssueAction.RETRY_SYNC || state.syncActivity == SyncActivity.IDLE,
             onClick = {
-                when (advice.action) {
+                when (actionAdvice.action) {
                     SyncIssueAction.CONTACTS_PERMISSION -> viewModel.requestContactsPermission()
                     SyncIssueAction.SIGN_IN -> onReauthenticate()
                     SyncIssueAction.RETRY_SYNC -> viewModel.syncNow()
@@ -160,7 +178,7 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
                     SyncIssueAction.WAIT -> Unit
                 }
             }) {
-            Text(stringResource(when (advice.action) {
+            Text(stringResource(when (actionAdvice.action) {
                 SyncIssueAction.CONTACTS_PERMISSION -> if (state.contactsPermissionAction == ContactsPermissionAction.OPEN_SETTINGS)
                     R.string.contacts_permission_open_settings else R.string.contacts_permission_action
                 SyncIssueAction.SIGN_IN -> R.string.auth_sign_in
@@ -174,10 +192,20 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
             }))
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (item.canReview && advice.action != SyncIssueAction.REVIEW_ITEM) {
+            // Diagnostic/sign-in advice must not remove the original scoped recovery path.
+            // Queueing a fresh preview still revalidates its source and retained retry budget.
+            if (targetedKind != null && item.targetId != null && !targetIsPrimary &&
+                actionAdvice.action != SyncIssueAction.WAIT &&
+                targetedStatus?.state !in setOf(TargetedRecoveryState.REQUESTED, TargetedRecoveryState.RUNNING)) {
+                TextButton(onClick = { viewModel.openTargetedRecovery(targetedKind, item.targetId) }) {
+                    Text(stringResource(if (targetedKind == TargetedRecoveryKind.PROTON_CARD)
+                        R.string.targeted_proton_title else R.string.targeted_android_title))
+                }
+            }
+            if (item.canReview && actionAdvice.action != SyncIssueAction.REVIEW_ITEM) {
                 TextButton(onClick = ::review) { Text(stringResource(R.string.sync_issue_review)) }
             }
-            if (targetIsPrimary || advice.action != SyncIssueAction.VIEW_DIAGNOSTICS) {
+            if (targetIsPrimary || actionAdvice.action != SyncIssueAction.VIEW_DIAGNOSTICS) {
                 TextButton(onClick = ::diagnostics) { Text(stringResource(R.string.sync_issue_diagnostics)) }
             }
         }

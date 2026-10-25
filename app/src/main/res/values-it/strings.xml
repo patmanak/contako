@@ -397,6 +397,9 @@
     <string name="initial_import_deferred">Contatti Proton ancora da verificare: %1$d</string>
     <string name="initial_import_android_pending">Copie Android in attesa: %1$d</string>
     <string name="initial_import_android_unavailable">L’integrazione Android non è disponibile. Contako e Proton restano utilizzabili.</string>
+    <string name="initial_import_android_permission">Manca l’autorizzazione ai contatti Android. Contako e Proton restano utilizzabili.</string>
+    <string name="initial_import_android_context">L’account dei contatti Android non è pronto. Contako e Proton restano utilizzabili.</string>
+    <string name="initial_import_android_unknown">La disponibilità di Android non è ancora stata verificata. Contako e Proton restano utilizzabili.</string>
     <string name="initial_import_android_no_pending">Nessuna copia Android è attualmente in attesa di elaborazione.</string>
     <string name="initial_import_view_contacts">Mostra i miei contatti</string>
     <string name="initial_import_view_problems">Mostra i problemi</string>
@@ -436,4 +439,5 @@
     <string name="targeted_attention">L’operazione richiede ancora attenzione. L’intento originale è conservato.</string>
     <string name="targeted_retry_after">Primo tentativo consentito: %1$s. Android può eseguirlo più tardi.</string>
     <string name="targeted_scope_note">La sincronizzazione normale già pianificata può elaborare anche altre modifiche.</string>
+    <string name="targeted_last_failure">Ultimo tentativo: %1$s</string>
 </resources>

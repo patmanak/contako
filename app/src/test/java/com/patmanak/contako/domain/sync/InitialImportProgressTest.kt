@@ -4,6 +4,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InitialImportProgressTest {
+    @Test fun permissionAloneCannotTurnAnUnknownOrUnavailableContextIntoReadiness() {
+        AndroidAvailability.entries.forEach {
+            assertEquals(AndroidAvailability.PERMISSION_REQUIRED, it.withContactsPermission(false))
+        }
+        assertEquals(AndroidAvailability.UNKNOWN, AndroidAvailability.UNKNOWN.withContactsPermission(true))
+        assertEquals(AndroidAvailability.UNKNOWN, AndroidAvailability.PERMISSION_REQUIRED.withContactsPermission(true))
+        assertEquals(AndroidAvailability.CONTEXT_NOT_ESTABLISHED,
+            AndroidAvailability.CONTEXT_NOT_ESTABLISHED.withContactsPermission(true))
+        assertEquals(AndroidAvailability.UNAVAILABLE, AndroidAvailability.UNAVAILABLE.withContactsPermission(true))
+        assertEquals(AndroidAvailability.READY, AndroidAvailability.READY.withContactsPermission(true))
+    }
+
     @Test fun noCheckpointIsUnknownEvenWhenNoLocalMutationOrAndroidCopyExists() {
         val initial = InitialImportSnapshot(false, 0, null, 0, 0)
         assertFalse(initial.remoteComplete)

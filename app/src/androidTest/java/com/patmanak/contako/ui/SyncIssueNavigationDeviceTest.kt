@@ -26,6 +26,85 @@ import org.junit.Test
 class SyncIssueNavigationDeviceTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun knownLocalValidationRendersBothCorrectionsInsteadOfUnknownFieldAdvice() {
+        val contact = CanonicalContact("synthetic-owner", "invalid", actionRequiredReasons = setOf("MISSING_NAME", "INVALID_EMAIL"),
+            pendingMutationRevision = 1)
+        val state = ContactsUiState(actionContacts = listOf(contact))
+        val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites))[ContactsViewModel::class.java]
+        val issue = currentSyncIssues(state, emptyList()).single()
+        compose.setContent { ContakoTheme { SyncIssueCard(issue, state, model) { error("No sign-in from local validation") } } }
+        compose.onNodeWithText(compose.activity.getString(R.string.actions_missing_name_body)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.actions_invalid_email_body)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.sync_issue_validation)).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(setOf("MISSING_NAME", "INVALID_EMAIL"), contact.actionRequiredReasons); owner.viewModelStore.clear() }
+    }
+
+    @Test fun lastTargetedAuthenticationFailureIsDistinctFromImportAndOffersSignInWithoutRetry() {
+        val snapshot = SyncDashboardSnapshot(SyncDashboardState.BLOCKED,
+            importProblems = listOf(com.patmanak.contako.domain.sync.SyncImportProblem("synthetic-card", null, SyncProblem.INTERNAL_FAILURE)),
+            targetedRecoveries = listOf(com.patmanak.contako.domain.sync.TargetedRecoveryStatus(
+                com.patmanak.contako.domain.sync.TargetedRecoveryKind.PROTON_CARD, "synthetic-card",
+                com.patmanak.contako.domain.sync.TargetedRecoveryState.ACTION_REQUIRED,
+                lastFailure = com.patmanak.contako.domain.sync.TargetedRecoveryFailure.AUTHENTICATION)))
+        val state = ContactsUiState(syncDashboard = snapshot)
+        var signIns = 0
+        val recovery = object : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
+            override suspend fun requestSync(accountId: String) = error("No global retry from a targeted failure")
+        }
+        val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery))[ContactsViewModel::class.java]
+        val issue = currentSyncIssues(state, emptyList()).single()
+        compose.setContent { ContakoTheme { SyncIssueCard(issue, state, model) { signIns++ } } }
+        compose.onNodeWithText(compose.activity.getString(R.string.sync_issue_unknown)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.targeted_last_failure,
+            compose.activity.getString(R.string.sync_issue_auth))).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.auth_sign_in)).performClick()
+        compose.runOnIdle {
+            assertEquals(1, signIns)
+            assertEquals(snapshot, state.syncDashboard)
+            owner.viewModelStore.clear()
+        }
+    }
+
+    @Test fun targetedCryptoFailureKeepsAReadOnlyPreviewAvailableForALaterRetry() {
+        val kind = com.patmanak.contako.domain.sync.TargetedRecoveryKind.PROTON_CARD
+        val snapshot = SyncDashboardSnapshot(SyncDashboardState.BLOCKED,
+            importProblems = listOf(com.patmanak.contako.domain.sync.SyncImportProblem("synthetic-card", null, SyncProblem.INTERNAL_FAILURE)),
+            targetedRecoveries = listOf(com.patmanak.contako.domain.sync.TargetedRecoveryStatus(kind, "synthetic-card",
+                com.patmanak.contako.domain.sync.TargetedRecoveryState.ACTION_REQUIRED,
+                lastFailure = com.patmanak.contako.domain.sync.TargetedRecoveryFailure.CRYPTOGRAPHY)))
+        val state = ContactsUiState(syncDashboard = snapshot)
+        var previews = 0
+        val recovery = object : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
+            override suspend fun previewTargetedRecovery(accountId: String,
+                kind: com.patmanak.contako.domain.sync.TargetedRecoveryKind, targetId: String):
+                com.patmanak.contako.domain.sync.TargetedRecoveryPreview {
+                previews++
+                return com.patmanak.contako.domain.sync.TargetedRecoveryPreview(kind, targetId, "synthetic-generation", null, null)
+            }
+            override suspend fun requestSync(accountId: String) = error("No global retry from a targeted preview")
+            override suspend fun requestTargetedRecovery(accountId: String,
+                expected: com.patmanak.contako.domain.sync.TargetedRecoveryPreview):
+                com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult = error("No queue before confirmation")
+        }
+        val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery))[ContactsViewModel::class.java]
+        val issue = currentSyncIssues(state, emptyList()).single()
+        compose.setContent { ContakoTheme { SyncIssueCard(issue, state, model) { error("No sign-in from cryptography") } } }
+        compose.onNodeWithText(compose.activity.getString(R.string.targeted_last_failure,
+            compose.activity.getString(R.string.sync_issue_crypto))).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.sync_issue_diagnostics)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.targeted_proton_title)).performClick()
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(1, previews)
+            assertEquals("synthetic-card", model.targetedRecoveryPanel.value.preview?.targetId)
+            assertEquals(snapshot, state.syncDashboard)
+            owner.viewModelStore.clear()
+        }
+    }
+
     @Test fun targetedRecoveryRequiresPreviewThenConfirmationAndNeverClaimsImmediateCompletion() {
         val kind = com.patmanak.contako.domain.sync.TargetedRecoveryKind.PROTON_CARD
         val snapshot = SyncDashboardSnapshot(SyncDashboardState.BLOCKED, actionRequiredCount = 1,

@@ -75,6 +75,8 @@ internal class ProductionSharedSyncRuntime(
     val accountSignOutCoordinator: AccountSignOutCoordinator,
     val accountProvisioningCoordinator: AndroidAccountProvisioningCoordinator,
     val accountLifecycleAdmission: AccountLifecycleAdmission,
+    val androidAvailability: kotlinx.coroutines.flow.Flow<com.patmanak.contako.domain.sync.AndroidAvailability>,
+    val invalidateAndroidAvailability: () -> Unit,
 )
 
 internal data class ProductionSyncDependencies(
@@ -288,8 +290,8 @@ internal fun composeProductionSharedSyncRuntime(
         replanObserver = androidIngestReplanObserver,
         exactContactsReader = AndroidExactContactReader { name, id -> contactsReader.readStableRawContact(name, id) },
     )
-    val androidPreflight = AndroidRuntimeAccountPreflight(
-        RoomAndroidDurableAccountContextReader(database), AndroidContactsRuntimeProbe(applicationContext))
+    val androidPreflight = ObservedAndroidPreflight(account, AndroidRuntimeAccountPreflight(
+        RoomAndroidDurableAccountContextReader(database), AndroidContactsRuntimeProbe(applicationContext)))
     val targetedStore = com.patmanak.contako.data.local.RoomTargetedRecoveryStore(database)
     val targetedRecovery = TargetedContactRecovery(targetedStore, dependencies.verifiedCards,
         ProductionTargetedAndroidRecovery(database, androidPreflight, androidStage, projectionCoordinator),
@@ -323,6 +325,7 @@ internal fun composeProductionSharedSyncRuntime(
     var completionDetails: com.patmanak.contako.domain.sync.SyncPassCompletionDetailsSource? = null
     val executor = ContakoSyncPassExecutor(
         onPassStarted = { request ->
+            androidPreflight.reset()
             androidDegradation.set(null)
             remoteFailure.set(null)
             skippedProjections.set(0)
@@ -506,6 +509,8 @@ internal fun composeProductionSharedSyncRuntime(
             FrameworkAndroidAccountPlatform(applicationContext),
         ),
         accountLifecycleAdmission = lifecycleAdmission,
+        androidAvailability = androidPreflight.observe(runner.isInvalidated, runner.state),
+        invalidateAndroidAvailability = androidPreflight::reset,
         accountSignOutCoordinator = AccountSignOutCoordinator(
             account,
             PendingMutationReader { scope ->

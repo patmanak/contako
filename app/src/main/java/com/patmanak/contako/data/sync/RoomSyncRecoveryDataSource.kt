@@ -29,6 +29,8 @@ internal class RoomSyncRecoveryDataSource(
     private val networkStateProvider: NetworkStateProvider,
     private val expectedAccount: AccountScope,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val androidAvailability: Flow<com.patmanak.contako.domain.sync.AndroidAvailability> =
+        kotlinx.coroutines.flow.flowOf(com.patmanak.contako.domain.sync.AndroidAvailability.UNKNOWN),
 ) : SyncRecoveryDataSource {
     private val statusStore = RoomSyncStatusStore(database)
     private val repairStore = RoomFullRepairProgressStore(database)
@@ -162,6 +164,8 @@ internal class RoomSyncRecoveryDataSource(
                     SyncDashboardState.PENDING else snapshot.state)
         }.combine(targeted.observe(boundAccount(accountId))) { snapshot, requests ->
             snapshot.copy(targetedRecoveries = requests)
+        }.combine(androidAvailability) { snapshot, availability ->
+            snapshot.copy(androidAvailability = availability)
         }.combine(outboxDao.observePendingCount(boundAccount(accountId).value)) { snapshot, pending ->
             snapshot.copy(pendingMutationCount = pending,
                 state = if (pending > 0 && snapshot.state == SyncDashboardState.CURRENT) SyncDashboardState.PENDING else snapshot.state)

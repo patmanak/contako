@@ -3,6 +3,7 @@ package com.patmanak.contako.ui
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import com.patmanak.contako.domain.sync.withContactsPermission
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -199,7 +200,8 @@ fun ContakoApp(
         initialImportDismissed = true
     }
     if (initialImportOpened) state.syncDashboard.initialImport?.let { progress ->
-        InitialImportDialog(progress, state.syncActivity, state.contactsPermissionGranted,
+        InitialImportDialog(progress, state.syncActivity,
+            state.syncDashboard.androidAvailability.withContactsPermission(state.contactsPermissionGranted),
             state.syncDashboard.actionRequiredCount > 0, ::dismissInitialImport,
             onViewContacts = { dismissInitialImport(); viewModel.selectDestination(RootDestination.CONTACTS) },
             onViewProblems = { dismissInitialImport(); viewModel.openSecondary(SecondaryDestination.ACTIONS) })
@@ -972,7 +974,8 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
         state.syncDashboard.initialImport?.let { progress ->
             item(key = "import-overview") {
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) { InitialImportOverview(progress, state.syncActivity, state.contactsPermissionGranted,
+                    Column(Modifier.padding(16.dp)) { InitialImportOverview(progress, state.syncActivity,
+                        state.syncDashboard.androidAvailability.withContactsPermission(state.contactsPermissionGranted),
                         state.syncDashboard.actionRequiredCount > 0,
                         onViewContacts = { viewModel.selectDestination(RootDestination.CONTACTS) },
                         onViewProblems = { viewModel.openSecondary(SecondaryDestination.ACTIONS) }) }

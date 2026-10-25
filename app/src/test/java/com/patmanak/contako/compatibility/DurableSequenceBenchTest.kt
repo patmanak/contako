@@ -35,6 +35,7 @@ class DurableSequenceBenchTest {
                     session.settle()
                     session.assertConverged()
                     assertTrue(session.livePeerChecks > 0)
+                    assertTrue(session.liveNoChangePasses >= 2)
                     evidence.checkBudget()
                 } catch (failure: SequenceInvariantFailure) {
                     // Replays construct new controlled stores and re-run production transitions.
@@ -63,6 +64,7 @@ class DurableSequenceBenchTest {
                     }
                     throw failure
                 }
+                // Keep the post-deletion passes as a separate non-resurrection check.
                 val remoteWrites = session.remote.writes
                 val androidWrites = session.androidWrites
                 repeat(2) { session.settle(); session.assertConverged() }
@@ -131,6 +133,35 @@ class DurableSequenceBenchTest {
         s.verify()
     }
 
+    @Test fun liveNoChangeOracleDetectsUnnecessaryAndroidWritesEvenWhenAllValuesStillMatch() = runBlocking {
+        val s = Session()
+        s.step(CompatibilityGenerator.Step(Action.IMPORT, 0, 0))
+        s.step(CompatibilityGenerator.Step(Action.SETTLE, 0, 0))
+        s.rewriteUnchangedAndroidCopies = true
+        val failure = try {
+            s.step(CompatibilityGenerator.Step(Action.NO_CHANGE, 0, 0))
+            error("The no-change oracle accepted a redundant Android write")
+        } catch (failure: SequenceInvariantFailure) { failure }
+        assertEquals("NO_CHANGE/ANDROID_WRITE", failure.violation.signature)
+        // This mutant preserves all values and identities: equality alone would miss it.
+        s.assertConverged()
+        assertEquals(0, s.liveNoChangePasses)
+        s.rewriteUnchangedAndroidCopies = false
+        s.step(CompatibilityGenerator.Step(Action.NO_CHANGE, 0, 0))
+        assertEquals(2, s.liveNoChangePasses)
+    }
+
+    @Test fun noChangeCommandRejectsAnEmptyDirectoryInsteadOfPassingVacuously() = runBlocking {
+        val s = Session()
+        val failure = try {
+            s.step(CompatibilityGenerator.Step(Action.NO_CHANGE, 0, 0))
+            error("The no-change oracle accepted an empty directory")
+        } catch (failure: SequenceInvariantFailure) { failure }
+        assertEquals("NO_CHANGE/NO_LIVE_CONTACT", failure.violation.signature)
+        assertEquals(0, s.remote.writes)
+        assertEquals(0, s.androidWrites)
+    }
+
     private class Session(private val dropRecoveryProof: Boolean = false) {
         var store = Store()
         val remote = Remote()
@@ -139,6 +170,8 @@ class DurableSequenceBenchTest {
         private val android = mutableMapOf<String, AndroidContactSnapshot>()
         var androidWrites = 0
         var livePeerChecks = 0
+        var liveNoChangePasses = 0
+        var rewriteUnchangedAndroidCopies = false
         var deniedId: String? = null
         private var crashAfterEffect = false
         private var now = 1_000L
@@ -215,7 +248,35 @@ class DurableSequenceBenchTest {
                     expected[id] = expected.getValue(id).let { it.copy(revision = it.revision + 1, deleted = true) }
                     settle()
                 }
-                Action.NO_CHANGE -> { settle(); if (deniedId == null) assertConverged() }
+                Action.NO_CHANGE -> assertStableLiveDirectory()
+            }
+        }
+
+        private suspend fun assertStableLiveDirectory() {
+            invariant(expected.values.any { !it.deleted }, "NO_CHANGE", "NO_LIVE_CONTACT")
+            // A pending mutation is not an unchanged pass. Establish convergence before sampling.
+            assertConverged()
+            val contacts = store.contacts.toMap()
+            val baselines = store.baselines.toMap()
+            val commands = store.commands.toMap()
+            val inFlight = store.inFlight.toSet()
+            val blocked = store.blocked.toSet()
+            val remoteRecords = remote.records.toList()
+            val androidCopies = android.toMap()
+            val remoteWrites = remote.writes
+            val priorAndroidWrites = androidWrites
+            repeat(2) {
+                settle()
+                assertConverged()
+                invariant(remote.writes == remoteWrites, "NO_CHANGE", "REMOTE_WRITE")
+                invariant(androidWrites == priorAndroidWrites, "NO_CHANGE", "ANDROID_WRITE")
+                invariant(store.contacts == contacts, "NO_CHANGE", "CANONICAL_CHANGED")
+                invariant(store.baselines == baselines, "NO_CHANGE", "BASELINE_CHANGED")
+                invariant(store.commands == commands && store.inFlight == inFlight && store.blocked == blocked,
+                    "NO_CHANGE", "INTENT_CHANGED")
+                invariant(remote.records == remoteRecords, "NO_CHANGE", "REMOTE_CHANGED")
+                invariant(android == androidCopies, "NO_CHANGE", "ANDROID_CHANGED")
+                liveNoChangePasses++
             }
         }
 
@@ -227,7 +288,8 @@ class DurableSequenceBenchTest {
                     if (android.remove(id) != null) androidWrites++
                 } else {
                     val existing = android[id]
-                    if (existing == null || mapper.planProjection(existing, baseline).operations.isNotEmpty()) {
+                    if (existing == null || rewriteUnchangedAndroidCopies ||
+                        mapper.planProjection(existing, baseline).operations.isNotEmpty()) {
                         android[id] = mapper.project(baseline).let { projected -> projected.copy(rows = projected.rows.mapIndexed { index, row ->
                             row.copy(identity = row.identity.copy(providerRowId = index + 1L))
                         }) }

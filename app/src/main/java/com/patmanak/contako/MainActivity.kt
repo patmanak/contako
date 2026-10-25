@@ -280,6 +280,9 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshContactsPermissionState() {
         val granted = hasContactsPermission()
+        if (granted != contactsPermissionGranted.value && ::authenticatedSyncLifecycle.isInitialized) {
+            (application as ContakoApplication).invalidateAndroidAvailability()
+        }
         contactsPermissionGranted.value = granted
         contactsPermissionAction.value = if (!granted && contactsPermissionRequested &&
             CONTACTS_PERMISSIONS.filter { permission ->

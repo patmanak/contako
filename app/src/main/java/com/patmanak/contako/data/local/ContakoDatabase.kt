@@ -43,7 +43,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AndroidPhotoProjectionReceiptEntity::class,
         AndroidContactIssueEntity::class,
     ],
-    version = 22,
+    version = 23,
     exportSchema = true,
 )
 internal abstract class ContakoDatabase : RoomDatabase() {
@@ -91,8 +91,16 @@ internal abstract class ContakoDatabase : RoomDatabase() {
                     MIGRATION_19_20,
                     MIGRATION_20_21,
                     MIGRATION_21_22,
+                    MIGRATION_22_23,
                 )
                 .build()
+
+        val MIGRATION_22_23: Migration = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE targeted_recovery_requests ADD COLUMN failure_category TEXT")
+                db.execSQL("ALTER TABLE targeted_recovery_requests ADD COLUMN hydration_category TEXT")
+            }
+        }
 
         val MIGRATION_21_22: Migration = object : Migration(21, 22) {
             override fun migrate(db: SupportSQLiteDatabase) {

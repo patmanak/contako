@@ -390,6 +390,9 @@
     <string name="initial_import_deferred">Nog te controleren Proton-contacten: %1$d</string>
     <string name="initial_import_android_pending">Android-kopieën in behandeling: %1$d</string>
     <string name="initial_import_android_unavailable">Android-integratie is niet beschikbaar. Contako en Proton blijven bruikbaar.</string>
+    <string name="initial_import_android_permission">Toegang tot Android-contacten ontbreekt. Contako en Proton blijven bruikbaar.</string>
+    <string name="initial_import_android_context">Het Android-contactaccount is niet gereed. Contako en Proton blijven bruikbaar.</string>
+    <string name="initial_import_android_unknown">De beschikbaarheid van Android is nog niet gecontroleerd. Contako en Proton blijven bruikbaar.</string>
     <string name="initial_import_android_no_pending">Er wachten momenteel geen Android-kopieën op verwerking.</string>
     <string name="initial_import_view_contacts">Mijn contacten bekijken</string>
     <string name="initial_import_view_problems">Problemen bekijken</string>
@@ -429,4 +432,5 @@
     <string name="targeted_attention">Deze bewerking heeft nog aandacht nodig. De oorspronkelijke bedoeling blijft bewaard.</string>
     <string name="targeted_retry_after">Eerst toegestane nieuwe poging: %1$s. Android kan deze later uitvoeren.</string>
     <string name="targeted_scope_note">Al geplande normale synchronisatie kan ook andere wijzigingen verwerken.</string>
+    <string name="targeted_last_failure">Laatste poging: %1$s</string>
 </resources>

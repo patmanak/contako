@@ -23,7 +23,7 @@ the generated application version is recorded separately.
 | quick (default) | 20 | 30 | 12 | 2 minutes per layer |
 | deep (explicit) | 100 | 100 | 12 | 15 minutes per layer |
 
-The version-1 generator uses a fixed causal command spine and a seeded Java RNG
+The version-2 generator uses a fixed causal command spine and a seeded Java RNG
 for synthetic variants. The same version, seed and profile produce the same
 commands and fault boundaries. Scheduling uses explicit commands, never sleeps.
 The budget is a safety cutoff, not a performance assertion. Exhaustion fails
@@ -51,7 +51,11 @@ initial case if no same-cause reduction can be established.
   A reference state checks local values, revisions, pending intent and baselines
   after each command; simulated remote records and mapper projections are
   checked after convergence. A foreign-owner canary shares a logical contact
-  ID and MUST remain unchanged. Two unchanged drains MUST add no writes.
+  ID and MUST remain unchanged. Before deletion, two unchanged drains MUST keep
+  a nonempty live directory, identities, revisions, pending intent and writes
+  stable. A synthetic redundant Android write MUST fail this check even when
+  the resulting values match. Separate final drains check non-resurrection
+  after deletion.
 - A deliberately faulty recovery double drops the reconciliation marker. The
   production orchestrator then exposes a duplicate CREATE, proving sensitivity
   of the oracle. The reducer replays the real orchestrator and accepts removal

@@ -74,7 +74,8 @@ internal class TargetedContactRecovery(
                             else when (val fetched = verifiedCards.fetch(account, RemoteContactId(command.targetId))) {
                                 is GatewayOutcome.Success -> store.completeVerified(command, fetched.value, clock(), isCancelled)
                                 is GatewayOutcome.Failure -> TargetedRecoveryWorkResult.Failed(fetched.category,
-                                    retryAfterMillis = fetched.retryAfterMillis)
+                                    retryAfterMillis = fetched.retryAfterMillis,
+                                    hydrationCategory = fetched.contactHydrationCategory)
                             }
                         }
                     }

@@ -6,7 +6,7 @@ import java.util.Random
 
 /** Test-only, versioned protocol. Changing generation or scheduling requires a version bump. */
 internal object CompatibilityGenerator {
-    const val VERSION = 1
+    const val VERSION = 2
     const val MAX_CONTACTS = 12
 
     enum class Action { IMPORT, NATIVE_PHONE, LOCAL_NOTE, LOST_ACK, RESTART, SETTLE, DELETE, NO_CHANGE }
@@ -29,7 +29,8 @@ internal object CompatibilityGenerator {
         val random = Random(seed)
         return Plan(seed, List(steps) { index ->
             // Fixed ten-command causal spine, bounded contact slots and randomized payload
-            // variants. Each unit contains save -> lost ack -> restart -> reconciliation.
+            // variants. Verify the settled live directory before deleting its contact.
+            // Each unit contains save -> lost ack -> restart -> reconciliation.
             val action = when (index % 10) {
                 0 -> Action.IMPORT
                 1 -> Action.NATIVE_PHONE
@@ -39,8 +40,8 @@ internal object CompatibilityGenerator {
                 5 -> Action.SETTLE
                 6 -> Action.LOCAL_NOTE
                 7 -> Action.SETTLE
-                8 -> Action.DELETE
-                else -> Action.NO_CHANGE
+                8 -> Action.NO_CHANGE
+                else -> Action.DELETE
             }
             Step(action, (index / 10) % MAX_CONTACTS, random.nextInt(6))
         })

@@ -90,6 +90,11 @@ internal fun TargetedRecoveryStatusText(status: TargetedRecoveryStatus) {
         TargetedRecoveryState.ACTION_REQUIRED -> R.string.targeted_attention
     }))
     status.prerequisite?.let { Text(stringResource(targetedPrerequisiteText(it)), style = MaterialTheme.typography.bodySmall) }
+    SyncIssuePresentationPolicy.presentTargetedFailure(status)?.let { advice ->
+        syncIssueBodyResources(advice).forEach { message ->
+            Text(stringResource(R.string.targeted_last_failure, stringResource(message)), style = MaterialTheme.typography.bodySmall)
+        }
+    }
     if (status.state == TargetedRecoveryState.DEFERRED) status.nextEligibleAtEpochMillis?.let { eligible ->
         val locale = LocalConfiguration.current.locales[0]
         val formatted = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT,

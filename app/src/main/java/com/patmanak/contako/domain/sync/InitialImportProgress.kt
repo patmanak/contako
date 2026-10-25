@@ -1,5 +1,15 @@
 package com.patmanak.contako.domain.sync
 
+/** Last live prerequisite observation, not proof that Android contact values are synchronized. */
+enum class AndroidAvailability { UNKNOWN, PERMISSION_REQUIRED, CONTEXT_NOT_ESTABLISHED, UNAVAILABLE, READY }
+
+/** Granting permission alone cannot establish a usable Android account/provider context. */
+fun AndroidAvailability.withContactsPermission(granted: Boolean): AndroidAvailability = when {
+    !granted -> AndroidAvailability.PERMISSION_REQUIRED
+    this == AndroidAvailability.PERMISSION_REQUIRED -> AndroidAvailability.UNKNOWN
+    else -> this
+}
+
 /**
  * Current, account-scoped local observations of the first import. These are read-model counts,
  * never incremental event counters. Activity is observed separately from the running engine.

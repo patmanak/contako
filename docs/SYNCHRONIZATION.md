@@ -57,6 +57,13 @@ advance the last successful whole-account synchronization timestamp. Ordinary
 work already scheduled alongside the request remains ordinary work and MUST
 not be suppressed or described as the cost of an isolated targeted pass.
 
+A canonical deletion MUST NOT by itself resolve an Android recovery request.
+Its owned copy's deletion MUST retain the current owner/epoch/source and
+convergence proofs; an obsolete request without those proofs MUST remain
+unresolved or stale. The latest targeted failure category and available closed
+hydration detail MUST survive restart independently of the original import
+failure. They MUST NOT replace unrelated account health or reset retry delays.
+
 ## Ordinary triggers and cost
 
 A rejected individual full card MUST NOT block verified independent cards.
