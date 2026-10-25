@@ -24,10 +24,8 @@ class FoundationI18nContractTest {
                 "Unsupported postal address component",
                 // Stable navigation/test keys, vCard types, locale pattern and visual flags;
                 // none is untranslated prose presented as a user instruction.
-                "import-overview",
-                "conflict:\${it.contactId}", "blocked:\${it.id}", "pending:\${it.id}", "android:\${it.id}", "local-diagnostics", "contact-editor-save-error",
-                "import:\${it.remoteId}",
-                "android-issue:\${it.id}", "blocked-item:\${it.type}:\${it.id}", "android-retained:\${it.contactId}",
+                "import-overview", "issue:\${it.key}", "pending:\${it.id}", "android:\${it.id}",
+                "local-diagnostics", "contact-editor-save-error",
                 "__custom__", "", "home", "work", "cell", "other", "mobile",
                 "contact_editor_top_save", "contact_editor_bottom_save", "group_editor_top_save", "group_editor_bottom_save",
                 "contact_editor_fields", "contact_editor_field_picker", "contact_value_options_\${value.id}",
@@ -55,6 +53,12 @@ class FoundationI18nContractTest {
                 "contako-diagnostic.txt",
             ),
             "InitialImportOverview.kt" to setOf("initial_import_overview"),
+            "SyncIssueCards.kt" to setOf(
+                "SyncIssueItem(REDACTED, scope=\${advice.scope}, cause=\${advice.cause})",
+                "conflict:\${conflict.contactId}", "blocked:\${item.type}:\${item.id}",
+                "import:\${item.remoteId}", "android:\${item.kind}:\${item.contactId}",
+                "contact:\${contact.id}", "permission", "account",
+            ),
         )
 
         allowedLiterals.forEach { (name, allowed) ->
@@ -235,10 +239,13 @@ class FoundationI18nContractTest {
                 val validSharedDutch = locale == "nl" && name in setOf("nav_sync_compact", "about_privacy", "about_credits")
                 val validSharedItalian = locale == "it" && name == "about_privacy" &&
                     translated.getValue(name).text == "Privacy"
+                // Account is also the conventional localized noun in Italian and Dutch.
+                val validSharedAccount = locale in setOf("it", "nl") && name == "sync_issue_account" &&
+                    translated.getValue(name).text == "Account"
                 // Day/month initials coincide in these languages; this is a format, not English prose.
                 val validSharedDateHint = locale in setOf("es", "nl", "pl", "pt") &&
                     name == "date_input_yearless_hint" && translated.getValue(name).text == "DD/MM"
-                name !in identicalEnglishAllowlist && !validSharedFrench && !validSharedDutch && !validSharedItalian && !validSharedDateHint &&
+                name !in identicalEnglishAllowlist && !validSharedFrench && !validSharedDutch && !validSharedItalian && !validSharedAccount && !validSharedDateHint &&
                     normalizedText(source.getValue(name)) == normalizedText(translated.getValue(name))
             }
             assertTrue(
