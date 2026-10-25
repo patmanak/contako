@@ -5,7 +5,7 @@ import java.util.zip.ZipFile
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
 
-val contakoReleaseVersion = "0.10.2"
+val contakoReleaseVersion = "0.11.0"
 val contakoBaseApplicationId = "com.patmanak.contako"
 val contakoCandidatePackageSuffix = providers.gradleProperty("contakoCandidatePackageSuffix")
     .orNull
@@ -42,7 +42,7 @@ android {
         minSdk = 31
         targetSdk = 36
         contakoTargetAbi?.let { targetAbi -> ndk { abiFilters += targetAbi } }
-        versionCode = 19
+        versionCode = 20
         versionName = contakoReleaseVersion
         buildConfigField("String", "PROTON_RELEASE_VERSION", "\"${contakoReleaseVersion.substringBefore('-')}\"")
         buildConfigField("boolean", "SANITIZED_DIAGNOSTICS", "false")
@@ -308,4 +308,11 @@ tasks.register("contakoJvmCheck") {
     group = "verification"
     description = "Runs Contako's real benchmark-variant JVM regression gate."
     dependsOn("testBenchmarkUnitTest")
+}
+
+// Opt-in exploration stays in JVM tests; it never starts a device or remote account.
+tasks.withType<Test>().configureEach {
+    systemProperty("compatibility.profile", providers.gradleProperty("compatibilityProfile").getOrElse("quick"))
+    providers.gradleProperty("compatibilitySeed").orNull?.let { systemProperty("compatibility.seed", it) }
+    providers.gradleProperty("compatibilitySource").orNull?.let { systemProperty("compatibility.source", it) }
 }

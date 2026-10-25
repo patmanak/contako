@@ -1,5 +1,18 @@
 # Unit test plan
 
+## Generated compatibility sequences
+
+Run the [deterministic compatibility bench](../app/qa/compatibility/README.md)
+alongside the hand-written regressions. The same generator version, profile and
+seed MUST reproduce inputs and fault points. Independent expected fields MUST
+include repeated email occurrences, per-occurrence groups, Unicode, dates and
+opaque properties. Mutation interruptions MUST pass through save, claim and the
+external-effect boundary before simulated restart. Verify retained intent,
+foreign partitions and identities after each step, then two no-change drains.
+A budget interruption MUST be reported as NOT RUN, never PASS. A reduced failure
+MUST preserve its causal signature; a deliberately injected defect MUST be
+detected and reduced to demonstrate the bench's sensitivity.
+
 Unit tests exercise deterministic rules in app/src/test without an account, phone,
 network or wall-clock sleep. Run the affected classes first; run the full suite
 when preparing a release candidate or changing shared policies. A passing unit

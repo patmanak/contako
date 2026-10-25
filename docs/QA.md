@@ -60,6 +60,14 @@ preserve cleanup checkpoints; history replacement is a separate operation.
 
 ## Retained executable support
 
+The [compatibility bench](../app/qa/compatibility/README.md) generates bounded,
+seeded synthetic variations and short interrupted sequences against production
+components. Its independent expectations distinguish exact text/bytes from the
+specific Android equivalences under test. Reproducible traces and bounded
+reductions remain under ignored `app/build/qa-results/compatibility/`.
+Controlled peers do not qualify Room persistence, cryptography, Binder, an OEM
+editor or Proton; those levels require their own execution evidence.
+
 Existing meaningful JVM/instrumentation tests and versioned wire-format fixtures
 remain: historical names do not by themselves make executable coverage obsolete.
 Room schema history, legal notices and dependency verification MUST remain.

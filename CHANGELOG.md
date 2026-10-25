@@ -2,6 +2,14 @@
 
 Features and improvements by version.
 
+## 0.11.0
+
+- Add a deterministic compatibility bench for synthetic vCard variations, native
+  edits and interrupted mutation sequences, with independent field expectations,
+  bounded failure reduction and reproducible local traces.
+- Keep simulated peer checks separate from Room, physical Android and Proton
+  qualification; the bench never accesses an account or device.
+
 ## 0.10.2
 
 - Keep verified contacts progressing when another remote card cannot be read;

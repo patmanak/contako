@@ -7,6 +7,7 @@ contracts; [known limitations](KNOWN_LIMITATIONS.md) separates gaps from require
 
 | ID | Contract |
 | --- | --- |
+| D-144 | Generated compatibility checks MUST be deterministic, bounded and synthetic, exercise production boundaries with independent expected fields, and preserve a causal failure signature during reduction. Controlled peers MUST NOT be presented as qualification of Room, cryptography, a physical provider/editor or Proton. Execution traces remain ignored and local. |
 | D-001 | Specifications, source and public documentation are written in English. Operator communication preferences belong in ignored local instructions. |
 | D-002 | The app owns a complete app-private local contact store; Proton is the remote peer; Android is an editable projection. |
 | D-003 | Contact data is not application-level encrypted locally. |
