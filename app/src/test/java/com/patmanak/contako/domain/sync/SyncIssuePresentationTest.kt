@@ -4,6 +4,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SyncIssuePresentationTest {
+    @org.junit.Test fun scopedRecoveryOnlyOffersAPreviewWhenAnExactTargetIsAvailable() {
+        for (scope in SyncIssueScope.entries) {
+            val advice = SyncIssuePresentationPolicy.present(SyncProblem.INTERNAL_FAILURE, scope, canTarget = true)
+            org.junit.Assert.assertEquals(if (scope in setOf(SyncIssueScope.PROTON_IMPORT, SyncIssueScope.ANDROID_COPY))
+                SyncIssueAction.PREVIEW_TARGETED_RECOVERY else SyncIssueAction.VIEW_DIAGNOSTICS, advice.action)
+            org.junit.Assert.assertFalse(advice.localIntentSaved)
+        }
+        org.junit.Assert.assertEquals(SyncIssueAction.CONTACTS_PERMISSION,
+            SyncIssuePresentationPolicy.present(SyncProblem.ANDROID_INTEROPERABILITY_DEGRADED,
+                SyncIssueScope.ANDROID_COPY, contactsPermissionMissing = true, canTarget = true).action)
+    }
     private val policy = SyncIssuePresentationPolicy
 
     @Test fun everyCurrentProblemHasAnExplicitConservativeMappingInEveryScope() {

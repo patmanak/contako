@@ -11,6 +11,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         ContactEntity::class,
         RemoteHydrationObligationEntity::class,
+        TargetedRecoveryRequestEntity::class,
         ContactConflictEntity::class,
         ContactConflictChunk::class,
         ContactValueEntity::class,
@@ -42,12 +43,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AndroidPhotoProjectionReceiptEntity::class,
         AndroidContactIssueEntity::class,
     ],
-    version = 21,
+    version = 22,
     exportSchema = true,
 )
 internal abstract class ContakoDatabase : RoomDatabase() {
     abstract fun contactDao(): ContactDao
     abstract fun remoteHydrationObligationDao(): RemoteHydrationObligationDao
+    abstract fun targetedRecoveryRequestDao(): TargetedRecoveryRequestDao
     abstract fun contactConflictDao(): ContactConflictDao
     abstract fun contactGroupDao(): ContactGroupDao
     abstract fun contactPayloadDao(): ContactPayloadDao
@@ -88,8 +90,28 @@ internal abstract class ContakoDatabase : RoomDatabase() {
                     MIGRATION_18_19,
                     MIGRATION_19_20,
                     MIGRATION_20_21,
+                    MIGRATION_21_22,
                 )
                 .build()
+
+        val MIGRATION_21_22: Migration = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE remote_hydration_obligations ADD COLUMN generation TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE remote_hydration_obligations ADD COLUMN baseline_version TEXT")
+                db.execSQL("UPDATE remote_hydration_obligations SET generation=lower(hex(randomblob(16)))")
+                db.execSQL("ALTER TABLE sync_account_status ADD COLUMN scoped_issues_only INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS targeted_recovery_requests (
+                        account_id TEXT NOT NULL,kind TEXT NOT NULL,target_id TEXT NOT NULL,
+                        request_generation TEXT NOT NULL,source_generation TEXT NOT NULL,
+                        expected_revision INTEGER,expected_epoch INTEGER,state TEXT NOT NULL,
+                        attempt_count INTEGER NOT NULL,next_eligible_at INTEGER NOT NULL,
+                        created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,claim_token TEXT,prerequisite TEXT,
+                        PRIMARY KEY(account_id,kind,target_id)
+                    )
+                """.trimIndent())
+            }
+        }
 
         val MIGRATION_20_21: Migration = object : Migration(20, 21) {
             override fun migrate(db: SupportSQLiteDatabase) {

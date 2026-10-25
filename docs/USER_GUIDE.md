@@ -37,6 +37,28 @@ local page; generating, exporting and clearing history remain explicit actions.
 Historical failed attempts in a report may have recovered since then and are
 not themselves current alerts.
 
+## Recovering one contact operation
+
+An import problem can offer **Recheck this Proton card**. An Android issue or
+pending copy can offer **Retry this Android copy**. Open the preview to see its
+scope and prerequisites, then explicitly queue the operation. Opening or closing
+the preview makes no network/provider request and does not acknowledge an error.
+
+Rechecking reads and verifies the selected Proton card and reconciles it with
+the saved local state. Retrying an Android copy first captures native edits,
+then verifies and updates only that contact using the saved local version. If
+the contact already has pending deletion intent, the preview explicitly says
+that the existing Android-copy removal will be retried. Other linked sources
+are retained. Missing remote identity or provider context requires the stated
+prerequisite; there is no silent global repair or reset.
+
+The result distinguishes queued, running, deferred, verified, changed context
+and attention required. Retry eligibility is the earliest allowed time, not an
+Android execution promise. Repeated taps do not reset the delay or attempt
+budget. Requests survive restart and stay with their owner. A verified operation
+can leave other synchronization work pending; it is not a new full-account
+success. Normal synchronization already scheduled may also process other work.
+
 Contako runs on Android 12 or later, with one Proton account at a time.
 See [Known limitations](KNOWN_LIMITATIONS.md) for compatibility and implementation limits.
 This guide is repository documentation; it is not yet an in-app FAQ screen.

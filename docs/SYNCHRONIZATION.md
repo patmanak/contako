@@ -6,7 +6,7 @@ Every foreground/background/system entry point MUST use one account-scoped engin
 
 ## Ordered work
 
-A pass checks prerequisites and session generation, ingests owned Android changes,
+An ordinary pass checks prerequisites and session generation, ingests owned Android changes,
 reads a bounded remote index, reconciles remote changes and durable local intent,
 drains eligible uploads, then converges Android projection and records outcomes.
 Account/provider context MUST be revalidated after ingestion and reconciliation.
@@ -28,7 +28,36 @@ account, including blocked conflicts. Contact writes can restore email identitie
 and labels; desired memberships alone cannot identify removed-edge dependencies.
 This conservative ordering retains group intent without consuming retry attempts.
 
-## Triggers and cost
+## Targeted recovery
+
+A user MAY request **Recheck this Proton card** for a durable rejected-card
+obligation, or **Retry this Android copy** for a known native/copy obligation.
+Preview MUST read local state only. Queueing MUST revalidate the actual owned
+obligation, source generation, canonical revision and provider epoch, and MUST
+persist the request before scheduling the existing account runner. An arbitrary
+UI identifier MUST NOT authorize a read, adoption or provider write.
+
+A targeted-only pass MUST NOT enumerate the remote directory, consume the event
+cursor, drain unrelated uploads or project the whole Android directory. The
+Proton action MUST use one bounded verified complete-card read and the normal
+canonical reconciliation policy. A generic 404 MUST NOT become a deletion.
+Existing native changes MUST be captured durably before reconciling an already
+projected contact; required common ingestion is separate prerequisite work.
+The Android action MUST ingest the exact owned source, then plan from the newly
+committed canonical revision and use the normal writer/receipt guards. It MUST
+NOT call Proton. A bounded Android group catalog MAY be needed as a shared
+prerequisite; it MUST NOT cause whole-directory contact projection.
+
+Missing ownership, epoch, identity, permission or group context MUST defer or
+block the request with a closed reason, never start an implicit full repair or
+provider reset. Repeated confirmation, internal replanning and process restart
+MUST preserve retry eligibility and ambiguity receipts. A resolved request MUST
+qualify only its scoped operation, retain independent problems and MUST NOT
+advance the last successful whole-account synchronization timestamp. Ordinary
+work already scheduled alongside the request remains ordinary work and MUST
+not be suppressed or described as the cost of an isolated targeted pass.
+
+## Ordinary triggers and cost
 
 A rejected individual full card MUST NOT block verified independent cards.
 Before acknowledging its event cursor, the engine MUST persist either the

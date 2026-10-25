@@ -286,7 +286,16 @@ internal fun composeProductionSharedSyncRuntime(
         projectionCoordinator = projectionCoordinator,
         actionRequiredObserver = androidIngestActionRequiredObserver,
         replanObserver = androidIngestReplanObserver,
+        exactContactsReader = AndroidExactContactReader { name, id -> contactsReader.readStableRawContact(name, id) },
     )
+    val androidPreflight = AndroidRuntimeAccountPreflight(
+        RoomAndroidDurableAccountContextReader(database), AndroidContactsRuntimeProbe(applicationContext))
+    val targetedStore = com.patmanak.contako.data.local.RoomTargetedRecoveryStore(database)
+    val targetedRecovery = TargetedContactRecovery(targetedStore, dependencies.verifiedCards,
+        ProductionTargetedAndroidRecovery(database, androidPreflight, androidStage, projectionCoordinator),
+        prepareProton = { command, cancelled ->
+            prepareTargetedProtonRead(database, androidPreflight, androidStage, command, cancelled)
+        })
     val groupCatalogAvailable = java.util.concurrent.atomic.AtomicBoolean(false)
     val mutationPreparation = RoomBackedMutationPreparationGateway(account, database, dependencies.membershipReader,
         dependencies.verifiedCards, dependencies.existence)
@@ -382,6 +391,7 @@ internal fun composeProductionSharedSyncRuntime(
         statusPublisher = RoomSyncPassStatusPublisher(
             account.value,
             database,
+            hasUnscopedFailure = { (completionDetails as? ContakoSyncPassExecutor)?.hasUnscopedFailure != false },
             afterPublish = {
                 com.patmanak.contako.android.sync.AndroidSyncActionNotifier(applicationContext, RoomSyncStatusStore(database)).refresh(account.value)
             },
@@ -412,10 +422,7 @@ internal fun composeProductionSharedSyncRuntime(
                 AndroidSchedulingNetworkMonitor(applicationContext).current() == SchedulingNetworkState.OFFLINE
             },
         ),
-        androidPreflight = AndroidRuntimeAccountPreflight(
-            RoomAndroidDurableAccountContextReader(database),
-            AndroidContactsRuntimeProbe(applicationContext),
-        ),
+        androidPreflight = androidPreflight,
         androidStage = androidStage,
         onAndroidDegraded = { androidDegradation.set(SyncActionReason.ANDROID_INTEROPERABILITY_DEGRADED) },
         stageObserver = passStageObserver,
@@ -426,6 +433,7 @@ internal fun composeProductionSharedSyncRuntime(
             FrameworkAndroidProviderEpochProofWriter(applicationContext),
         ),
         fullRepairCoordinator = RoomFullRepairExecutionCoordinator(account, fullRepairStore),
+        targetedRecovery = targetedRecovery,
     )
     completionDetails = executor
     val removalCheckpoints = SharedPreferencesAccountRemovalCheckpointStore(applicationContext)
@@ -438,11 +446,19 @@ internal fun composeProductionSharedSyncRuntime(
     val lifecycleAdmission = AccountLifecycleAdmission(dependencies.isAccountReady, hasPendingCleanup)
     val runner = AccountSyncRunner(runnerScope, syncRunnerObserver, initiallyInvalidated = cleanupPending, executor = executor)
     runnerScope.launch {
+        watchTargetedRecoveryWakeups(database.targetedRecoveryRequestDao().observeNextEligible(account.value),
+            runner.isInvalidated) {
+            runner.request(com.patmanak.contako.domain.sync.SyncTrigger.TARGETED_RECOVERY)
+        }
+    }
+    runnerScope.launch {
         if (!cleanupPending && fullRepairStore.load(account) != null) {
             runner.request(
                 com.patmanak.contako.domain.sync.SyncTrigger.MANUAL,
                 com.patmanak.contako.domain.sync.SyncScope.FULL_REPAIR,
             )
+        } else if (!cleanupPending && targetedStore.hasEligible(account, System.currentTimeMillis())) {
+            runner.request(com.patmanak.contako.domain.sync.SyncTrigger.TARGETED_RECOVERY)
         }
     }
     val resolver = exactBoundAccountResolver(database, account, runner)

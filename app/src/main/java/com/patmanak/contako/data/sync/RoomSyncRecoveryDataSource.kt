@@ -36,6 +36,20 @@ internal class RoomSyncRecoveryDataSource(
     private val outboxDao = database.outboxDao()
     private val hydrationDao = database.remoteHydrationObligationDao()
     private val conflicts = com.patmanak.contako.data.local.RoomContactConflictStore(database)
+    private val targeted = com.patmanak.contako.data.local.RoomTargetedRecoveryStore(database)
+
+    override suspend fun previewTargetedRecovery(accountId: String,
+        kind: com.patmanak.contako.domain.sync.TargetedRecoveryKind, targetId: String) =
+        targeted.preview(boundAccount(accountId), kind, targetId)
+
+    override suspend fun requestTargetedRecovery(accountId: String,
+        expected: com.patmanak.contako.domain.sync.TargetedRecoveryPreview): com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult {
+        val result = targeted.queue(boundAccount(accountId), expected, clock())
+        if (result in setOf(com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult.QUEUED,
+                com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult.ALREADY_PENDING))
+            runner.request(SyncTrigger.TARGETED_RECOVERY, SyncScope.INCREMENTAL)
+        return result
+    }
 
     override fun observeConflicts(accountId: String) = conflicts.observe(boundAccount(accountId).value)
     override suspend fun loadConflict(accountId: String, contactId: String) = conflicts.detail(boundAccount(accountId).value, contactId)
@@ -55,7 +69,13 @@ internal class RoomSyncRecoveryDataSource(
             hydrationDao.observe(boundAccount(accountId).value),
             database.androidContactIssueDao().observeCurrentWithContacts(boundAccount(accountId).value),
         ) { status, pendingIds, blockedIds, importFailures, androidFailures ->
-            val snapshot = status?.toDomain() ?: SyncDashboardSnapshot(SyncDashboardState.CURRENT)
+            val storedSnapshot = status?.toDomain() ?: SyncDashboardSnapshot(SyncDashboardState.CURRENT)
+            // Only an explicitly attributed status may be rebuilt from current item sources.
+            // Legacy/unscoped account failures remain intact; zero item counters are not proof
+            // that such an independent failure was repaired by one targeted operation.
+            val snapshot = if (status?.scopedIssuesOnly == true) storedSnapshot.copy(
+                state = SyncDashboardState.PENDING, problem = null, actionRequiredCount = 0,
+            ) else storedSnapshot
             val issues = androidFailures.map { failure -> SyncAndroidContactIssue(
                 failure.issue.canonicalContactId,
                 if (failure.issue.origin == AndroidContactIssueOrigin.INGEST.name)
@@ -67,6 +87,8 @@ internal class RoomSyncRecoveryDataSource(
             val localProblem = when {
                 projectionFailures.isNotEmpty() -> SyncProblem.ANDROID_CONTACTS_PARTIALLY_PROJECTED
                 issues.isNotEmpty() -> SyncProblem.ANDROID_INTEROPERABILITY_DEGRADED
+                importFailures.any { it.category == "CRYPTOGRAPHIC_VERIFICATION_FAILED" } -> SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED
+                importFailures.isNotEmpty() -> SyncProblem.INTERNAL_FAILURE
                 else -> null
             }
             snapshot.copy(
@@ -138,6 +160,11 @@ internal class RoomSyncRecoveryDataSource(
             snapshot.copy(initialImport = progress,
                 state = if (snapshot.state == SyncDashboardState.CURRENT && !progress.remoteComplete)
                     SyncDashboardState.PENDING else snapshot.state)
+        }.combine(targeted.observe(boundAccount(accountId))) { snapshot, requests ->
+            snapshot.copy(targetedRecoveries = requests)
+        }.combine(outboxDao.observePendingCount(boundAccount(accountId).value)) { snapshot, pending ->
+            snapshot.copy(pendingMutationCount = pending,
+                state = if (pending > 0 && snapshot.state == SyncDashboardState.CURRENT) SyncDashboardState.PENDING else snapshot.state)
         }
 
     override fun observeRepair(accountId: String): Flow<RepairProgress?> =

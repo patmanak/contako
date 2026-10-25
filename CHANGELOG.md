@@ -2,6 +2,18 @@
 
 Features and improvements by version.
 
+## 0.14.0
+
+- Add previewed, durable recovery requests for one rejected Proton card or one
+  Android copy, processed by the existing account-scoped synchronization engine.
+- Revalidate ownership, source generation, revision and provider context; retain
+  retry delays and coalesce repeated requests without discarding existing intent.
+- Capture native changes before retrying an Android copy, reuse guarded writes
+  and receipts, and keep unrelated copies and Proton uploads outside that operation.
+- Show queued, deferred, resolved and intervention results separately from
+  whole-account synchronization; a missing shared prerequisite never starts a
+  full repair or provider reset automatically.
+
 ## 0.13.0
 
 - Give synchronization issues a scoped explanation and a suitable primary action:

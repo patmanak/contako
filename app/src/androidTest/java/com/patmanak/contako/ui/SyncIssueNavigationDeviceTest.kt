@@ -26,6 +26,47 @@ import org.junit.Test
 class SyncIssueNavigationDeviceTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun targetedRecoveryRequiresPreviewThenConfirmationAndNeverClaimsImmediateCompletion() {
+        val kind = com.patmanak.contako.domain.sync.TargetedRecoveryKind.PROTON_CARD
+        val snapshot = SyncDashboardSnapshot(SyncDashboardState.BLOCKED, actionRequiredCount = 1,
+            importProblems = listOf(com.patmanak.contako.domain.sync.SyncImportProblem("synthetic-remote", "Synthetic card",
+                SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED)))
+        val recovery = object : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
+            val status = MutableStateFlow<SyncDashboardSnapshot?>(snapshot)
+            var queued = 0
+            override fun observeStatus(accountId: String) = status
+            override suspend fun previewTargetedRecovery(accountId: String,
+                kind: com.patmanak.contako.domain.sync.TargetedRecoveryKind, targetId: String) =
+                com.patmanak.contako.domain.sync.TargetedRecoveryPreview(kind, targetId, "synthetic-generation", null, null,
+                    displayName = "Synthetic card")
+            override suspend fun requestTargetedRecovery(accountId: String,
+                expected: com.patmanak.contako.domain.sync.TargetedRecoveryPreview): com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult {
+                queued++
+                status.value = snapshot.copy(targetedRecoveries = listOf(com.patmanak.contako.domain.sync.TargetedRecoveryStatus(
+                    kind, expected.targetId, com.patmanak.contako.domain.sync.TargetedRecoveryState.REQUESTED)))
+                return com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult.QUEUED
+            }
+            override suspend fun requestSync(accountId: String) = error("No ordinary pass from a preview")
+        }
+        val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery))[ContactsViewModel::class.java]
+        model.selectDestination(RootDestination.SYNC)
+        compose.setContent { ContakoTheme { ContakoApp(model) } }
+        compose.onNodeWithText(compose.activity.getString(R.string.targeted_proton_title)).performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.targeted_proton_body)).assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, recovery.queued) }
+        compose.onNodeWithText(compose.activity.getString(R.string.action_cancel)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(0, recovery.queued) }
+        compose.onNodeWithText(compose.activity.getString(R.string.targeted_proton_title)).performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.targeted_confirm)).performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.targeted_queued)).performScrollTo().assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(1, recovery.queued)
+            assertEquals(snapshot.importProblems, recovery.status.value?.importProblems)
+            owner.viewModelStore.clear()
+        }
+    }
+
     @Test fun unknownIssueOpensDiagnosticsWithoutRetryGenerationOrAcknowledgement() {
         val snapshot = SyncDashboardSnapshot(SyncDashboardState.BLOCKED, actionRequiredCount = 1,
             problem = SyncProblem.INTERNAL_FAILURE)

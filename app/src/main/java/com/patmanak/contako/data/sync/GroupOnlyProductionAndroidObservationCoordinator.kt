@@ -75,12 +75,15 @@ internal class GroupOnlyProductionAndroidBoundedObservationCoordinator private c
         AndroidProductionContactObservationCoordinator.FAIL_CLOSED,
     private val actionRequiredObserver: AndroidIngestActionRequiredObserver =
         AndroidIngestActionRequiredObserver { },
-) : AndroidBoundedObservationCoordinator {
+) : AndroidBoundedObservationCoordinator, AndroidScopedFailureProofSource {
+    @Volatile override var lastFailureIsFullyScoped: Boolean = false
+        private set
 
     override suspend fun ingestGroups(
         context: AndroidInteroperabilityContext,
         pages: List<AndroidOwnedGroupRowPage>,
     ): AndroidBoundedPageResult {
+        lastFailureIsFullyScoped = false
         if (!hasExactPageChain(context, pages)) {
             return repair(AndroidIngestActionRequiredReason.GROUP_PAGE_CHAIN)
         }
@@ -124,7 +127,13 @@ internal class GroupOnlyProductionAndroidBoundedObservationCoordinator private c
     override suspend fun ingestContacts(
         context: AndroidInteroperabilityContext,
         page: AndroidStableRawContactObservationPage,
-    ): AndroidBoundedPageResult = contactCoordinator.ingest(context, page)
+    ): AndroidBoundedPageResult {
+        lastFailureIsFullyScoped = false
+        val result = contactCoordinator.ingest(context, page)
+        lastFailureIsFullyScoped = result == AndroidBoundedPageResult.PartiallyApplied &&
+            (contactCoordinator as? AndroidScopedFailureProofSource)?.lastFailureIsFullyScoped == true
+        return result
+    }
 
     private fun repair(reason: AndroidIngestActionRequiredReason): AndroidBoundedPageResult.RepairRequired =
         AndroidBoundedPageResult.RepairRequired.also {

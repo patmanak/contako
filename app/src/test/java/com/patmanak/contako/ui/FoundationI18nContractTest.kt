@@ -25,7 +25,7 @@ class FoundationI18nContractTest {
                 // Stable navigation/test keys, vCard types, locale pattern and visual flags;
                 // none is untranslated prose presented as a user instruction.
                 "import-overview", "issue:\${it.key}", "pending:\${it.id}", "android:\${it.id}",
-                "local-diagnostics", "contact-editor-save-error",
+                "recovery:\${it.kind}:\${it.targetId}", "local-diagnostics", "contact-editor-save-error",
                 "__custom__", "", "home", "work", "cell", "other", "mobile",
                 "contact_editor_top_save", "contact_editor_bottom_save", "group_editor_top_save", "group_editor_bottom_save",
                 "contact_editor_fields", "contact_editor_field_picker", "contact_value_options_\${value.id}",
@@ -58,6 +58,9 @@ class FoundationI18nContractTest {
                 "conflict:\${conflict.contactId}", "blocked:\${item.type}:\${item.id}",
                 "import:\${item.remoteId}", "android:\${item.kind}:\${item.contactId}",
                 "contact:\${contact.id}", "permission", "account",
+            ),
+            "TargetedRecoveryDialog.kt" to setOf(
+                "TargetedRecoveryPanelState(REDACTED, loading=\$loading, submitting=\$submitting)",
             ),
         )
 

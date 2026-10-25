@@ -409,4 +409,24 @@
     <string name="sync_issue_review">Element prüfen</string>
     <string name="sync_issue_diagnostics">Diagnose ansehen</string>
     <string name="sync_issue_history">Der Diagnoseverlauf kann inzwischen behobene Fehler enthalten. Er belegt kein aktuelles Problem.</string>
+    <string name="targeted_proton_title">Diese Proton-Karte erneut prüfen</string>
+    <string name="targeted_android_title">Diese Android-Kopie fortsetzen</string>
+    <string name="targeted_proton_body">Nur diese Proton-Karte lesen und prüfen, dann mit der gespeicherten lokalen Version abgleichen. Telefonänderungen müssen gegebenenfalls zuerst erfasst werden. Es werden keine Änderungen an Proton gesendet oder Android-Kopien abgeschlossen.</string>
+    <string name="targeted_android_body">Telefonänderungen erfassen, dann die Android-Kopie dieses Kontakts anhand der gespeicherten lokalen Version prüfen und aktualisieren. Es werden keine Änderungen an Proton gesendet.</string>
+    <string name="targeted_android_delete_body">Die bereits angeforderte Entfernung der eigenen Android-Kopie dieses Kontakts prüfen und wiederholen. Andere Kontaktquellen bleiben unverändert.</string>
+    <string name="targeted_confirm">Vorgang vormerken</string>
+    <string name="targeted_refresh">Vorschau aktualisieren</string>
+    <string name="targeted_changed">Kontakt oder Kontext haben sich geändert. Prüfe eine neue Vorschau.</string>
+    <string name="targeted_unavailable">Dieser Vorgang ist derzeit nicht verfügbar. Es wurde keine vollständige Reparatur gestartet.</string>
+    <string name="targeted_no_obligation">Für dieses Ziel ist keine Wiederherstellung mehr ausstehend.</string>
+    <string name="targeted_permission">Erlaube den Kontaktzugriff, bevor du die Android-Kopie erneut versuchst.</string>
+    <string name="targeted_dependency">Eine gemeinsame Voraussetzung fehlt. Es wurde keine vollständige Reparatur oder Anbieter-Zurücksetzung gestartet.</string>
+    <string name="targeted_identity">Die entfernte Identität steht noch nicht fest. Gleiche sie durch normale Synchronisierung ab.</string>
+    <string name="targeted_queued">Vorgang auf diesem Gerät vorgemerkt.</string>
+    <string name="targeted_running">Dieser Vorgang wird geprüft.</string>
+    <string name="targeted_deferred">Dieser Vorgang wartet auf Voraussetzungen oder einen zulässigen Wiederholungsversuch.</string>
+    <string name="targeted_resolved">Dieser Vorgang wurde geprüft. Andere Synchronisierungsarbeiten können noch ausstehen.</string>
+    <string name="targeted_attention">Dieser Vorgang benötigt weiterhin Aufmerksamkeit. Die ursprüngliche Absicht bleibt erhalten.</string>
+    <string name="targeted_retry_after">Frühester zulässiger Versuch: %1$s. Android kann ihn später ausführen.</string>
+    <string name="targeted_scope_note">Eine bereits geplante normale Synchronisierung kann auch andere Änderungen verarbeiten.</string>
 </resources>

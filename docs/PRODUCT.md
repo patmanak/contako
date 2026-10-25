@@ -24,6 +24,10 @@ product target; [known limitations](KNOWN_LIMITATIONS.md) describe current gaps.
 - Automatic synchronization, manual incremental sync and explicit full repair
   MUST share one account-scoped engine. Pending, retry and action-required states
   MUST distinguish Proton delivery from Android projection.
+- A known rejected Proton card or native/copy obligation MUST support a previewed,
+  durable targeted recovery through that same engine. The action MUST preserve
+  current ownership, revision, epoch, retry and write-receipt guards, and MUST
+  distinguish scoped success from complete account convergence.
 - Authentication MUST support login, TOTP/recovery-code proof, human verification,
   session restoration and revocation. Unsupported security-key-only authentication
   MUST provide an actionable message.

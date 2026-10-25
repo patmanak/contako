@@ -74,6 +74,11 @@ internal class RoomRemoteCanonicalReconciliationStore(
             ?.isRepeatedEmailRecoveryCandidate(stored.group.revision, stored.group.pendingMutationRevision) == true
     }
 
+    /** Caller MUST hold the targeted transaction and its owner/revision/source-generation guards. */
+    internal suspend fun reconcileTargetedVerified(account: AccountScope, verified: VerifiedContactCard) {
+        reconcileHydrated(account, verified, null)
+    }
+
     override suspend fun commit(
         account: AccountScope,
         plan: ContactInventoryPlan,

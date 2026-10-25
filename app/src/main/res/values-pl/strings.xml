@@ -423,4 +423,24 @@
     <string name="sync_issue_review">Sprawdź element</string>
     <string name="sync_issue_diagnostics">Pokaż diagnostykę</string>
     <string name="sync_issue_history">Historia może zawierać wcześniejsze błędy, które już ustąpiły. Nie oznacza to aktualnego problemu.</string>
+    <string name="targeted_proton_title">Sprawdź ponownie tę kartę Proton</string>
+    <string name="targeted_android_title">Ponów tę kopię Android</string>
+    <string name="targeted_proton_body">Odczytaj i zweryfikuj tylko tę kartę Proton, a następnie uzgodnij ją z zapisaną wersją lokalną. Najpierw może być konieczne przechwycenie zmian telefonu. Nie wysyła zmian do Proton ani nie kończy kopii Android.</string>
+    <string name="targeted_android_body">Przechwyć zmiany telefonu, a następnie sprawdź i zaktualizuj kopię Android tego kontaktu z zapisanej wersji lokalnej. Nie wysyła zmian do Proton.</string>
+    <string name="targeted_android_delete_body">Sprawdź i ponów wcześniej żądane usunięcie własnej kopii Android tego kontaktu. Inne źródła pozostają bez zmian.</string>
+    <string name="targeted_confirm">Dodaj operację do kolejki</string>
+    <string name="targeted_refresh">Odśwież podgląd</string>
+    <string name="targeted_changed">Kontakt lub jego kontekst uległ zmianie. Sprawdź nowy podgląd.</string>
+    <string name="targeted_unavailable">Ta operacja jest obecnie niedostępna. Nie uruchomiono pełnej naprawy.</string>
+    <string name="targeted_no_obligation">Ten cel nie ma już operacji do wznowienia.</string>
+    <string name="targeted_permission">Zezwól na dostęp do kontaktów przed ponowieniem kopii Android.</string>
+    <string name="targeted_dependency">Brakuje wspólnego warunku. Nie uruchomiono pełnej naprawy ani resetowania dostawcy.</string>
+    <string name="targeted_identity">Tożsamość zdalna nie została ustalona. Uzgodnij ją przez zwykłą synchronizację.</string>
+    <string name="targeted_queued">Operacja oczekuje w kolejce na tym urządzeniu.</string>
+    <string name="targeted_running">Trwa weryfikacja tej operacji.</string>
+    <string name="targeted_deferred">Operacja czeka na wymagane warunki lub dozwoloną ponowną próbę.</string>
+    <string name="targeted_resolved">Operacja została zweryfikowana. Inne zadania synchronizacji mogą nadal oczekiwać.</string>
+    <string name="targeted_attention">Operacja nadal wymaga uwagi. Pierwotny zamiar jest zachowany.</string>
+    <string name="targeted_retry_after">Najwcześniejsza dozwolona próba: %1$s. Android może wykonać ją później.</string>
+    <string name="targeted_scope_note">Już zaplanowana zwykła synchronizacja może również przetwarzać inne zmiany.</string>
 </resources>

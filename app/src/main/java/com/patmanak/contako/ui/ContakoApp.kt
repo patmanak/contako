@@ -205,6 +205,8 @@ fun ContakoApp(
             onViewProblems = { dismissInitialImport(); viewModel.openSecondary(SecondaryDestination.ACTIONS) })
     }
     val conflictPanel by viewModel.conflictPanel.collectAsState()
+    val targetedPanel by viewModel.targetedRecoveryPanel.collectAsState()
+    if (targetedPanel.kind != null) TargetedRecoveryDialog(targetedPanel, viewModel)
     if (conflictPanel.contactId != null) ContactConflictDialog(conflictPanel, viewModel)
     var requestSearchFocus by remember(state.navigation.destination) { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
@@ -933,6 +935,7 @@ private fun EmptyDirectory(title: String, body: String) {
 private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, onConfigureNotifications: () -> Unit,
     onReauthenticate: () -> Unit) {
     val conflicts by viewModel.conflicts.collectAsState()
+    val issueItems = currentSyncIssues(state, conflicts)
     val semanticColors = LocalContakoColors.current
     val syncing = state.syncActivity != SyncActivity.IDLE
     val statusColor = when (state.syncDashboard.state) {
@@ -1015,7 +1018,7 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
             }
         }
 
-        items(currentSyncIssues(state, conflicts), key = { "issue:${it.key}" }) { issue ->
+        items(issueItems, key = { "issue:${it.key}" }) { issue ->
             SyncIssueCard(issue, state, viewModel, onReauthenticate)
         }
         val waitingContacts = state.pendingContacts.filterNot { it.id in state.syncDashboard.blockedMutationContactIds }
@@ -1035,6 +1038,26 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
             }
             items(waitingAndroidContacts, key = { "android:${it.id}" }) { contact ->
                 ContactRow(contact, onOpen = { viewModel.openContactFromGroup(contact) })
+                TextButton(onClick = { viewModel.openTargetedRecovery(
+                    com.patmanak.contako.domain.sync.TargetedRecoveryKind.ANDROID_COPY, contact.id) }) {
+                    Text(stringResource(R.string.targeted_android_title))
+                }
+            }
+        }
+        val unlistedRecoveries = state.syncDashboard.targetedRecoveries.filter { recovery -> issueItems.none { issue ->
+            issue.targetId == recovery.targetId && when (issue.advice.scope) {
+                com.patmanak.contako.domain.sync.SyncIssueScope.PROTON_IMPORT ->
+                    recovery.kind == com.patmanak.contako.domain.sync.TargetedRecoveryKind.PROTON_CARD
+                com.patmanak.contako.domain.sync.SyncIssueScope.ANDROID_COPY ->
+                    recovery.kind == com.patmanak.contako.domain.sync.TargetedRecoveryKind.ANDROID_COPY
+                else -> false
+            }
+        } }
+        items(unlistedRecoveries, key = { "recovery:${it.kind}:${it.targetId}" }) { recovery ->
+            InfoCard(recovery.displayName?.takeIf(String::isNotBlank) ?: stringResource(
+                if (recovery.kind == com.patmanak.contako.domain.sync.TargetedRecoveryKind.PROTON_CARD)
+                    R.string.targeted_proton_title else R.string.targeted_android_title)) {
+                TargetedRecoveryStatusText(recovery)
             }
         }
         item {

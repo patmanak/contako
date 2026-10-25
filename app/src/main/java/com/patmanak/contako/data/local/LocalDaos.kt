@@ -44,6 +44,8 @@ internal data class BlockedSyncItemRecord(
 
 @Dao
 internal interface ContactDao {
+    @Query("SELECT * FROM contacts WHERE account_id=:accountId AND remote_contact_id=:remoteId LIMIT 2")
+    suspend fun getEntitiesByRemoteContactId(accountId: String, remoteId: String): List<ContactEntity>
     @Query("""
         SELECT c.id AS contact_id, c.remote_contact_id, v.id AS value_id, v.metadata_encoding
         FROM contacts c JOIN contact_values v ON v.account_id = c.account_id AND v.contact_id = c.id
@@ -858,6 +860,8 @@ internal interface AndroidProjectionLedgerDao {
 
 @Dao
 internal interface AccountRemovalDao {
+    @Query("DELETE FROM targeted_recovery_requests WHERE account_id=:accountId")
+    suspend fun deleteTargetedRecovery(accountId: String)
     @Query("DELETE FROM remote_hydration_obligations WHERE account_id = :accountId")
     suspend fun deleteHydrationObligations(accountId: String)
     @Query("SELECT COUNT(*) FROM outbox_mutations WHERE account_id = :accountId")
@@ -887,6 +891,7 @@ internal interface AccountRemovalDao {
     @Transaction
     suspend fun deleteAccount(accountId: String) {
         require(accountId.isNotBlank())
+        deleteTargetedRecovery(accountId)
         deleteOutbox(accountId)
         deleteHydrationObligations(accountId)
         deleteSyncStatus(accountId)

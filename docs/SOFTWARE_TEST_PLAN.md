@@ -1,5 +1,22 @@
 # Software integration test plan
 
+## Durable targeted recovery
+
+Exercise request persistence/reopening, source generations, transaction rollback,
+owner cleanup, stale revisions/epochs, duplicate confirmation and retry deadlines
+against the real Room store. Validate the additive migration and isolation when
+only request metadata remains. Test one target among 300 witnesses with a real
+canonical reconciliation transaction, independently asserting changed/unchanged
+fields, occurrence identities and surviving per-email group edges.
+
+The targeted Android integration MUST call the original item executor seam and
+require current contact/membership receipts before resolution. A synthetic
+`Applied` without those receipts, a concurrent revision or a failed issue clear
+MUST remain unresolved. Native ingestion MUST commit canonical intent/outbox
+before projection; target-only page readers MUST not touch other contact rows.
+These controlled seams and database cases do not qualify physical OEM photo
+processing or Proton delivery.
+
 ## Issue navigation
 
 `SyncIssueNavigationDeviceTest` checks that an unknown problem opens local

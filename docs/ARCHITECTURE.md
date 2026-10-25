@@ -1,5 +1,27 @@
 # Architecture
 
+## Targeted recovery metadata
+
+Targeted contact recovery is a durable request model, separate from the contact
+mutation outbox. Requests refer to existing owner-scoped obligations and retain
+their source generation, revision, provider epoch, claim and retry state. They
+MUST NOT copy vCards, photos or authentication material. Preview is read-only;
+queueing and completion use guarded transactions under lifecycle admission and
+the existing serialized account runner.
+
+Proton recovery invokes the existing verified-card reconciliation primitive,
+including its conflict and preservation rules. Android recovery captures native
+intent first and invokes the existing item projector and receipt verification.
+The operation result is local scoped evidence, not a whole-account success.
+Request metadata follows the approved local-storage/backup policy and MUST be
+included in owner-data presence checks and transactional account cleanup.
+
+Account-health publication distinguishes failures fully attributed to durable
+item sources from unclassified/global failures. Only proven item-only alerts
+may be rebuilt from current obligations after targeted recovery; the resulting
+pending state MUST NOT advance global success time. Older unclassified health
+records remain conservative until a normal pass establishes attribution.
+
 ## Source-of-truth model
 
 The canonical data model belongs to Contako.

@@ -244,7 +244,9 @@ internal class ProductionAndroidContactObservationCoordinator(
         AndroidProviderAccountName, AndroidStableRawContactObservation,
         com.patmanak.contako.data.local.AndroidPhotoProviderWriteJournalEntity,
     ) -> AndroidExistingContactPlanRepairReason? = { _, _, _ -> AndroidExistingContactPlanRepairReason.CONTACT_BASELINE_PHOTO_PROOF_FAILED },
-) : AndroidProductionContactObservationCoordinator {
+) : AndroidProductionContactObservationCoordinator, AndroidScopedFailureProofSource {
+    @Volatile override var lastFailureIsFullyScoped: Boolean = false
+        private set
     @Volatile private var catalogSession: CatalogSession? = null
     private val contactIssues = RoomAndroidContactIssueStore(database)
 
@@ -252,6 +254,7 @@ internal class ProductionAndroidContactObservationCoordinator(
         context: AndroidInteroperabilityContext,
         pages: List<AndroidOwnedGroupRowPage>,
     ) {
+        lastFailureIsFullyScoped = false
         catalogSession = CatalogSession(
             context.account,
             context.androidAccountName,
@@ -264,16 +267,20 @@ internal class ProductionAndroidContactObservationCoordinator(
         context: AndroidInteroperabilityContext,
         page: AndroidStableRawContactObservationPage,
     ): AndroidBoundedPageResult {
+        lastFailureIsFullyScoped = false
         val catalog = catalogSession?.takeIf {
             it.account == context.account && it.androidAccountName == context.androidAccountName &&
                 it.providerEpoch == context.providerEpoch
         }?.catalog ?: return replan(AndroidIngestReplanReason.CONTACT_CATALOG_STALE)
         var incompleteContacts = false
+        var everyIncompleteFailureRetained = true
         for (observation in page.observations) {
             val lifecycle = ingestLifecycleObservation(context, observation)
             if (lifecycle != null) {
                 if (lifecycle == AndroidBoundedPageResult.PartiallyApplied) {
                     incompleteContacts = true
+                    // Lifecycle helpers can fail without an identified persisted contact.
+                    everyIncompleteFailureRetained = false
                     continue
                 }
                 if (lifecycle != AndroidBoundedPageResult.Applied) return lifecycle
@@ -292,12 +299,13 @@ internal class ProductionAndroidContactObservationCoordinator(
                     runCatching { existingPlanRepairObserver.onRepairRequired(result.reason) }
                     // Retain the exact, independently validated owner identity for local UI.
                     // The diagnostic observer deliberately remains identity-free.
-                    contactIssues.recordIngestFailure(context, observation.rawContact, result.reason)
+                    val retained = contactIssues.recordIngestFailure(context, observation.rawContact, result.reason)
                     val failure = repair(AndroidIngestActionRequiredReason.CONTACT_EXISTING_PLAN)
                     if (isContactLocalPlanFailure(result.reason, result.codecFailure)) {
                         // No intent was committed or acknowledged for this row. Keep its
                         // journal/baseline/DIRTY state intact, but do not strand later rows.
                         incompleteContacts = true
+                        everyIncompleteFailureRetained = retained && everyIncompleteFailureRetained
                         continue
                     }
                     return failure
@@ -350,6 +358,7 @@ internal class ProductionAndroidContactObservationCoordinator(
             }
             contactIssues.clearIngestFailure(context, observation.rawContact)
         }
+        lastFailureIsFullyScoped = incompleteContacts && everyIncompleteFailureRetained
         return if (incompleteContacts) AndroidBoundedPageResult.PartiallyApplied else AndroidBoundedPageResult.Applied
     }
 

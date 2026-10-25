@@ -59,6 +59,8 @@ data class SyncDashboardSnapshot(
     val blockedItems: List<SyncBlockedItem> = emptyList(),
     /** Private local first-import observations; independent of runner activity and outbox size. */
     val initialImport: InitialImportSnapshot? = null,
+    /** Private request/result locators, excluded from diagnostics. */
+    val targetedRecoveries: List<TargetedRecoveryStatus> = emptyList(),
 ) {
     override fun toString(): String = "SyncDashboardSnapshot(state=$state, pendingMutationCount=$pendingMutationCount, " +
         "actionRequiredCount=$actionRequiredCount, problem=$problem, androidPendingCount=${androidPendingContactIds.size}, " +
@@ -86,6 +88,10 @@ enum class RepairStartResult { CONFIRMATION_REQUIRED, STARTED, RESUMED }
 
 /** Presentation-neutral recovery port implemented by the synchronization data adapter. */
 interface SyncRecoveryDataSource {
+    suspend fun previewTargetedRecovery(accountId: String, kind: TargetedRecoveryKind,
+        targetId: String): TargetedRecoveryPreview? = null
+    suspend fun requestTargetedRecovery(accountId: String,
+        expected: TargetedRecoveryPreview): TargetedRecoveryQueueResult = TargetedRecoveryQueueResult.UNAVAILABLE
     fun observeConflicts(accountId: String): Flow<List<ContactConflictSummary>> = flowOf(emptyList())
     suspend fun loadConflict(accountId: String, contactId: String): ContactConflictDetail? = null
     suspend fun chooseConflict(accountId: String, expected: ContactConflictSummary, choice: ContactConflictChoice): Boolean = false

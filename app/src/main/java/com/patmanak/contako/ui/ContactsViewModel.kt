@@ -177,6 +177,52 @@ class ContactsViewModel(
     private val mutableConflictPanel = MutableStateFlow(ConflictPanelState())
     val conflictPanel: StateFlow<ConflictPanelState> = mutableConflictPanel
     private var conflictPanelGeneration = 0L
+    private val mutableTargetedRecoveryPanel = MutableStateFlow(TargetedRecoveryPanelState())
+    val targetedRecoveryPanel: StateFlow<TargetedRecoveryPanelState> = mutableTargetedRecoveryPanel
+    private var targetedRecoveryPanelGeneration = 0L
+
+    fun dismissTargetedRecovery() {
+        if (mutableTargetedRecoveryPanel.value.submitting) return
+        targetedRecoveryPanelGeneration++
+        mutableTargetedRecoveryPanel.value = TargetedRecoveryPanelState()
+    }
+
+    fun openTargetedRecovery(kind: com.patmanak.contako.domain.sync.TargetedRecoveryKind, targetId: String) {
+        if (!acceptsMutation() || targetId.isBlank() || mutableTargetedRecoveryPanel.value.submitting) return
+        val generation = ++targetedRecoveryPanelGeneration
+        mutableTargetedRecoveryPanel.value = TargetedRecoveryPanelState(kind, targetId, loading = true)
+        viewModelScope.launch {
+            val preview = try { syncRecoveryDataSource.previewTargetedRecovery(accountId, kind, targetId) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            if (acceptsMutation() && generation == targetedRecoveryPanelGeneration) {
+                val matching = preview?.takeIf { it.kind == kind && it.targetId == targetId }
+                mutableTargetedRecoveryPanel.value = TargetedRecoveryPanelState(kind, targetId, matching, failed = matching == null)
+            }
+        }
+    }
+
+    fun confirmTargetedRecovery() {
+        if (!acceptsMutation()) return
+        val panel = mutableTargetedRecoveryPanel.value.takeUnless { it.loading || it.submitting || it.failed } ?: return
+        val preview = panel.preview?.takeIf { it.canQueue } ?: return
+        val generation = targetedRecoveryPanelGeneration
+        mutableTargetedRecoveryPanel.value = panel.copy(submitting = true)
+        launchMutation(onRejected = {
+            if (generation == targetedRecoveryPanelGeneration) mutableTargetedRecoveryPanel.value = panel.copy(failed = true)
+        }) {
+            val result = try { syncRecoveryDataSource.requestTargetedRecovery(accountId, preview) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult.UNAVAILABLE }
+            if (acceptsMutation() && generation == targetedRecoveryPanelGeneration) {
+                mutableTargetedRecoveryPanel.value = when (result) {
+                    com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult.QUEUED,
+                    com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult.ALREADY_PENDING -> TargetedRecoveryPanelState()
+                    else -> panel.copy(failed = true, queueResult = result)
+                }
+            }
+        }
+    }
 
     fun dismissConflict() {
         if (mutableConflictPanel.value.busy) return
@@ -349,6 +395,8 @@ class ContactsViewModel(
         groupDeletionStatus.value = DeletionStatus()
         conflictPanelGeneration++
         mutableConflictPanel.value = ConflictPanelState()
+        targetedRecoveryPanelGeneration++
+        mutableTargetedRecoveryPanel.value = TargetedRecoveryPanelState()
         showAccountMenu.value = false
         showUnsavedConfirmation.value = false
         showRepairConfirmation.value = false

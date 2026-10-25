@@ -37,7 +37,8 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
         result += SyncIssueItem(key, id, name, problem,
             SyncIssuePresentationPolicy.present(problem, scope, snapshot.state, durable, compare, review,
                 contactsPermissionMissing = !state.contactsPermissionGranted,
-                conflictChoiceQueued = queuedChoice), review, deleted)
+                conflictChoiceQueued = queuedChoice,
+                canTarget = id != null && scope in setOf(SyncIssueScope.PROTON_IMPORT, SyncIssueScope.ANDROID_COPY)), review, deleted)
     }
     conflicts.forEach { conflict ->
         val contact = contacts[conflict.contactId]
@@ -98,6 +99,15 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
 internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewModel: ContactsViewModel,
     onReauthenticate: () -> Unit) {
     val advice = item.advice
+    val targetedKind = when (advice.scope) {
+        SyncIssueScope.PROTON_IMPORT -> TargetedRecoveryKind.PROTON_CARD
+        SyncIssueScope.ANDROID_COPY -> item.targetId?.let { TargetedRecoveryKind.ANDROID_COPY }
+        else -> null
+    }
+    val targetedStatus = state.syncDashboard.targetedRecoveries.firstOrNull {
+        it.kind == targetedKind && it.targetId == item.targetId
+    }
+    val targetIsPrimary = targetedKind != null && item.targetId != null && advice.action == SyncIssueAction.PREVIEW_TARGETED_RECOVERY
     val scopeLabel = stringResource(when (advice.scope) {
         SyncIssueScope.ACCOUNT -> R.string.sync_issue_account
         SyncIssueScope.CONTACT -> R.string.contact_detail_title
@@ -127,7 +137,14 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
         if (advice.localIntentSaved) Text(stringResource(R.string.sync_issue_saved),
             style = MaterialTheme.typography.bodySmall)
         if (item.isDeleted) Text(stringResource(R.string.sync_deletion_pending))
-        if (advice.action == SyncIssueAction.WAIT) Text(stringResource(R.string.conflict_queued))
+        targetedStatus?.let { TargetedRecoveryStatusText(it) }
+        if (targetIsPrimary) {
+            Button(onClick = { viewModel.openTargetedRecovery(requireNotNull(targetedKind), requireNotNull(item.targetId)) },
+                enabled = targetedStatus?.state !in setOf(TargetedRecoveryState.REQUESTED, TargetedRecoveryState.RUNNING)) {
+                Text(stringResource(if (targetedKind == TargetedRecoveryKind.PROTON_CARD) R.string.targeted_proton_title
+                    else R.string.targeted_android_title))
+            }
+        } else if (advice.action == SyncIssueAction.WAIT) Text(stringResource(R.string.conflict_queued))
         else Button(enabled = advice.action != SyncIssueAction.RETRY_SYNC || state.syncActivity == SyncActivity.IDLE,
             onClick = {
                 when (advice.action) {
@@ -137,6 +154,9 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
                     SyncIssueAction.COMPARE_VERSIONS -> item.targetId?.let(viewModel::openConflict)
                     SyncIssueAction.REVIEW_ITEM -> review()
                     SyncIssueAction.VIEW_DIAGNOSTICS -> diagnostics()
+                    SyncIssueAction.PREVIEW_TARGETED_RECOVERY -> targetedKind?.let { kind ->
+                        item.targetId?.let { viewModel.openTargetedRecovery(kind, it) }
+                    }
                     SyncIssueAction.WAIT -> Unit
                 }
             }) {
@@ -148,6 +168,8 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
                 SyncIssueAction.COMPARE_VERSIONS -> R.string.conflict_review
                 SyncIssueAction.REVIEW_ITEM -> R.string.sync_issue_review
                 SyncIssueAction.VIEW_DIAGNOSTICS -> R.string.sync_issue_diagnostics
+                SyncIssueAction.PREVIEW_TARGETED_RECOVERY -> if (targetedKind == TargetedRecoveryKind.PROTON_CARD)
+                    R.string.targeted_proton_title else R.string.targeted_android_title
                 SyncIssueAction.WAIT -> R.string.conflict_queued
             }))
         }
@@ -155,7 +177,7 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
             if (item.canReview && advice.action != SyncIssueAction.REVIEW_ITEM) {
                 TextButton(onClick = ::review) { Text(stringResource(R.string.sync_issue_review)) }
             }
-            if (advice.action != SyncIssueAction.VIEW_DIAGNOSTICS) {
+            if (targetIsPrimary || advice.action != SyncIssueAction.VIEW_DIAGNOSTICS) {
                 TextButton(onClick = ::diagnostics) { Text(stringResource(R.string.sync_issue_diagnostics)) }
             }
         }

@@ -409,4 +409,24 @@
     <string name="sync_issue_review">Review item</string>
     <string name="sync_issue_diagnostics">View diagnostics</string>
     <string name="sync_issue_history">Diagnostic history can contain failures from earlier attempts that have since recovered. It does not establish a current problem.</string>
+    <string name="targeted_proton_title">Recheck this Proton card</string>
+    <string name="targeted_android_title">Retry this Android copy</string>
+    <string name="targeted_proton_body">Read and verify only this Proton card, then reconcile it with the saved local version. Phone changes may need to be captured first. This does not send edits to Proton or complete Android delivery.</string>
+    <string name="targeted_android_body">Capture any changes on this phone, then verify and update this contact’s Android copy from the saved local version. This does not send changes to Proton.</string>
+    <string name="targeted_android_delete_body">Verify and retry the already requested removal of this contact’s own Android copy. Other contact sources remain unchanged.</string>
+    <string name="targeted_confirm">Queue this operation</string>
+    <string name="targeted_refresh">Refresh preview</string>
+    <string name="targeted_changed">The contact or its context changed. Review a fresh preview.</string>
+    <string name="targeted_unavailable">This operation is currently unavailable. No full repair was started.</string>
+    <string name="targeted_no_obligation">This target no longer has an operation to recover.</string>
+    <string name="targeted_permission">Allow Contacts access before retrying the Android copy.</string>
+    <string name="targeted_dependency">A shared prerequisite is not ready. No full repair or provider reset was started.</string>
+    <string name="targeted_identity">The remote identity is not established. Use normal synchronization to reconcile it.</string>
+    <string name="targeted_queued">Operation queued on this device.</string>
+    <string name="targeted_running">This operation is being verified.</string>
+    <string name="targeted_deferred">This operation is waiting for its prerequisites or retry eligibility.</string>
+    <string name="targeted_resolved">This operation was verified. Other synchronization work may still be pending.</string>
+    <string name="targeted_attention">This operation still needs attention. Its existing intent is retained.</string>
+    <string name="targeted_retry_after">Earliest eligible retry: %1$s. Android scheduling can run later.</string>
+    <string name="targeted_scope_note">Already scheduled normal synchronization can also process other changes.</string>
 </resources>

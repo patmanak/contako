@@ -51,6 +51,13 @@ internal data class AndroidContactIssueWithContact(
 internal interface AndroidContactIssueDao {
     @Query("""
         SELECT issue.* FROM android_contact_issues issue
+        JOIN android_projection_accounts account ON account.account_id=issue.account_id
+            AND account.provider_epoch=issue.provider_epoch
+        WHERE issue.account_id=:accountId ORDER BY issue.canonical_contact_id,issue.origin
+    """)
+    suspend fun getCurrent(accountId: String): List<AndroidContactIssueEntity>
+    @Query("""
+        SELECT issue.* FROM android_contact_issues issue
         JOIN android_projection_accounts account ON account.account_id = issue.account_id
             AND account.provider_epoch = issue.provider_epoch
         JOIN contacts contact ON contact.account_id = issue.account_id

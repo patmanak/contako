@@ -1765,6 +1765,103 @@ class ContactsViewModelTest {
         assertEquals(group.id, model.uiState.value.navigation.current.selectedId)
     }
 
+    @Test fun targetedPreviewIsReadOnlyAndRepeatedConfirmQueuesTheExactPreviewOnce() = runTest(dispatcher) {
+        val kind = com.patmanak.contako.domain.sync.TargetedRecoveryKind.ANDROID_COPY
+        val preview = com.patmanak.contako.domain.sync.TargetedRecoveryPreview(kind, "target", "proof", 4, 2)
+        val finish = CompletableDeferred<Unit>()
+        var queued = 0
+        val recovery = object : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
+            override suspend fun previewTargetedRecovery(accountId: String,
+                kind: com.patmanak.contako.domain.sync.TargetedRecoveryKind, targetId: String) = preview
+            override suspend fun requestTargetedRecovery(accountId: String,
+                expected: com.patmanak.contako.domain.sync.TargetedRecoveryPreview): com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult {
+                assertEquals(preview, expected)
+                queued++
+                finish.await()
+                return com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult.QUEUED
+            }
+            override suspend fun requestSync(accountId: String) = error("Preview must not start ordinary synchronization")
+        }
+        val model = ContactsViewModel(FakeRepository(emptyList()), recovery)
+        model.openTargetedRecovery(kind, "target")
+        runCurrent()
+        assertEquals(0, queued)
+        assertEquals(preview, model.targetedRecoveryPanel.value.preview)
+        model.confirmTargetedRecovery()
+        model.confirmTargetedRecovery()
+        runCurrent()
+        assertEquals(1, queued)
+        assertTrue(model.targetedRecoveryPanel.value.submitting)
+        finish.complete(Unit)
+        runCurrent()
+        assertNull(model.targetedRecoveryPanel.value.kind)
+    }
+
+    @Test fun staleTargetedPreviewCannotReappearAfterOwnerCleanup() = runTest(dispatcher) {
+        val kind = com.patmanak.contako.domain.sync.TargetedRecoveryKind.PROTON_CARD
+        val finish = CompletableDeferred<Unit>()
+        val gate = AccountLifecycleAdmission()
+        val recovery = object : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
+            override suspend fun previewTargetedRecovery(accountId: String,
+                kind: com.patmanak.contako.domain.sync.TargetedRecoveryKind, targetId: String): com.patmanak.contako.domain.sync.TargetedRecoveryPreview {
+                finish.await()
+                return com.patmanak.contako.domain.sync.TargetedRecoveryPreview(kind, "old-owner", "proof", null, null)
+            }
+            override suspend fun requestTargetedRecovery(accountId: String,
+                expected: com.patmanak.contako.domain.sync.TargetedRecoveryPreview): com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult =
+                error("Old owner must not queue recovery")
+        }
+        val model = ContactsViewModel(FakeRepository(emptyList()), recovery, mutationAdmission = gate)
+        model.openTargetedRecovery(kind, "old-owner")
+        runCurrent()
+        gate.cleanup { }
+        runCurrent()
+        finish.complete(Unit)
+        runCurrent()
+        assertNull(model.targetedRecoveryPanel.value.kind)
+        model.confirmTargetedRecovery()
+    }
+
+    @Test fun unmetTargetedPrerequisiteCannotBeConfirmed() = runTest(dispatcher) {
+        val kind = com.patmanak.contako.domain.sync.TargetedRecoveryKind.ANDROID_COPY
+        val recovery = object : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
+            override suspend fun previewTargetedRecovery(accountId: String,
+                kind: com.patmanak.contako.domain.sync.TargetedRecoveryKind, targetId: String) =
+                com.patmanak.contako.domain.sync.TargetedRecoveryPreview(kind, "target", "proof", 4, 2,
+                    prerequisite = com.patmanak.contako.domain.sync.TargetedRecoveryPrerequisite.ANDROID_CONTEXT)
+            override suspend fun requestTargetedRecovery(accountId: String,
+                expected: com.patmanak.contako.domain.sync.TargetedRecoveryPreview): com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult =
+                error("Unmet prerequisite cannot queue work")
+        }
+        val model = ContactsViewModel(FakeRepository(emptyList()), recovery)
+        model.openTargetedRecovery(kind, "target")
+        runCurrent()
+        assertFalse(requireNotNull(model.targetedRecoveryPanel.value.preview).canQueue)
+        model.confirmTargetedRecovery()
+        runCurrent()
+        assertFalse(model.targetedRecoveryPanel.value.submitting)
+    }
+
+    @Test fun aPreviewForADifferentTargetCannotAuthorizeRecovery() = runTest(dispatcher) {
+        val kind = com.patmanak.contako.domain.sync.TargetedRecoveryKind.ANDROID_COPY
+        val recovery = object : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
+            override suspend fun previewTargetedRecovery(accountId: String,
+                kind: com.patmanak.contako.domain.sync.TargetedRecoveryKind, targetId: String) =
+                com.patmanak.contako.domain.sync.TargetedRecoveryPreview(kind, "other-target", "proof", 4, 2)
+            override suspend fun requestTargetedRecovery(accountId: String,
+                expected: com.patmanak.contako.domain.sync.TargetedRecoveryPreview): com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult =
+                error("A different target must never be queued")
+        }
+        val model = ContactsViewModel(FakeRepository(emptyList()), recovery)
+        model.openTargetedRecovery(kind, "selected-target")
+        runCurrent()
+        assertNull(model.targetedRecoveryPanel.value.preview)
+        assertTrue(model.targetedRecoveryPanel.value.failed)
+        model.confirmTargetedRecovery()
+        runCurrent()
+        assertFalse(model.targetedRecoveryPanel.value.submitting)
+    }
+
     private class FakeRepository(
         contacts: List<CanonicalContact>,
         groups: List<ContactGroup> = emptyList(),

@@ -3,7 +3,33 @@
 These are design contracts, not a claim that every failure scenario is qualified.
 See [Synchronization](SYNCHRONIZATION.md) and [Known limitations](KNOWN_LIMITATIONS.md).
 
-## Runner state machine
+## Targeted request state
+
+| State | Meaning | Required transition proof |
+| --- | --- | --- |
+| REQUESTED | Durable request, no effect promised | Current owned obligation and queue-time revision/context |
+| RUNNING | Claimed by the existing account runner | Current claim token, owner admission and cancellation generation |
+| DEFERRED | A transient prerequisite or retry deadline prevents completion | Durable eligibility preserved; no busy replay loop |
+| RESOLVED | The scoped operation was verified or already satisfied | Current verified card reconciliation or exact Android write/readback receipts |
+| STALE | Source revision, generation or context changed | No old plan may apply; a fresh preview is required |
+| ACTION_REQUIRED | A conflict, deterministic refusal or exhausted automatic budget remains | Intent retained; no automatic winner, forced copy or silent reset |
+
+Interruption MUST leave the request recoverable. An external effect without a
+returned acknowledgement MUST be reconciled from the existing canonical/provider
+proofs before replay. A repeat request or internal ledger transition MUST NOT
+reset retry eligibility or reopen a terminal automatic failure. Owner removal
+MUST close admission and remove only that owner’s request metadata. Scoped
+resolution MUST NOT erase independent failures or become global success.
+
+## Shared runner transitions
+
+`TARGETED_RECOVERY` uses that same runner. An isolated request executes only its
+durable target work; coalescing with a normal or full pass retains the normal
+pass and settles the target request from its verified current state. A single
+account-scoped waiter observes durable retry deadlines and account invalidation;
+it only requests the runner, never performs peer I/O itself. Deterministic or
+exhausted automatic failures remain action-required. An explicit cooled retry
+MAY request another check without resetting the attempt count or server delay.
 
 | State | Durable input/output | Allowed next states |
 | --- | --- | --- |

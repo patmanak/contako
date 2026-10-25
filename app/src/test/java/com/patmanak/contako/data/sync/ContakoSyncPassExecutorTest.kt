@@ -36,6 +36,61 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ContakoSyncPassExecutorTest {
+    @Test fun aScopedAndroidFailureCannotAttributeAnIndependentRemoteTimeoutToThatContact() = runTest {
+        val android = object : AndroidInteroperabilityStage, AndroidScopedFailureProofSource {
+            override val lastFailureIsFullyScoped = true
+            override suspend fun ingest(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) =
+                AndroidInteroperabilityStageResult.ActionRequired
+            override suspend fun project(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) =
+                AndroidInteroperabilityStageResult.Success
+        }
+        for (prerequisite in listOf(SyncPrerequisiteState.READY, SyncPrerequisiteState.OFFLINE)) {
+            val candidate = executor(prerequisite = { prerequisite }, inventory = {}, canonical = {},
+                store = SingleCommandStore(null), prepare = {}, upload = {}, android = android,
+                eventFailure = GatewayFailureCategory.TIMEOUT)
+            assertEquals(SyncPassOutcome.ACTION_REQUIRED, candidate.execute(request()))
+            assertTrue(candidate.hasUnscopedFailure)
+        }
+    }
+
+    @Test fun initialAndResumedFullRepairKeepRemoteTimeoutAsUnscopedEvenWithOlderItemFailures() = runTest {
+        for (resumed in listOf(false, true)) {
+            val repair = MemoryFullRepair(mutableListOf()).apply {
+                if (resumed) progress = progress.copy(phase = FullRepairPhase.ANDROID_PROJECTION,
+                    completedUnits = 1, totalUnits = 1)
+            }
+            val candidate = executor(prerequisite = { SyncPrerequisiteState.READY }, inventory = {}, canonical = {},
+                store = SingleCommandStore(null), prepare = {}, upload = {},
+                eventFailure = GatewayFailureCategory.TIMEOUT,
+                fullRepairCoordinator = FullRepairExecutionCoordinator { repair })
+            assertEquals(SyncPassOutcome.RETRY_WAITING, candidate.execute(fullRepairRequest()))
+            assertTrue(candidate.hasUnscopedFailure)
+            assertFalse(repair.cleared)
+        }
+    }
+
+    @Test fun mutationRetryAndIncompleteAssignmentProgressRemainUnscopedBesideAKnownAndroidFailure() = runTest {
+        val android = object : AndroidInteroperabilityStage, AndroidScopedFailureProofSource {
+            override val lastFailureIsFullyScoped = true
+            override suspend fun ingest(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) =
+                AndroidInteroperabilityStageResult.ActionRequired
+            override suspend fun project(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) =
+                AndroidInteroperabilityStageResult.Success
+        }
+        val outcomes = listOf<GatewayOutcome<RemoteMutationAcknowledgement>>(
+            GatewayOutcome.Failure(GatewayFailureCategory.TIMEOUT),
+            GatewayOutcome.Success(RemoteMutationAcknowledgement("remote", "version", fullyConverged = false,
+                nextOperation = RemoteMutationOperation.ASSIGNMENTS)),
+        )
+        outcomes.forEach { uploadResult ->
+            val candidate = executor(prerequisite = { SyncPrerequisiteState.READY }, inventory = {}, canonical = {},
+                store = SingleCommandStore(command()), prepare = {}, upload = {}, android = android,
+                uploadOutcome = { uploadResult })
+            assertEquals(SyncPassOutcome.ACTION_REQUIRED, candidate.execute(request()))
+            assertTrue(candidate.hasUnscopedFailure)
+        }
+    }
+
     @Test
     fun interruptedMutationRecoveryPrecedesRemoteReconciliationInBothPassKinds() = runTest {
         for (scope in SyncScope.entries) {

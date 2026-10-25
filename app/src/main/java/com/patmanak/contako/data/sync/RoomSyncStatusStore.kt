@@ -52,6 +52,7 @@ data class SyncStatusSnapshot(
     val actionReason: SyncActionReason?,
     val blockedSinceEpochMillis: Long?,
     val notificationClaimed: Boolean,
+    val scopedIssuesOnly: Boolean = false,
 )
 
 data class SyncStatusUpdate(
@@ -60,6 +61,7 @@ data class SyncStatusUpdate(
     val actionRequiredCount: Int,
     val actionReason: SyncActionReason? = null,
     val offline: Boolean = false,
+    val scopedIssuesOnly: Boolean = false,
 ) {
     init {
         require(pendingMutationCount >= 0)
@@ -108,6 +110,7 @@ internal class RoomSyncStatusStore(private val database: ContakoDatabase) {
                     previous?.lastSuccessAtEpochMillis
                 },
                 pendingMutationCount = update.pendingMutationCount,
+                scopedIssuesOnly = update.scopedIssuesOnly,
                 actionRequiredCount = update.actionRequiredCount,
                 actionReason = update.actionReason?.name,
                 blockedSinceEpochMillis = blockedSince,
@@ -178,6 +181,7 @@ internal class RoomSyncStatusStore(private val database: ContakoDatabase) {
         actionReason = actionReason?.let(SyncActionReason::valueOf),
         blockedSinceEpochMillis = blockedSinceEpochMillis,
         notificationClaimed = notificationClaimedForBlockEpochMillis != null,
+        scopedIssuesOnly = scopedIssuesOnly,
     )
 
     private fun elapsedAtLeast(start: Long, now: Long, duration: Long): Boolean =
@@ -197,12 +201,14 @@ internal class RoomSyncPassStatusPublisher(
     private val isOffline: suspend () -> Boolean = { false },
     private val externalActionReason: suspend () -> SyncActionReason? = { null },
     private val afterPublish: suspend () -> Unit = {},
+    private val hasUnscopedFailure: () -> Boolean = { true },
 ) : SyncPassStatusPublisher {
     override suspend fun publish(outcome: SyncPassOutcome) {
+        database.withTransaction {
         val all = database.outboxDao().getAll(accountId)
         val blocked = database.outboxDao().getActionRequired(accountId)
         val failedImports = database.remoteHydrationObligationDao().getAll(accountId)
-        val androidIssues = database.androidContactIssueDao().observeCurrent(accountId).first()
+        val androidIssues = database.androidContactIssueDao().getCurrent(accountId)
         val external = externalActionReason()
         val retainedAndroidReason = when {
             androidIssues.any { it.origin == AndroidContactIssueOrigin.PROJECTION.name } ->
@@ -229,8 +235,12 @@ internal class RoomSyncPassStatusPublisher(
                         androidIssues.map { "CONTACT" to it.canonicalContactId }).toSet().size + failedImports.size),
                 actionReason = reason,
                 offline = outcome == SyncPassOutcome.RETRY_WAITING && isOffline(),
+                scopedIssuesOnly = outcome == SyncPassOutcome.ACTION_REQUIRED && !hasUnscopedFailure() &&
+                    (blocked.isNotEmpty() || failedImports.isNotEmpty() || androidIssues.isNotEmpty()) &&
+                    reason !in setOf(SyncActionReason.AUTHENTICATION_REQUIRED, SyncActionReason.INTERACTIVE_AUTHENTICATION_REQUIRED),
             ),
         )
+        }
         afterPublish()
     }
 }

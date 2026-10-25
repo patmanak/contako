@@ -50,6 +50,23 @@ successful evidence or declaring an accepted limitation fixed.
 
 ## Cases
 
+For targeted recovery, use a rejected card or Android-copy issue among 300 owned
+synthetic contacts. Preview/cancel MUST make no peer request. Confirm once and
+repeatedly; inspect a scoped result, restart before/after effect and resume.
+Compare the intended and preserved fields, duplicate occurrences, per-email
+groups, photo originals/receipts and at least one unrelated and one linked
+foreign-source witness. A Proton recheck MUST read only the selected full card
+without advancing the event cursor or uploading edits. An Android retry MUST
+capture a native edit made after the preview and never overwrite it with an old
+plan; it MUST make no Proton request or unrelated contact-copy write.
+Exercise permission/session loss, provider-epoch change, recycled locator,
+unestablished identity, 429/Retry-After and a refused proof. Requests and backoff
+MUST survive restart; ten taps MUST NOT reset them. An ambiguous 404 MUST NOT
+delete a contact. A real conflict remains a conflict. A resolved target MUST NOT
+erase another issue, fabricate an account error or advance global success time.
+Keep coalesced normal/full synchronization distinct from isolated targeted cost;
+check both a queue beyond one batch and a future retry deadline at startup.
+
 For actionable issues, combine an Android issue, rejected Proton card, blocked
 group and account-authentication prerequisite. Each independent scope MUST stay
 visible with its own known cause; resolving one MUST NOT erase the others.

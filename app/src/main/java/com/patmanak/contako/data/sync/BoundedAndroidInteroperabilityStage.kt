@@ -110,6 +110,11 @@ internal fun interface AndroidStableContactPageReader {
     ): AndroidStableRawContactPageResult
 }
 
+/** Exact owned-source read used only by a scoped request admitted by the shared runner. */
+internal fun interface AndroidExactContactReader {
+    fun read(accountName: AndroidProviderAccountName, rawContactId: Long): AndroidStableRawContactPageResult
+}
+
 internal fun interface AndroidGroupPageReader {
     fun read(
         accountName: AndroidProviderAccountName,
@@ -127,13 +132,80 @@ internal class BoundedAndroidInteroperabilityStage(
     private val actionRequiredObserver: AndroidIngestActionRequiredObserver =
         AndroidIngestActionRequiredObserver { },
     private val replanObserver: AndroidIngestReplanObserver = AndroidIngestReplanObserver { },
-) : AndroidInteroperabilityStage {
+    private val exactContactsReader: AndroidExactContactReader? = null,
+) : AndroidInteroperabilityStage, AndroidScopedFailureProofSource {
+    @Volatile override var lastFailureIsFullyScoped: Boolean = false
+        private set
     init { require(maxReplansPerPage in 0..4) }
+
+    /**
+     * Refreshes the shared bounded group prerequisite, then ingests at most one exact owned
+     * contact. A missing locator is not a deletion proof. The projection executor still has to
+     * establish ownership and reject an unexpected dirty source before writing a new copy.
+     */
+    suspend fun ingestTarget(
+        context: AndroidInteroperabilityContext,
+        contactId: String,
+        rawContactId: Long?,
+        expectedSourceIdentity: String?,
+        isCancelled: () -> Boolean,
+    ): AndroidInteroperabilityStageResult = boundary(observeIngestRepair = true) {
+        lastFailureIsFullyScoped = false
+        require(contactId.isNotBlank())
+        if (isCancelled()) return@boundary AndroidInteroperabilityStageResult.Cancelled
+        val accountName = AndroidProviderAccountName(context.androidAccountName)
+        val groupPages = readAllGroupPages(accountName, isCancelled)
+            ?: return@boundary AndroidInteroperabilityStageResult.Cancelled
+        if (isCancelled()) return@boundary AndroidInteroperabilityStageResult.Cancelled
+        val groups = observationCoordinator.ingestGroups(context, groupPages)
+        if (groups != AndroidBoundedPageResult.Applied) {
+            if (groups == AndroidBoundedPageResult.ReplanRequired) {
+                notifyReplan(AndroidIngestReplanReason.GROUP_OBSERVATION_STALE)
+            }
+            return@boundary map(groups) ?: AndroidInteroperabilityStageResult.ActionRequired
+        }
+        if (isCancelled()) return@boundary AndroidInteroperabilityStageResult.Cancelled
+        if (rawContactId == null) return@boundary AndroidInteroperabilityStageResult.Success
+        require(rawContactId > 0)
+        if (expectedSourceIdentity.isNullOrBlank()) {
+            return@boundary actionRequired(AndroidIngestActionRequiredReason.CONTACT_INVALID_IDENTITY_SHAPE)
+        }
+        val reader = exactContactsReader
+            ?: return@boundary retryWaiting(AndroidIngestReplanReason.CONTACT_PAGE_UNSTABLE)
+        var attempts = 0
+        var page: AndroidStableRawContactObservationPage? = null
+        while (page == null) {
+            if (isCancelled()) return@boundary AndroidInteroperabilityStageResult.Cancelled
+            when (val read = reader.read(accountName, rawContactId)) {
+                is AndroidStableRawContactPageResult.Stable -> page = read.page
+                AndroidStableRawContactPageResult.ReplanRequired -> if (++attempts > maxReplansPerPage) {
+                    return@boundary retryWaiting(AndroidIngestReplanReason.CONTACT_PAGE_UNSTABLE)
+                }
+            }
+        }
+        if (isCancelled()) return@boundary AndroidInteroperabilityStageResult.Cancelled
+        val raw = page.observations.singleOrNull()?.rawContact
+        if (page.nextAfterRawContactId != null || raw == null || raw.rawContactId != rawContactId ||
+            raw.canonicalContactIdClaim != contactId || raw.sourceIdentity != expectedSourceIdentity
+        ) {
+            return@boundary actionRequired(AndroidIngestActionRequiredReason.CONTACT_INVALID_IDENTITY_SHAPE)
+        }
+        when (val observed = observationCoordinator.ingestContacts(context, page)) {
+            AndroidBoundedPageResult.Applied -> AndroidInteroperabilityStageResult.Success
+            AndroidBoundedPageResult.PartiallyApplied -> {
+                lastFailureIsFullyScoped = (observationCoordinator as? AndroidScopedFailureProofSource)
+                    ?.lastFailureIsFullyScoped == true
+                AndroidInteroperabilityStageResult.ActionRequired
+            }
+            else -> map(observed) ?: AndroidInteroperabilityStageResult.ActionRequired
+        }
+    }
 
     override suspend fun ingest(
         context: AndroidInteroperabilityContext,
         isCancelled: () -> Boolean,
     ): AndroidInteroperabilityStageResult = boundary(observeIngestRepair = true) {
+        lastFailureIsFullyScoped = false
         val accountName = AndroidProviderAccountName(context.androidAccountName)
         val groupPages = readAllGroupPages(accountName, isCancelled)
             ?: return@boundary AndroidInteroperabilityStageResult.Cancelled
@@ -145,6 +217,7 @@ internal class BoundedAndroidInteroperabilityStage(
 
         var after = 0L
         var incompleteContactPage = false
+        var everyPartialPageScoped = groupResult == AndroidBoundedPageResult.Applied
         do {
             if (isCancelled()) return@boundary AndroidInteroperabilityStageResult.Cancelled
             var attempts = 0
@@ -161,13 +234,18 @@ internal class BoundedAndroidInteroperabilityStage(
                 if (isCancelled()) return@boundary AndroidInteroperabilityStageResult.Cancelled
             }
             val contactResult = observationCoordinator.ingestContacts(context, stable)
-            if (contactResult == AndroidBoundedPageResult.PartiallyApplied) incompleteContactPage = true
+            if (contactResult == AndroidBoundedPageResult.PartiallyApplied) {
+                incompleteContactPage = true
+                everyPartialPageScoped = (observationCoordinator as? AndroidScopedFailureProofSource)
+                    ?.lastFailureIsFullyScoped == true && everyPartialPageScoped
+            }
             if (contactResult == AndroidBoundedPageResult.ReplanRequired) {
                 notifyReplan(AndroidIngestReplanReason.CONTACT_OBSERVATION_STALE)
             }
             map(contactResult)?.let { return@boundary it }
             after = stable.nextAfterRawContactId ?: 0L
         } while (after != 0L)
+        lastFailureIsFullyScoped = incompleteContactPage && everyPartialPageScoped
         if (incompleteContactPage) AndroidInteroperabilityStageResult.ActionRequired else AndroidInteroperabilityStageResult.Success
     }
 
@@ -175,15 +253,22 @@ internal class BoundedAndroidInteroperabilityStage(
         context: AndroidInteroperabilityContext,
         isCancelled: () -> Boolean,
     ): AndroidInteroperabilityStageResult = boundary {
+        lastFailureIsFullyScoped = false
         var after: String? = null
         var partiallyApplied = false
+        var everyPartialPageScoped = true
         do {
             if (isCancelled()) return@boundary AndroidInteroperabilityStageResult.Cancelled
             val (page, result) = projectionCoordinator.projectPage(context, after)
-            if (result == AndroidBoundedPageResult.PartiallyApplied) partiallyApplied = true
+            if (result == AndroidBoundedPageResult.PartiallyApplied) {
+                partiallyApplied = true
+                everyPartialPageScoped = (projectionCoordinator as? AndroidScopedFailureProofSource)
+                    ?.lastFailureIsFullyScoped == true && everyPartialPageScoped
+            }
             map(result)?.let { return@boundary it }
             after = page.nextKey
         } while (after != null)
+        lastFailureIsFullyScoped = partiallyApplied && everyPartialPageScoped
         if (partiallyApplied) AndroidInteroperabilityStageResult.ActionRequired else AndroidInteroperabilityStageResult.Success
     }
 
@@ -221,6 +306,7 @@ internal class BoundedAndroidInteroperabilityStage(
     ): AndroidInteroperabilityStageResult = try {
         block()
     } catch (error: AndroidProviderBoundaryException) {
+        lastFailureIsFullyScoped = false
         when (error.category) {
             AndroidProviderFailureCategory.PERMISSION_DENIED -> if (observeIngestRepair) {
                 actionRequired(AndroidIngestActionRequiredReason.PROVIDER_PERMISSION_DENIED)

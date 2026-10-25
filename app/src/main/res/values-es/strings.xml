@@ -416,4 +416,24 @@
     <string name="sync_issue_review">Revisar elemento</string>
     <string name="sync_issue_diagnostics">Ver diagnóstico</string>
     <string name="sync_issue_history">El historial puede incluir fallos antiguos ya resueltos. No demuestra que exista un problema actual.</string>
+    <string name="targeted_proton_title">Volver a verificar esta ficha de Proton</string>
+    <string name="targeted_android_title">Reintentar esta copia de Android</string>
+    <string name="targeted_proton_body">Leer y verificar solo esta ficha de Proton y conciliarla con la versión local guardada. Puede ser necesario recoger primero los cambios del teléfono. No envía ediciones a Proton ni completa la copia de Android.</string>
+    <string name="targeted_android_body">Recoger los cambios del teléfono y verificar y actualizar la copia de Android de este contacto desde la versión local guardada. No envía cambios a Proton.</string>
+    <string name="targeted_android_delete_body">Verificar y reintentar la eliminación ya solicitada de la copia de Android de este contacto. Las demás fuentes no cambian.</string>
+    <string name="targeted_confirm">Poner esta operación en cola</string>
+    <string name="targeted_refresh">Actualizar vista previa</string>
+    <string name="targeted_changed">El contacto o su contexto ha cambiado. Revisa una nueva vista previa.</string>
+    <string name="targeted_unavailable">Esta operación no está disponible ahora. No se inició una reparación completa.</string>
+    <string name="targeted_no_obligation">Este destino ya no tiene una operación que recuperar.</string>
+    <string name="targeted_permission">Permite el acceso a contactos antes de reintentar la copia de Android.</string>
+    <string name="targeted_dependency">Falta un requisito compartido. No se inició una reparación completa ni se restableció el proveedor.</string>
+    <string name="targeted_identity">La identidad remota no está establecida. Usa la sincronización normal para conciliarla.</string>
+    <string name="targeted_queued">Operación en cola en este dispositivo.</string>
+    <string name="targeted_running">Se está verificando esta operación.</string>
+    <string name="targeted_deferred">Esta operación espera sus requisitos o un nuevo intento permitido.</string>
+    <string name="targeted_resolved">Esta operación se verificó. Puede haber otras tareas de sincronización pendientes.</string>
+    <string name="targeted_attention">Esta operación aún necesita atención. Se conserva su intención original.</string>
+    <string name="targeted_retry_after">Próximo intento permitido a partir de: %1$s. Android puede ejecutarlo más tarde.</string>
+    <string name="targeted_scope_note">La sincronización normal ya programada también puede procesar otros cambios.</string>
 </resources>

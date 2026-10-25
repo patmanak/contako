@@ -36,6 +36,7 @@ internal enum class SyncPassStage {
     STATUS_PUBLICATION,
     FULL_REPAIR_FINALIZATION,
     COMPLETE,
+    TARGETED_RECOVERY,
 }
 
 internal fun interface SyncPassStageObserver {
@@ -94,14 +95,18 @@ internal class ContakoSyncPassExecutor(
         MissingFullRepairExecutionCoordinator,
     private val onPassStarted: (com.patmanak.contako.domain.sync.SyncPassRequest) -> Unit = {},
     private val onGroupCatalogAvailability: (Boolean) -> Unit = {},
+    private val targetedRecovery: TargetedContactRecovery? = null,
 ) : SyncPassExecutor, com.patmanak.contako.domain.sync.SyncPassCompletionDetailsSource {
     override var completionCause: com.patmanak.contako.domain.sync.SyncCompletionCause? = null
         private set
     private var independentOutcome = SyncPassOutcome.SUCCESS
+    var hasUnscopedFailure: Boolean = false
+        private set
 
     override suspend fun execute(request: com.patmanak.contako.domain.sync.SyncPassRequest): SyncPassOutcome {
         completionCause = null
         independentOutcome = SyncPassOutcome.SUCCESS
+        hasUnscopedFailure = false
         onPassStarted(request)
         onGroupCatalogAvailability(false)
         return try {
@@ -117,6 +122,15 @@ internal class ContakoSyncPassExecutor(
 
     private suspend fun executePass(request: com.patmanak.contako.domain.sync.SyncPassRequest): SyncPassOutcome {
         observe(SyncPassStage.REQUEST_GATE)
+        if (request.scope == SyncScope.INCREMENTAL && request.triggers ==
+            setOf(com.patmanak.contako.domain.sync.SyncTrigger.TARGETED_RECOVERY)) {
+            return try { executeTargeted(request) } catch (_: CancellationException) {
+                SyncPassOutcome.CANCELLED
+            } catch (error: Throwable) {
+                observeException(error)
+                SyncPassOutcome.FAILED
+            }
+        }
         var fullRepair: FullRepairExecution? = null
         var outcome = try {
             if (request.scope == SyncScope.FULL_REPAIR) {
@@ -135,7 +149,10 @@ internal class ContakoSyncPassExecutor(
             observeException(error)
             SyncPassOutcome.FAILED
         }
+        if (outcome in setOf(SyncPassOutcome.RETRY_WAITING, SyncPassOutcome.CANCELLED, SyncPassOutcome.FAILED))
+            hasUnscopedFailure = true
         outcome = combineTerminalOutcomes(outcome, independentOutcome)
+        targetedRecovery?.settleAfterOrdinaryPass(account, request::isAccountCancellationRequested)
         if (fullRepair != null) {
             if (outcome == SyncPassOutcome.SUCCESS &&
                 !fullRepair.checkpoint(FullRepairPhase.PUBLISHING, 1, 1)
@@ -157,12 +174,34 @@ internal class ContakoSyncPassExecutor(
         return outcome
     }
 
+    /** A scoped result never overwrites whole-account health or last-success timestamps. */
+    private suspend fun executeTargeted(request: com.patmanak.contako.domain.sync.SyncPassRequest): SyncPassOutcome {
+        val recovery = targetedRecovery ?: return SyncPassOutcome.FAILED
+        if (request.isCancellationRequested()) return SyncPassOutcome.CANCELLED
+        observe(SyncPassStage.TARGETED_RECOVERY)
+        return recovery.run(account, isCancelled = request::isCancellationRequested,
+            remotePrerequisites = { observe(SyncPassStage.PREREQUISITES); checkRemotePrerequisites() },
+            beforeRemote = { mutationOrchestrator.recoverInterrupted(account.value, wallClock()) })
+            .also { observe(SyncPassStage.COMPLETE) }
+    }
+
     private fun observe(stage: SyncPassStage) {
         // Diagnostics must never be able to change synchronization behavior.
         runCatching { stageObserver.onStage(stage) }
     }
 
+    private suspend fun checkAndroidPreflight(account: AccountScope, cancelled: () -> Boolean): AndroidInteroperabilityPreflightResult =
+        androidPreflight.check(account, cancelled).also {
+            if (it !is AndroidInteroperabilityPreflightResult.Ready && it != AndroidInteroperabilityPreflightResult.Cancelled)
+                hasUnscopedFailure = true
+        }
+
+    private suspend fun checkRemotePrerequisites(): SyncPrerequisiteState = prerequisites.check().also {
+        if (it != SyncPrerequisiteState.READY) hasUnscopedFailure = true
+    }
+
     private fun observeException(error: Throwable) {
+        hasUnscopedFailure = true
         completionCause = when (syncPassExceptionCategory(error)) {
             SyncPassExceptionCategory.DATABASE, SyncPassExceptionCategory.SQLITE_ROW_TOO_LARGE ->
                 com.patmanak.contako.domain.sync.SyncCompletionCause.STORAGE
@@ -178,21 +217,31 @@ internal class ContakoSyncPassExecutor(
     ): AndroidInteroperabilityStageResult = result.also {
         if (result == AndroidInteroperabilityStageResult.ActionRequired && completionCause == null)
             completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.PROJECTION
+        if (result in setOf(AndroidInteroperabilityStageResult.ActionRequired,
+                AndroidInteroperabilityStageResult.RetryWaiting, AndroidInteroperabilityStageResult.LocalPersistenceFailure)) {
+            val contactScopeProved = stage in setOf(SyncPassStage.ANDROID_INGEST,
+                SyncPassStage.ANDROID_INITIAL_PROJECTION, SyncPassStage.ANDROID_FINAL_PROJECTION) &&
+                (androidStage as? AndroidScopedFailureProofSource)?.lastFailureIsFullyScoped == true
+            if (!contactScopeProved) hasUnscopedFailure = true
+        }
         runCatching { androidStageResultObserver.onResult(stage, result) }
     }
 
     private fun authenticationRequired(): SyncPassOutcome {
+        hasUnscopedFailure = true
         completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.AUTHENTICATION
         return SyncPassOutcome.ACTION_REQUIRED
     }
 
     private fun androidPermissionRequired(): SyncPassOutcome {
+        hasUnscopedFailure = true
         completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.ANDROID_PERMISSION
         onAndroidDegraded(null)
         return SyncPassOutcome.ACTION_REQUIRED
     }
 
     private fun persistenceFailure(category: SyncPassExceptionCategory?): SyncPassOutcome {
+        hasUnscopedFailure = true
         completionCause = when (category) {
             SyncPassExceptionCategory.DATABASE, SyncPassExceptionCategory.SQLITE_ROW_TOO_LARGE ->
                 com.patmanak.contako.domain.sync.SyncCompletionCause.STORAGE
@@ -202,7 +251,9 @@ internal class ContakoSyncPassExecutor(
         return SyncPassOutcome.FAILED
     }
 
-    private fun remoteActionRequired(): SyncPassOutcome = when (remoteStage.lastFailureCategory) {
+    private fun remoteActionRequired(): SyncPassOutcome {
+        hasUnscopedFailure = true
+        return when (remoteStage.lastFailureCategory) {
         com.patmanak.contako.data.gateway.GatewayFailureCategory.AUTHENTICATION_REQUIRED,
         com.patmanak.contako.data.gateway.GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED,
         com.patmanak.contako.data.gateway.GatewayFailureCategory.UNSUPPORTED_AUTHENTICATION,
@@ -210,6 +261,7 @@ internal class ContakoSyncPassExecutor(
         else -> {
             completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.VALIDATION
             SyncPassOutcome.ACTION_REQUIRED
+        }
         }
     }
 
@@ -220,10 +272,12 @@ internal class ContakoSyncPassExecutor(
         RemoteGroupStageResult.Cancelled -> SyncPassOutcome.CANCELLED
         RemoteGroupStageResult.LocalPersistenceFailure -> persistenceFailure(groupStage?.lastExceptionCategory)
         is RemoteGroupStageResult.RetryWaiting -> {
+            hasUnscopedFailure = true
             independentOutcome = combineTerminalOutcomes(independentOutcome, SyncPassOutcome.RETRY_WAITING)
             null
         }
         RemoteGroupStageResult.ActionRequired -> {
+            hasUnscopedFailure = true
             if (groupStage?.lastFailureCategory in setOf(
                     com.patmanak.contako.data.gateway.GatewayFailureCategory.AUTHENTICATION_REQUIRED,
                     com.patmanak.contako.data.gateway.GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED,
@@ -246,7 +300,7 @@ internal class ContakoSyncPassExecutor(
         if (cancelled()) return SyncPassOutcome.CANCELLED
 
         observe(SyncPassStage.ANDROID_PREFLIGHT)
-        val preflight = androidPreflight.check(account, ::cancelled)
+        val preflight = checkAndroidPreflight(account, ::cancelled)
         var repairedProvider = false
         val androidContext = when (preflight) {
             is AndroidInteroperabilityPreflightResult.Ready -> preflight.context
@@ -285,7 +339,7 @@ internal class ContakoSyncPassExecutor(
         }
 
         observe(SyncPassStage.PREREQUISITES)
-        when (prerequisites.check()) {
+        when (checkRemotePrerequisites()) {
             SyncPrerequisiteState.READY -> Unit
             SyncPrerequisiteState.OFFLINE -> return SyncPassOutcome.RETRY_WAITING
             SyncPrerequisiteState.AUTHENTICATION_REQUIRED,
@@ -313,9 +367,11 @@ internal class ContakoSyncPassExecutor(
                 completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.VALIDATION
                 remoteCardsPending = true
             }
-            is RemoteContactStageResult.RetryWaiting, RemoteContactStageResult.StalePlan ->
+            is RemoteContactStageResult.RetryWaiting, RemoteContactStageResult.StalePlan -> {
+                hasUnscopedFailure = true
                 return SyncPassOutcome.RETRY_WAITING
-            RemoteContactStageResult.Cancelled -> return SyncPassOutcome.CANCELLED
+            }
+            RemoteContactStageResult.Cancelled -> { hasUnscopedFailure = true; return SyncPassOutcome.CANCELLED }
             RemoteContactStageResult.ActionRequired -> return remoteActionRequired()
             RemoteContactStageResult.LocalPersistenceFailure -> return persistenceFailure(remoteStage.lastExceptionCategory)
         }
@@ -336,7 +392,7 @@ internal class ContakoSyncPassExecutor(
             // Always revisit durable projection obligations: a previous resumed pass may
             // have committed remote changes and failed here after the original checkpoint.
             observe(SyncPassStage.ANDROID_PREFLIGHT)
-            val projectionContext = when (val refreshed = androidPreflight.check(account, ::cancelled)) {
+            val projectionContext = when (val refreshed = checkAndroidPreflight(account, ::cancelled)) {
                 is AndroidInteroperabilityPreflightResult.Ready -> refreshed.context
                 is AndroidInteroperabilityPreflightResult.RepairRequired -> {
                     onAndroidDegraded(refreshed.reason)
@@ -408,6 +464,7 @@ internal class ContakoSyncPassExecutor(
     }
 
     private fun drainOutcome(result: MutationDrainResult): SyncPassOutcome {
+        if (result.cancelled || result.retryWaiting > 0 || result.progressPending > 0) hasUnscopedFailure = true
         if (result.failureCategories.any { it in setOf(
                 com.patmanak.contako.data.gateway.GatewayFailureCategory.AUTHENTICATION_REQUIRED,
                 com.patmanak.contako.data.gateway.GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED,
@@ -460,7 +517,7 @@ internal class ContakoSyncPassExecutor(
 
         if (request.isAccountCancellationRequested()) return SyncPassOutcome.CANCELLED
         observe(SyncPassStage.ANDROID_PREFLIGHT)
-        var preflight = androidPreflight.check(account, request::isAccountCancellationRequested)
+        var preflight = checkAndroidPreflight(account, request::isAccountCancellationRequested)
         var skipAndroidStages = false
         if (preflight is AndroidInteroperabilityPreflightResult.RepairRequired &&
             preflight.reason == AndroidInteroperabilityRepairReason.PROVIDER_STATE_DIVERGED
@@ -477,7 +534,7 @@ internal class ContakoSyncPassExecutor(
             )) {
                 AndroidInteroperabilityStageResult.Success -> {
                     if (request.isAccountCancellationRequested()) return SyncPassOutcome.CANCELLED
-                    preflight = androidPreflight.check(
+                    preflight = checkAndroidPreflight(
                         account,
                         request::isAccountCancellationRequested,
                     )
@@ -526,7 +583,7 @@ internal class ContakoSyncPassExecutor(
             // Google-created contact or group observation. Reusing the pre-ingest context makes
             // the immediately following projection report a false stale replan.
             observe(SyncPassStage.ANDROID_PREFLIGHT)
-            androidContext = when (val refreshed = androidPreflight.check(
+            androidContext = when (val refreshed = checkAndroidPreflight(
                 account,
                 request::isAccountCancellationRequested,
             )) {
@@ -566,7 +623,7 @@ internal class ContakoSyncPassExecutor(
         }
         if (request.isAccountCancellationRequested()) return SyncPassOutcome.CANCELLED
         observe(SyncPassStage.PREREQUISITES)
-        when (prerequisites.check()) {
+        when (checkRemotePrerequisites()) {
             SyncPrerequisiteState.READY -> Unit
             SyncPrerequisiteState.OFFLINE -> return withDeferredAndroid(SyncPassOutcome.RETRY_WAITING)
             SyncPrerequisiteState.AUTHENTICATION_REQUIRED,
@@ -594,8 +651,11 @@ internal class ContakoSyncPassExecutor(
             }
             is RemoteContactStageResult.RetryWaiting,
             RemoteContactStageResult.StalePlan,
-            -> return withDeferredAndroid(SyncPassOutcome.RETRY_WAITING)
-            RemoteContactStageResult.Cancelled -> return SyncPassOutcome.CANCELLED
+            -> {
+                hasUnscopedFailure = true
+                return withDeferredAndroid(SyncPassOutcome.RETRY_WAITING)
+            }
+            RemoteContactStageResult.Cancelled -> { hasUnscopedFailure = true; return SyncPassOutcome.CANCELLED }
             RemoteContactStageResult.ActionRequired ->
                 return withDeferredAndroid(remoteActionRequired())
             RemoteContactStageResult.LocalPersistenceFailure -> return persistenceFailure(remoteStage.lastExceptionCategory)
@@ -612,7 +672,7 @@ internal class ContakoSyncPassExecutor(
             // account revision after the post-ingest refresh. Reusing that earlier context makes
             // the final projection report a false stale replan after a successful Proton create.
             observe(SyncPassStage.ANDROID_PREFLIGHT)
-            val finalContext = when (val refreshed = androidPreflight.check(
+            val finalContext = when (val refreshed = checkAndroidPreflight(
                 account,
                 request::isAccountCancellationRequested,
             )) {
@@ -661,7 +721,7 @@ internal class ContakoSyncPassExecutor(
                 if (request.isAccountCancellationRequested()) return SyncPassOutcome.CANCELLED
                 observe(SyncPassStage.ANDROID_PREFLIGHT)
                 val previousContext = currentContext
-                currentContext = when (val replanned = androidPreflight.check(
+                currentContext = when (val replanned = checkAndroidPreflight(
                     account,
                     request::isAccountCancellationRequested,
                 )) {

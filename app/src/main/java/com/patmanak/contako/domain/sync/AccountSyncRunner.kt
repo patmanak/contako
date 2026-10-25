@@ -21,6 +21,7 @@ enum class SyncTrigger {
     MUTATION_COMMITTED,
     CONNECTIVITY_RETURNED,
     RETRY,
+    TARGETED_RECOVERY,
 }
 
 enum class SyncScope { INCREMENTAL, FULL_REPAIR }
@@ -107,6 +108,8 @@ class AccountSyncRunner(
     private var pendingScope = SyncScope.INCREMENTAL
     private var active = false
     private var invalidated = initiallyInvalidated
+    private val mutableInvalidated = MutableStateFlow(initiallyInvalidated)
+    val isInvalidated: StateFlow<Boolean> = mutableInvalidated.asStateFlow()
     private var passNumber = 0L
 
     val state: StateFlow<SyncRunState> = mutableState.asStateFlow()
@@ -138,6 +141,7 @@ class AccountSyncRunner(
         cancellationGeneration.incrementAndGet()
         mutex.withLock {
             invalidated = true
+            mutableInvalidated.value = true
             pendingTriggers.clear()
             pendingScope = SyncScope.INCREMENTAL
             if (!active) mutableState.value = SyncRunState.Idle
@@ -156,6 +160,7 @@ class AccountSyncRunner(
             if (!invalidated) return
             check(!active) { "Cannot reactivate an active account runner" }
             invalidated = false
+            mutableInvalidated.value = false
             pendingTriggers.clear()
             pendingScope = SyncScope.INCREMENTAL
             mutableLastCompletion.value = null

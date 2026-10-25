@@ -7,6 +7,14 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
 
 ## Contact synchronization
 
+- Targeted recovery retains controlled engine, Room and provider-seam regression
+  cases. Execution on a physical device and real Proton, including interrupted
+  photo publication and delayed scheduling, requires separate qualification;
+  compilation and simulated receipts do not establish those behaviors.
+  Earlier account-health records without durable item attribution remain
+  conservative until a normal synchronization refreshes that attribution; a
+  targeted result does not erase an independent or unidentified account failure.
+
 | Condition | Current behavior or limitation |
 | --- | --- |
 | Concurrent local/Web updates | A targeted complete-card read blocks conflicting uploads and Sync offers a version choice. The GET-to-write window remains non-atomic. Both choices and stale-choice rejection have scoped physical coverage; this does not qualify every field, account or OEM combination. |

@@ -12,6 +12,8 @@ import com.patmanak.contako.data.android.mapping.CanonicalAndroidContactMapper
 import com.patmanak.contako.data.local.AndroidProjectionLedgerEntity
 import com.patmanak.contako.data.local.ContakoDatabase
 import com.patmanak.contako.data.local.toDomain
+import com.patmanak.contako.data.gateway.GatewayFailureCategory
+import com.patmanak.contako.domain.sync.TargetedRecoveryPrerequisite
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -50,14 +52,101 @@ internal class RoomBoundedAndroidProjectionCoordinator(
     private val canonicalMapper: CanonicalAndroidContactMapper = CanonicalAndroidContactMapper(),
     private val presenceVerifier: AndroidCleanProjectionPresenceVerifier =
         AndroidCleanProjectionPresenceVerifier { _, _ -> emptySet() },
-) : AndroidBoundedProjectionCoordinator {
+) : AndroidBoundedProjectionCoordinator, AndroidScopedFailureProofSource {
+    @Volatile override var lastFailureIsFullyScoped: Boolean = false
+        private set
     init { require(pageSize in 1..MAX_PAGE_SIZE) }
     private val contactIssues = RoomAndroidContactIssueStore(database)
+
+    /**
+     * Reuses the ordinary item executor for one exact canonical contact. It deliberately does
+     * not project the group catalog or use the ordinary CLEAN/presence skip optimization. The
+     * caller MUST have ingested this source first under the same account-scoped runner.
+     */
+    suspend fun projectContact(
+        context: AndroidInteroperabilityContext,
+        contactId: String,
+        expectedRevision: Long,
+    ): TargetedRecoveryWorkResult {
+        lastFailureIsFullyScoped = false
+        return try {
+            require(contactId.isNotBlank() && expectedRevision >= 0)
+            var refusal: TargetedRecoveryWorkResult = TargetedRecoveryWorkResult.Stale(TargetedRecoveryPrerequisite.ANDROID_CONTEXT)
+            val ledger = database.withTransaction {
+                if (!currentAccount(context)) return@withTransaction null
+                val canonical = database.contactDao().getEntity(context.account.value, contactId)
+                    ?: run { refusal = TargetedRecoveryWorkResult.Stale(TargetedRecoveryPrerequisite.NO_OBLIGATION); return@withTransaction null }
+                refusal = TargetedRecoveryWorkResult.Stale()
+                if (canonical.revision != expectedRevision || canonical.conflictState != null) return@withTransaction null
+                val dao = database.androidProjectionLedgerDao()
+                var current = dao.get(context.account.value, contactId)
+                if (current == null && canonical.remoteContactId == null) {
+                    refusal = TargetedRecoveryWorkResult.Failed(GatewayFailureCategory.VALIDATION_REJECTED,
+                        TargetedRecoveryPrerequisite.REMOTE_IDENTITY)
+                    return@withTransaction null
+                }
+                if (current == null && !canonical.isDeleted && canonical.remoteContactId != null) {
+                    RoomAndroidProjectionLedger(database).attachCanonicalContact(context.account, contactId, canonical.remoteContactId)
+                    current = dao.get(context.account.value, contactId)
+                }
+                refusal = TargetedRecoveryWorkResult.Stale(TargetedRecoveryPrerequisite.ANDROID_CONTEXT)
+                current?.takeIf { it.providerEpoch == context.providerEpoch }
+            } ?: return refusal
+            when (val result = itemExecutor.project(context, ledger)) {
+                AndroidBoundedPageResult.Applied -> database.withTransaction {
+                    if (!currentAccount(context)) return@withTransaction TargetedRecoveryWorkResult.Stale(TargetedRecoveryPrerequisite.ANDROID_CONTEXT)
+                    val canonical = database.contactDao().getEntity(context.account.value, contactId)
+                    val current = database.androidProjectionLedgerDao().get(context.account.value, contactId)
+                    if (canonical == null || canonical.revision != expectedRevision || canonical.conflictState != null || current == null ||
+                        current.providerEpoch != context.providerEpoch ||
+                        contactId !in currentProjectionIds(context, listOf(current))
+                    ) return@withTransaction TargetedRecoveryWorkResult.Stale()
+                    // The existing executor supplied provider ownership/version/readback proof;
+                    // currentProjectionIds additionally checks this revision's contact and group
+                    // receipts. Clearing presentation cannot precede either proof.
+                    contactIssues.clearProjectionFailure(context, contactId)
+                    val retained = database.androidContactIssueDao().get(context.account.value, contactId,
+                        AndroidContactIssueOrigin.PROJECTION.name)
+                    if (retained?.providerEpoch == context.providerEpoch) {
+                        return@withTransaction TargetedRecoveryWorkResult.Failed(GatewayFailureCategory.UNKNOWN,
+                            TargetedRecoveryPrerequisite.UNAVAILABLE)
+                    }
+                    TargetedRecoveryWorkResult.Resolved(canonical.revision)
+                }
+                AndroidBoundedPageResult.RepairRequired, AndroidBoundedPageResult.ReplanRequired -> {
+                    contactIssues.recordProjectionFailure(context, ledger, result)
+                    runCatching { skipObserver.onSkipped(contactId, result) }
+                    TargetedRecoveryWorkResult.Failed(
+                        if (result == AndroidBoundedPageResult.RepairRequired) GatewayFailureCategory.VALIDATION_REJECTED
+                        else GatewayFailureCategory.UNKNOWN,
+                        TargetedRecoveryPrerequisite.ANDROID_CONTEXT,
+                    )
+                }
+                AndroidBoundedPageResult.PartiallyApplied -> TargetedRecoveryWorkResult.Failed(
+                    GatewayFailureCategory.VALIDATION_REJECTED, TargetedRecoveryPrerequisite.ANDROID_CONTEXT)
+                AndroidBoundedPageResult.LocalPersistenceFailure -> TargetedRecoveryWorkResult.Failed(
+                    GatewayFailureCategory.UNKNOWN, TargetedRecoveryPrerequisite.UNAVAILABLE)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: SQLiteException) {
+            TargetedRecoveryWorkResult.Failed(GatewayFailureCategory.UNKNOWN, TargetedRecoveryPrerequisite.UNAVAILABLE)
+        }
+    }
+
+    private suspend fun currentAccount(context: AndroidInteroperabilityContext): Boolean {
+        val dao = database.androidProjectionLedgerDao()
+        val current = dao.getAccount(context.account.value) ?: return false
+        return current.revision == context.accountRevision && current.providerEpoch == context.providerEpoch &&
+            current.androidAccountName == context.androidAccountName && !current.providerRepairPending &&
+            dao.countOtherAccountsBoundToAndroidName(context.account.value, context.androidAccountName) == 0
+    }
 
     override suspend fun projectPage(
         context: AndroidInteroperabilityContext,
         afterKey: String?,
     ): Pair<AndroidProjectionPage, AndroidBoundedPageResult> {
+        lastFailureIsFullyScoped = false
         return try {
         if (afterKey == null) {
             val groupResult = groupProjectionCoordinator.project(context)
@@ -90,6 +179,7 @@ internal class RoomBoundedAndroidProjectionCoordinator(
             return AndroidProjectionPage(null, page.size) to AndroidBoundedPageResult.ReplanRequired
         }
         var skipped = 0
+        var everySkippedFailureRetained = true
         val locallyCurrentIds = currentProjectionIds(context, page)
         val detachedIds = page.filter {
             it.canonicalContactId in locallyCurrentIds &&
@@ -121,7 +211,8 @@ internal class RoomBoundedAndroidProjectionCoordinator(
                     // pass. Repair-required is specific to that contact: record it and continue.
                     AndroidBoundedPageResult.RepairRequired -> {
                         skipped++
-                        contactIssues.recordProjectionFailure(context, ledger, result)
+                        everySkippedFailureRetained = contactIssues.recordProjectionFailure(context, ledger, result) &&
+                            everySkippedFailureRetained
                         skipObserver.onSkipped(ledger.canonicalContactId, result)
                     }
                     // Replan normally means the pass observed stale state and should restart. But
@@ -131,7 +222,8 @@ internal class RoomBoundedAndroidProjectionCoordinator(
                     AndroidBoundedPageResult.ReplanRequired -> {
                         if (ledger.projectionState == AndroidProjectionWriteState.WRITE_PENDING.name) {
                             skipped++
-                            contactIssues.recordProjectionFailure(context, ledger, result)
+                            everySkippedFailureRetained = contactIssues.recordProjectionFailure(context, ledger, result) &&
+                                everySkippedFailureRetained
                             skipObserver.onSkipped(ledger.canonicalContactId, result)
                         } else {
                             return AndroidProjectionPage(null, page.size) to result
@@ -150,6 +242,7 @@ internal class RoomBoundedAndroidProjectionCoordinator(
         } else {
             AndroidBoundedPageResult.Applied
         }
+        lastFailureIsFullyScoped = skipped > 0 && everySkippedFailureRetained
         AndroidProjectionPage(next, page.size) to outcome
     } catch (cancelled: CancellationException) {
         throw cancelled

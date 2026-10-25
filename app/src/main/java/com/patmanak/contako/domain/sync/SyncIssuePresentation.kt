@@ -10,6 +10,7 @@ enum class SyncIssueCause {
 
 enum class SyncIssueAction {
     CONTACTS_PERMISSION, SIGN_IN, RETRY_SYNC, COMPARE_VERSIONS, REVIEW_ITEM, VIEW_DIAGNOSTICS, WAIT,
+    PREVIEW_TARGETED_RECOVERY,
 }
 
 data class SyncIssueAdvice(
@@ -39,9 +40,12 @@ object SyncIssuePresentationPolicy {
         canReview: Boolean = false,
         contactsPermissionMissing: Boolean = false,
         conflictChoiceQueued: Boolean = false,
+        canTarget: Boolean = false,
     ): SyncIssueAdvice {
-        fun advice(cause: SyncIssueCause, action: SyncIssueAction) =
-            SyncIssueAdvice(cause, scope, action, hasDurableIntent)
+        fun advice(cause: SyncIssueCause, action: SyncIssueAction) = SyncIssueAdvice(cause, scope,
+            if (action == SyncIssueAction.VIEW_DIAGNOSTICS && canTarget &&
+                scope in setOf(SyncIssueScope.PROTON_IMPORT, SyncIssueScope.ANDROID_COPY))
+                SyncIssueAction.PREVIEW_TARGETED_RECOVERY else action, hasDurableIntent)
 
         if (scope == SyncIssueScope.ANDROID_COPY && contactsPermissionMissing) {
             return advice(SyncIssueCause.ANDROID, SyncIssueAction.CONTACTS_PERMISSION)

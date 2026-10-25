@@ -24,6 +24,24 @@ class ContakoMigrationDeviceTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
 
+    @Test fun targetedRecoveryMigrationPreservesRejectedCardsWithoutFabricatingRequests() {
+        val name = "migration-targeted-recovery.db"
+        context.deleteDatabase(name)
+        migrations.createDatabase(name, 21).use { old ->
+            old.execSQL("INSERT INTO remote_hydration_obligations VALUES('synthetic-owner','synthetic-card','Synthetic','MALFORMED_RESPONSE',NULL)")
+        }
+        try {
+            migrations.runMigrationsAndValidate(name, 22, true, ContakoDatabase.MIGRATION_21_22).use { upgraded ->
+                assertEquals("1", upgraded.scalar("SELECT COUNT(*) FROM remote_hydration_obligations"))
+                assertEquals("0", upgraded.scalar("SELECT COUNT(*) FROM targeted_recovery_requests"))
+                upgraded.query("SELECT generation,baseline_version FROM remote_hydration_obligations").use { row ->
+                    assertTrue(row.moveToFirst()); assertTrue(row.getString(0).isNotBlank()); assertTrue(row.isNull(1))
+                }
+                upgraded.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
+            }
+        } finally { context.deleteDatabase(name) }
+    }
+
     @Test
     fun photoReceiptMigrationPreservesJournalWithoutInventingReadbackProof() {
         val name = "migration-photo-receipt.db"
@@ -195,7 +213,7 @@ class ContakoMigrationDeviceTest {
     private class SimulatedMigrationProcessDeath : RuntimeException()
 
     private companion object {
-        const val CURRENT_VERSION = 21
+        const val CURRENT_VERSION = 22
         val ALL_MIGRATIONS = arrayOf(
             ContakoDatabase.MIGRATION_1_2,
             ContakoDatabase.MIGRATION_2_3,
@@ -217,6 +235,7 @@ class ContakoMigrationDeviceTest {
             ContakoDatabase.MIGRATION_18_19,
             ContakoDatabase.MIGRATION_19_20,
             ContakoDatabase.MIGRATION_20_21,
+            ContakoDatabase.MIGRATION_21_22,
         )
     }
 }

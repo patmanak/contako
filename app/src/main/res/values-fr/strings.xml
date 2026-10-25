@@ -416,4 +416,24 @@
     <string name="sync_issue_review">Examiner l’élément</string>
     <string name="sync_issue_diagnostics">Voir le diagnostic</string>
     <string name="sync_issue_history">L’historique peut contenir des échecs anciens depuis résolus. Il ne prouve pas l’existence d’un problème actuel.</string>
+    <string name="targeted_proton_title">Revérifier cette fiche Proton</string>
+    <string name="targeted_android_title">Reprendre cette copie Android</string>
+    <string name="targeted_proton_body">Lire et vérifier uniquement cette fiche Proton, puis la réconcilier avec la version locale enregistrée. Les modifications du téléphone doivent parfois être capturées au préalable. Cela n’envoie aucune modification à Proton et ne termine pas la copie Android.</string>
+    <string name="targeted_android_body">Capturer les éventuelles modifications du téléphone, puis vérifier et mettre à jour la copie Android de ce contact depuis la version locale enregistrée. Cela n’envoie aucune modification à Proton.</string>
+    <string name="targeted_android_delete_body">Vérifier et reprendre le retrait déjà demandé de la copie Android propre à ce contact. Les autres sources restent inchangées.</string>
+    <string name="targeted_confirm">Mettre cette opération en attente</string>
+    <string name="targeted_refresh">Actualiser l’aperçu</string>
+    <string name="targeted_changed">Le contact ou son contexte a changé. Vérifiez un nouvel aperçu.</string>
+    <string name="targeted_unavailable">Cette opération est actuellement indisponible. Aucune réparation complète n’a été lancée.</string>
+    <string name="targeted_no_obligation">Cette cible n’a plus d’opération à reprendre.</string>
+    <string name="targeted_permission">Autorisez l’accès aux contacts avant de reprendre la copie Android.</string>
+    <string name="targeted_dependency">Un prérequis commun manque. Aucune réparation complète ni réinitialisation du fournisseur n’a été lancée.</string>
+    <string name="targeted_identity">L’identité distante n’est pas établie. Utilisez la synchronisation normale pour la réconcilier.</string>
+    <string name="targeted_queued">Opération mise en attente sur cet appareil.</string>
+    <string name="targeted_running">Cette opération est en cours de vérification.</string>
+    <string name="targeted_deferred">Cette opération attend ses prérequis ou le prochain essai autorisé.</string>
+    <string name="targeted_resolved">Cette opération a été vérifiée. D’autres opérations de synchronisation peuvent rester en attente.</string>
+    <string name="targeted_attention">Cette opération nécessite encore votre attention. Son intention initiale est conservée.</string>
+    <string name="targeted_retry_after">Prochain essai autorisé au plus tôt : %1$s. Android peut le planifier plus tard.</string>
+    <string name="targeted_scope_note">La synchronisation habituelle déjà planifiée peut aussi traiter d’autres changements.</string>
 </resources>

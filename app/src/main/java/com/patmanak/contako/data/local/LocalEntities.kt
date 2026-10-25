@@ -282,6 +282,7 @@ internal data class SyncAccountStatusEntity(
     @ColumnInfo(name = "blocked_since_epoch_millis") val blockedSinceEpochMillis: Long?,
     @ColumnInfo(name = "notification_claimed_for_block_epoch_millis")
     val notificationClaimedForBlockEpochMillis: Long?,
+    @ColumnInfo(name = "scoped_issues_only", defaultValue = "0") val scopedIssuesOnly: Boolean = false,
 ) {
     override fun toString(): String =
         "SyncAccountStatusEntity(REDACTED, state=$state, pendingMutationCount=$pendingMutationCount, " +
