@@ -24,6 +24,7 @@ class FoundationI18nContractTest {
                 "Unsupported postal address component",
                 // Stable navigation/test keys, vCard types, locale pattern and visual flags;
                 // none is untranslated prose presented as a user instruction.
+                "import-overview",
                 "conflict:\${it.contactId}", "blocked:\${it.id}", "pending:\${it.id}", "android:\${it.id}", "local-diagnostics", "contact-editor-save-error",
                 "import:\${it.remoteId}",
                 "android-issue:\${it.id}", "blocked-item:\${it.type}:\${it.id}", "android-retained:\${it.contactId}",
@@ -53,6 +54,7 @@ class FoundationI18nContractTest {
                 "Document provider returned no output stream",
                 "contako-diagnostic.txt",
             ),
+            "InitialImportOverview.kt" to setOf("initial_import_overview"),
         )
 
         allowedLiterals.forEach { (name, allowed) ->
