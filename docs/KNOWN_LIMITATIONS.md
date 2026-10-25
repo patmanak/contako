@@ -23,6 +23,10 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
 
 ## Interface and runtime
 
+- The import-availability overview has deterministic state coverage and retained
+  Room/Compose integration tests. Physical first-import navigation, recreation,
+  large-font and accessibility behavior still require separate qualification.
+
 - Full TalkBack traversal remains unqualified. It is a non-blocking RC
   qualification item; this MUST NOT be presented as verified screen-reader
   accessibility.

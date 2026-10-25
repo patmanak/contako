@@ -50,6 +50,16 @@ successful evidence or declaring an accepted limitation fixed.
 
 ## Cases
 
+For first import, inspect the dismissible availability overview before and after
+the first durable batch, with Android permission granted and denied. Browse an
+already committed contact, dismiss/rotate/restart and return to Sync. Verify
+counts against independent owned records, not emitted event totals. A partial
+card rejection MUST retain healthy contacts; an empty confirmed inventory MUST
+finish without an endless animation. An idle interrupted import MUST NOT show
+live activity merely from an old log/checkpoint. Compare source fields and
+foreign contact rows unchanged; opening/closing the overview MUST make no
+network request or new synchronization intent.
+
 Every row is parameterized by the referenced dataset/state. Unless stated
 otherwise, apply the common setup, exact field comparison and cleanup above.
 

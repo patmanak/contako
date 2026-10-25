@@ -1,5 +1,17 @@
 # Software integration test plan
 
+## Import availability
+
+Exercise `InitialImportProgressDeviceTest` on an isolated local database:
+committed partial batches before any inventory checkpoint, reopening without
+double counting, confirmed empty inventory, deferred cards independent of
+Android copies, transaction rollback and owner cleanup without touching a
+foreign partition. Compare the pending-copy query with the existing ledger
+predicate, including missing, clean-with-pending and unclean ledgers.
+`InitialImportOverviewDeviceTest` verifies dismissal, saved-state restoration
+and navigation to saved contacts without another synchronization request.
+Neither test creates an Android account or qualifies Proton/OEM behavior.
+
 This level checks several production components together: codec and preservation,
 Room transactions/outbox, runner and ports, Android provider adapters, crypto and
 UI. External faults MAY be controlled. These tests do not count as real Web

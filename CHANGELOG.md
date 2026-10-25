@@ -2,6 +2,14 @@
 
 Features and improvements by version.
 
+## 0.12.0
+
+- Show a dismissible first-import overview and a persistent Sync summary, keeping
+  already saved contacts accessible while other cards and Android copies wait.
+- Rebuild availability and outstanding work from local records after restart;
+  distinguish an empty completed inventory, partial import and missing Android
+  permission without an estimated percentage or finish time.
+
 ## 0.11.0
 
 - Add a deterministic compatibility bench for synthetic vCard variations, native

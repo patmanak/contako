@@ -6,6 +6,11 @@ product target; [known limitations](KNOWN_LIMITATIONS.md) describe current gaps.
 
 ## Features
 
+- First import MUST offer a dismissible overview and continued access to already
+  committed contacts. Availability, remote verification and Android-copy work
+  MUST remain distinct, including partial results and a confirmed empty account.
+  Closing or restoring this view MUST NOT start or cancel synchronization.
+
 - The app MUST support one active Proton account and show only its owned contacts.
   Other Android address books MUST NOT be adopted, merged or edited by Contako.
 - Cached browsing and local search MUST work offline. Creation, editing, deletion

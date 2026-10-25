@@ -493,8 +493,40 @@ internal interface OutboxDao {
     ): Int
 }
 
+/** One atomic SQL observation, without contact payloads or private names/locators. */
+internal data class InitialImportProgressCounts(
+    val inventoryEstablished: Boolean,
+    val localContactCount: Int,
+    val inventoryContactCount: Int?,
+    val deferredContactCount: Int,
+    val androidPendingContactCount: Int,
+) {
+    override fun toString() = "InitialImportProgressCounts(REDACTED)"
+}
+
 @Dao
 internal interface ContactInventoryCheckpointDao {
+    @Query("""
+        SELECT
+            EXISTS(SELECT 1 FROM contact_inventory_checkpoints WHERE account_id=:accountId) AS inventoryEstablished,
+            (SELECT COUNT(*) FROM contacts WHERE account_id=:accountId AND is_deleted=0) AS localContactCount,
+            CASE WHEN EXISTS(SELECT 1 FROM contact_inventory_checkpoints WHERE account_id=:accountId)
+                THEN (SELECT COUNT(*) FROM contact_inventory_entries WHERE account_id=:accountId)
+                ELSE NULL END AS inventoryContactCount,
+            (SELECT COUNT(*) FROM remote_hydration_obligations WHERE account_id=:accountId) AS deferredContactCount,
+            (SELECT COUNT(*) FROM contacts c LEFT JOIN android_projection_ledger l
+                ON l.account_id=c.account_id AND l.canonical_contact_id=c.id
+                WHERE c.account_id=:accountId AND (
+                    (c.is_deleted=0 AND (l.canonical_contact_id IS NULL OR l.projection_state<>'CLEAN'
+                        OR l.pending_projection_fingerprint IS NOT NULL))
+                    OR EXISTS(SELECT 1 FROM android_contact_issues issue
+                        JOIN android_projection_accounts account ON account.account_id=issue.account_id
+                            AND account.provider_epoch=issue.provider_epoch
+                        WHERE issue.account_id=c.account_id AND issue.canonical_contact_id=c.id
+                            AND issue.origin='PROJECTION'))) AS androidPendingContactCount
+    """)
+    fun observeInitialImportProgress(accountId: String): Flow<InitialImportProgressCounts>
+
     @Query("SELECT * FROM contact_inventory_checkpoints WHERE account_id = :accountId")
     suspend fun getCheckpoint(accountId: String): ContactInventoryCheckpointEntity?
 

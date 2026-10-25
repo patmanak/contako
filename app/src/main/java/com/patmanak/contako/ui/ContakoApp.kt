@@ -185,6 +185,25 @@ fun ContakoApp(
         return
     }
     val state by viewModel.uiState.collectAsState()
+    // The caller keys this composition by owner lifecycle generation. The address label can
+    // arrive asynchronously after READY and is not an identity or a new import session.
+    var initialImportOpened by rememberSaveable { mutableStateOf(false) }
+    var initialImportDismissed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.syncDashboard.initialImport?.inventoryEstablished) {
+        if (state.syncDashboard.initialImport?.inventoryEstablished == false && !initialImportDismissed) {
+            initialImportOpened = true
+        }
+    }
+    fun dismissInitialImport() {
+        initialImportOpened = false
+        initialImportDismissed = true
+    }
+    if (initialImportOpened) state.syncDashboard.initialImport?.let { progress ->
+        InitialImportDialog(progress, state.syncActivity, state.contactsPermissionGranted,
+            state.syncDashboard.actionRequiredCount > 0, ::dismissInitialImport,
+            onViewContacts = { dismissInitialImport(); viewModel.selectDestination(RootDestination.CONTACTS) },
+            onViewProblems = { dismissInitialImport(); viewModel.openSecondary(SecondaryDestination.ACTIONS) })
+    }
     val conflictPanel by viewModel.conflictPanel.collectAsState()
     if (conflictPanel.contactId != null) ContactConflictDialog(conflictPanel, viewModel)
     var requestSearchFocus by remember(state.navigation.destination) { mutableStateOf(false) }
@@ -943,6 +962,17 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
                     color = statusColor,
                     fontWeight = FontWeight.Medium,
                 )
+            }
+        }
+
+        state.syncDashboard.initialImport?.let { progress ->
+            item(key = "import-overview") {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) { InitialImportOverview(progress, state.syncActivity, state.contactsPermissionGranted,
+                        state.syncDashboard.actionRequiredCount > 0,
+                        onViewContacts = { viewModel.selectDestination(RootDestination.CONTACTS) },
+                        onViewProblems = { viewModel.openSecondary(SecondaryDestination.ACTIONS) }) }
+                }
             }
         }
 

@@ -1,5 +1,11 @@
 # User-interface contracts
 
+The first-import overview MUST be dismissible and keep committed contacts
+accessible. Its persistent Sync summary MUST distinguish local availability,
+the last processed remote inventory, deferred verification and Android copies.
+Only live activity may animate progress; unknown totals MUST remain unknown.
+Dismissal/navigation restoration MUST NOT cancel or restart durable work.
+
 The application uses Material 3, Contako's own palette and existing original
 octopus assets. Current packaged assets are the baseline; abandoned image studies
 are not production masters. Proton branding retains the independent-project notice

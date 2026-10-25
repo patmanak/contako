@@ -380,4 +380,17 @@
     <string name="conflict_remote_deleted">Dieser Kontakt wurde auf Proton gelöscht. Der lokale Entwurf bleibt erhalten; der vorherige Vergleich kann eine Löschung nicht auflösen.</string>
     <string name="field_structured_name">Strukturierter Name</string>
     <string name="sync_problem_remote_permission">Proton hat das Senden einer Kontaktänderung nicht erlaubt. Versuche die Synchronisierung erneut und prüfe die verfügbaren Kontaktfunktionen deines Kontos.</string>
+    <string name="initial_import_title">Kontakte werden vorbereitet</string>
+    <string name="initial_import_ready">Kontakte verfügbar</string>
+    <string name="initial_import_inventory_search">Kontakte auf Proton werden gesucht</string>
+    <string name="initial_import_waiting">Der Import wartet auf die Fortsetzung.</string>
+    <string name="initial_import_inventory_done">Letztes Proton-Verzeichnis verarbeitet.</string>
+    <string name="initial_import_available">In Contako verfügbare Kontakte: %1$d</string>
+    <string name="initial_import_inventory">Kontakte im letzten Verzeichnis: %1$d</string>
+    <string name="initial_import_deferred">Noch zu prüfende Proton-Kontakte: %1$d</string>
+    <string name="initial_import_android_pending">Ausstehende Android-Kopien: %1$d</string>
+    <string name="initial_import_android_unavailable">Die Android-Integration ist nicht verfügbar. Contako und Proton bleiben nutzbar.</string>
+    <string name="initial_import_android_no_pending">Derzeit warten keine Android-Kopien auf Verarbeitung.</string>
+    <string name="initial_import_view_contacts">Meine Kontakte ansehen</string>
+    <string name="initial_import_view_problems">Probleme ansehen</string>
 </resources>

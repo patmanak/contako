@@ -380,4 +380,17 @@
     <string name="conflict_remote_deleted">This contact was deleted on Proton. The local draft is kept; the previous comparison cannot resolve a deletion.</string>
     <string name="field_structured_name">Structured name</string>
     <string name="sync_problem_remote_permission">Proton did not permit sending a contact change. Retry synchronization and check the account’s available contact features.</string>
+    <string name="initial_import_title">Getting your contacts ready</string>
+    <string name="initial_import_ready">Contacts available</string>
+    <string name="initial_import_inventory_search">Finding your contacts on Proton</string>
+    <string name="initial_import_waiting">Import is waiting to continue.</string>
+    <string name="initial_import_inventory_done">Most recent Proton inventory processed.</string>
+    <string name="initial_import_available">Contacts available in Contako: %1$d</string>
+    <string name="initial_import_inventory">Contacts in the most recent inventory: %1$d</string>
+    <string name="initial_import_deferred">Proton contacts still needing verification: %1$d</string>
+    <string name="initial_import_android_pending">Android copies pending: %1$d</string>
+    <string name="initial_import_android_unavailable">Android integration is unavailable. You can still use Contako and Proton.</string>
+    <string name="initial_import_android_no_pending">No Android copies are currently awaiting processing.</string>
+    <string name="initial_import_view_contacts">View my contacts</string>
+    <string name="initial_import_view_problems">View problems</string>
 </resources>

@@ -1,5 +1,22 @@
 # User guide and FAQ
 
+## Getting your contacts ready
+
+The first import opens an overview that can be closed at any time. **View my
+contacts** opens the contacts already saved on this device; it does not cancel
+the import. Sync keeps the same availability summary afterwards.
+
+The overview separates the most recent processed Proton inventory, contacts
+available in Contako, remote cards still needing verification and Android
+copies awaiting processing. Before an inventory is established its total is
+unknown. The indicator follows current synchronization activity, with no
+estimated percentage or finish time. A confirmed empty inventory completes
+normally. Refusing Android permission leaves Contako and Proton available.
+
+After restart the summary is rebuilt from saved contacts, inventory and pending
+obligations. No pending Android copy means no known copy obligation, rather
+than a promise that every field in every peer was compared simultaneously.
+
 Contako runs on Android 12 or later, with one Proton account at a time.
 See [Known limitations](KNOWN_LIMITATIONS.md) for compatibility and implementation limits.
 This guide is repository documentation; it is not yet an in-app FAQ screen.

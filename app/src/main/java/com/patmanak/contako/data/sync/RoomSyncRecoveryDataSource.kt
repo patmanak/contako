@@ -18,6 +18,7 @@ import com.patmanak.contako.domain.sync.SyncAndroidContactIssue
 import com.patmanak.contako.domain.sync.SyncAndroidContactIssueKind
 import com.patmanak.contako.domain.sync.SyncBlockedItem
 import com.patmanak.contako.domain.sync.SyncBlockedItemType
+import com.patmanak.contako.domain.sync.InitialImportSnapshot
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
@@ -131,6 +132,12 @@ internal class RoomSyncRecoveryDataSource(
                     else blockedProblem ?: snapshot.problem,
                 actionRequiredCount = maxOf(snapshot.actionRequiredCount,
                     identities.toSet().size + snapshot.importProblems.size))
+        }.combine(database.contactInventoryCheckpointDao().observeInitialImportProgress(boundAccount(accountId).value)) { snapshot, counts ->
+            val progress = InitialImportSnapshot(counts.inventoryEstablished, counts.localContactCount,
+                counts.inventoryContactCount, counts.deferredContactCount, counts.androidPendingContactCount)
+            snapshot.copy(initialImport = progress,
+                state = if (snapshot.state == SyncDashboardState.CURRENT && !progress.remoteComplete)
+                    SyncDashboardState.PENDING else snapshot.state)
         }
 
     override fun observeRepair(accountId: String): Flow<RepairProgress?> =

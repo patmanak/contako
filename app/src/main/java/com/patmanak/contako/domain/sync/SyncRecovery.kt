@@ -57,6 +57,8 @@ data class SyncDashboardSnapshot(
     val androidContactIssues: List<SyncAndroidContactIssue> = emptyList(),
     /** Private names/identities for blocked groups and deleted/missing directory entries. */
     val blockedItems: List<SyncBlockedItem> = emptyList(),
+    /** Private local first-import observations; independent of runner activity and outbox size. */
+    val initialImport: InitialImportSnapshot? = null,
 ) {
     override fun toString(): String = "SyncDashboardSnapshot(state=$state, pendingMutationCount=$pendingMutationCount, " +
         "actionRequiredCount=$actionRequiredCount, problem=$problem, androidPendingCount=${androidPendingContactIds.size}, " +

@@ -387,4 +387,17 @@
     <string name="conflict_remote_deleted">Este contacto foi eliminado no Proton. O rascunho local é mantido; a comparação anterior não resolve uma eliminação.</string>
     <string name="field_structured_name">Nome estruturado</string>
     <string name="sync_problem_remote_permission">Proton não permitiu enviar uma alteração de contacto. Tente sincronizar novamente e verifique as funções de contactos disponíveis para a sua conta.</string>
+    <string name="initial_import_title">A preparar os seus contactos</string>
+    <string name="initial_import_ready">Contactos disponíveis</string>
+    <string name="initial_import_inventory_search">A procurar os seus contactos no Proton</string>
+    <string name="initial_import_waiting">A importação aguarda para continuar.</string>
+    <string name="initial_import_inventory_done">Último inventário do Proton processado.</string>
+    <string name="initial_import_available">Contactos disponíveis no Contako: %1$d</string>
+    <string name="initial_import_inventory">Contactos no último inventário: %1$d</string>
+    <string name="initial_import_deferred">Contactos do Proton ainda por verificar: %1$d</string>
+    <string name="initial_import_android_pending">Cópias Android pendentes: %1$d</string>
+    <string name="initial_import_android_unavailable">A integração Android está indisponível. Pode continuar a usar o Contako e o Proton.</string>
+    <string name="initial_import_android_no_pending">Não há cópias Android a aguardar processamento.</string>
+    <string name="initial_import_view_contacts">Ver os meus contactos</string>
+    <string name="initial_import_view_problems">Ver problemas</string>
 </resources>
