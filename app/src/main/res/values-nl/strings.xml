@@ -393,4 +393,20 @@
     <string name="initial_import_android_no_pending">Er wachten momenteel geen Android-kopieën op verwerking.</string>
     <string name="initial_import_view_contacts">Mijn contacten bekijken</string>
     <string name="initial_import_view_problems">Problemen bekijken</string>
+    <string name="sync_issue_account">Account</string>
+    <string name="sync_issue_import">Proton-import</string>
+    <string name="sync_issue_android">Android-kopie</string>
+    <string name="sync_issue_auth">Externe bewerkingen zijn gepauzeerd. Meld je opnieuw aan bij hetzelfde account om verder te gaan.</string>
+    <string name="sync_issue_network">Extern werk wacht op verbinding of een toegestane nieuwe poging. Opgeslagen wijzigingen blijven in de wachtrij.</string>
+    <string name="sync_issue_conflict">Lokale en Proton-wijzigingen moeten worden bekeken voordat deze bewerking verder kan gaan.</string>
+    <string name="sync_issue_validation">Dit item moet worden gecontroleerd. Er is geen specifiek probleemveld vastgesteld.</string>
+    <string name="sync_issue_crypto">Deze Proton-kaart kon niet worden geverifieerd en is niet als betrouwbare vervanging aanvaard.</string>
+    <string name="sync_issue_groups">Sommige groepsbewerkingen zijn niet beschikbaar. Onafhankelijke contacten kunnen verder synchroniseren.</string>
+    <string name="sync_issue_remote_permission">Proton heeft deze bewerking geweigerd. Controleer het item en de beschikbare rechten bij Proton.</string>
+    <string name="sync_issue_android_body">Deze telefoonwijziging of kopie is nog niet geverifieerd en blijft in behandeling.</string>
+    <string name="sync_issue_unknown">De oorzaak is niet vastgesteld. Open de lokale diagnose voor de technische geschiedenis.</string>
+    <string name="sync_issue_saved">De bewerking in behandeling is op dit apparaat opgeslagen.</string>
+    <string name="sync_issue_review">Item bekijken</string>
+    <string name="sync_issue_diagnostics">Diagnose bekijken</string>
+    <string name="sync_issue_history">De diagnosegeschiedenis kan eerder herstelde fouten bevatten. Dit bewijst geen huidig probleem.</string>
 </resources>

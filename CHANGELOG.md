@@ -2,6 +2,16 @@
 
 Features and improvements by version.
 
+## 0.13.0
+
+- Give synchronization issues a scoped explanation and a suitable primary action:
+  contact permission, same-account sign-in, version comparison, item review,
+  eligible retry or local diagnostics.
+- Keep independent contact, import, group and Android issues visible together;
+  distinguish durable pending edits from changes not yet captured locally.
+- Open local diagnostics directly from an issue without generating or exporting
+  a report automatically; unidentified causes remain explicitly unidentified.
+
 ## 0.12.0
 
 - Show a dismissible first-import overview and a persistent Sync summary, keeping

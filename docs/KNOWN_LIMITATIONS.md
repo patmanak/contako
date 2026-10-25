@@ -26,6 +26,10 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
 - The import-availability overview has deterministic state coverage and retained
   Room/Compose integration tests. Physical first-import navigation, recreation,
   large-font and accessibility behavior still require separate qualification.
+- Actionable synchronization advice uses current closed causes. Generic internal
+  or validation failures may still lack a field-level cause; the UI deliberately
+  leaves that detail unknown. New issue-card navigation and accessibility need
+  physical qualification separately from the policy and navigation regressions.
 
 - Full TalkBack traversal remains unqualified. It is a non-blocking RC
   qualification item; this MUST NOT be presented as verified screen-reader

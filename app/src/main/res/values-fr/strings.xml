@@ -400,4 +400,20 @@
     <string name="initial_import_android_no_pending">Aucune copie Android ne reste actuellement à traiter.</string>
     <string name="initial_import_view_contacts">Voir mes contacts</string>
     <string name="initial_import_view_problems">Voir les problèmes</string>
+    <string name="sync_issue_account">Compte</string>
+    <string name="sync_issue_import">Import Proton</string>
+    <string name="sync_issue_android">Copie Android</string>
+    <string name="sync_issue_auth">Les opérations distantes sont suspendues. Reconnectez-vous au même compte pour reprendre.</string>
+    <string name="sync_issue_network">Le travail distant attend le réseau ou le prochain essai autorisé. Les modifications enregistrées restent en attente.</string>
+    <string name="sync_issue_conflict">Les modifications locales et Proton nécessitent un examen avant de poursuivre cette opération.</string>
+    <string name="sync_issue_validation">Cet élément doit être vérifié. Aucun champ précis en cause n’a été identifié.</string>
+    <string name="sync_issue_crypto">Cette fiche Proton n’a pas pu être vérifiée et n’a pas été acceptée comme version fiable.</string>
+    <string name="sync_issue_groups">Certaines opérations de groupes sont indisponibles. Les contacts indépendants peuvent continuer à se synchroniser.</string>
+    <string name="sync_issue_remote_permission">Proton a refusé cette opération. Vérifiez l’élément et les autorisations disponibles sur Proton.</string>
+    <string name="sync_issue_android_body">Cette modification du téléphone ou cette copie n’est pas encore vérifiée. Elle reste en attente.</string>
+    <string name="sync_issue_unknown">La cause n’a pas été identifiée. Ouvrez le diagnostic local pour consulter l’historique technique.</string>
+    <string name="sync_issue_saved">L’opération en attente est enregistrée sur cet appareil.</string>
+    <string name="sync_issue_review">Examiner l’élément</string>
+    <string name="sync_issue_diagnostics">Voir le diagnostic</string>
+    <string name="sync_issue_history">L’historique peut contenir des échecs anciens depuis résolus. Il ne prouve pas l’existence d’un problème actuel.</string>
 </resources>

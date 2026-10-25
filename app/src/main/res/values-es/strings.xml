@@ -400,4 +400,20 @@
     <string name="initial_import_android_no_pending">No hay copias de Android pendientes de procesar.</string>
     <string name="initial_import_view_contacts">Ver mis contactos</string>
     <string name="initial_import_view_problems">Ver problemas</string>
+    <string name="sync_issue_account">Cuenta</string>
+    <string name="sync_issue_import">Importación de Proton</string>
+    <string name="sync_issue_android">Copia de Android</string>
+    <string name="sync_issue_auth">Las operaciones remotas están pausadas. Inicia sesión en la misma cuenta para continuar.</string>
+    <string name="sync_issue_network">El trabajo remoto espera conexión o el próximo intento permitido. Las ediciones guardadas siguen en cola.</string>
+    <string name="sync_issue_conflict">Los cambios locales y de Proton necesitan revisión antes de continuar esta operación.</string>
+    <string name="sync_issue_validation">Este elemento necesita revisión. No se ha identificado un campo concreto como causa.</string>
+    <string name="sync_issue_crypto">No se pudo verificar esta ficha de Proton y no se aceptó como una versión fiable.</string>
+    <string name="sync_issue_groups">Algunas operaciones de grupos no están disponibles. Los contactos independientes pueden seguir sincronizándose.</string>
+    <string name="sync_issue_remote_permission">Proton rechazó esta operación. Revisa el elemento y los permisos disponibles en Proton.</string>
+    <string name="sync_issue_android_body">Este cambio del teléfono o esta copia aún no se ha verificado. Sigue pendiente.</string>
+    <string name="sync_issue_unknown">No se ha identificado la causa. Abre el diagnóstico local para ver el historial técnico.</string>
+    <string name="sync_issue_saved">La operación pendiente está guardada en este dispositivo.</string>
+    <string name="sync_issue_review">Revisar elemento</string>
+    <string name="sync_issue_diagnostics">Ver diagnóstico</string>
+    <string name="sync_issue_history">El historial puede incluir fallos antiguos ya resueltos. No demuestra que exista un problema actual.</string>
 </resources>

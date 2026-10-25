@@ -400,4 +400,20 @@
     <string name="initial_import_android_no_pending">Nessuna copia Android è attualmente in attesa di elaborazione.</string>
     <string name="initial_import_view_contacts">Mostra i miei contatti</string>
     <string name="initial_import_view_problems">Mostra i problemi</string>
+    <string name="sync_issue_account">Account</string>
+    <string name="sync_issue_import">Importazione Proton</string>
+    <string name="sync_issue_android">Copia Android</string>
+    <string name="sync_issue_auth">Le operazioni remote sono sospese. Accedi di nuovo allo stesso account per riprendere.</string>
+    <string name="sync_issue_network">Il lavoro remoto attende la connessione o il prossimo tentativo consentito. Le modifiche salvate restano in coda.</string>
+    <string name="sync_issue_conflict">Le modifiche locali e di Proton richiedono una verifica prima di continuare questa operazione.</string>
+    <string name="sync_issue_validation">Questo elemento richiede una verifica. Non è stato identificato un campo specifico come causa.</string>
+    <string name="sync_issue_crypto">Questa scheda Proton non è stata verificata e non è stata accettata come sostituzione attendibile.</string>
+    <string name="sync_issue_groups">Alcune operazioni sui gruppi non sono disponibili. I contatti indipendenti possono continuare a sincronizzarsi.</string>
+    <string name="sync_issue_remote_permission">Proton ha rifiutato questa operazione. Verifica l’elemento e le autorizzazioni disponibili su Proton.</string>
+    <string name="sync_issue_android_body">Questa modifica del telefono o copia non è ancora verificata. Resta in attesa.</string>
+    <string name="sync_issue_unknown">La causa non è stata identificata. Apri la diagnostica locale per la cronologia tecnica.</string>
+    <string name="sync_issue_saved">L’operazione in attesa è salvata su questo dispositivo.</string>
+    <string name="sync_issue_review">Verifica elemento</string>
+    <string name="sync_issue_diagnostics">Mostra diagnostica</string>
+    <string name="sync_issue_history">La cronologia può contenere errori precedenti ormai risolti. Non dimostra un problema attuale.</string>
 </resources>

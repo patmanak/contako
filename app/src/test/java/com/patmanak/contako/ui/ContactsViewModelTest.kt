@@ -1742,6 +1742,29 @@ class ContactsViewModelTest {
         val invalid: String,
     )
 
+    @Test fun affectedGroupReviewRemainsAvailableOutsideTheSearchFilter() = runTest(dispatcher) {
+        val group = ContactGroup(LOCAL_ACCOUNT_ID, "hidden-group", "Synthetic group")
+        val recovery = FakeSyncRecoveryDataSource()
+        recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.BLOCKED,
+            blockedItems = listOf(com.patmanak.contako.domain.sync.SyncBlockedItem(group.id,
+                com.patmanak.contako.domain.sync.SyncBlockedItemType.GROUP, group.name, false,
+                com.patmanak.contako.domain.sync.SyncProblem.VALIDATION_REJECTED)))
+        val model = ContactsViewModel(FakeRepository(emptyList(), listOf(group)), recovery)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        model.selectDestination(RootDestination.GROUPS)
+        model.updateQuery("nonmatching")
+        model.openSecondary(SecondaryDestination.ACTIONS)
+        advanceUntilIdle()
+        assertTrue(model.uiState.value.groups.isEmpty())
+        assertEquals(listOf(group), model.uiState.value.actionGroups)
+        assertEquals(com.patmanak.contako.domain.sync.SyncIssueAction.REVIEW_ITEM,
+            currentSyncIssues(model.uiState.value, emptyList()).single().advice.action)
+        model.openAffectedGroup(group.id)
+        advanceUntilIdle()
+        assertEquals(RootDestination.GROUPS, model.uiState.value.navigation.destination)
+        assertEquals(group.id, model.uiState.value.navigation.current.selectedId)
+    }
+
     private class FakeRepository(
         contacts: List<CanonicalContact>,
         groups: List<ContactGroup> = emptyList(),

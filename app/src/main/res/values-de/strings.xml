@@ -393,4 +393,20 @@
     <string name="initial_import_android_no_pending">Derzeit warten keine Android-Kopien auf Verarbeitung.</string>
     <string name="initial_import_view_contacts">Meine Kontakte ansehen</string>
     <string name="initial_import_view_problems">Probleme ansehen</string>
+    <string name="sync_issue_account">Konto</string>
+    <string name="sync_issue_import">Proton-Import</string>
+    <string name="sync_issue_android">Android-Kopie</string>
+    <string name="sync_issue_auth">Remote-Vorgänge sind angehalten. Melde dich erneut mit demselben Konto an.</string>
+    <string name="sync_issue_network">Remote-Arbeit wartet auf das Netzwerk oder den nächsten zulässigen Versuch. Gespeicherte Änderungen bleiben vorgemerkt.</string>
+    <string name="sync_issue_conflict">Lokale und Proton-Änderungen müssen geprüft werden, bevor dieser Vorgang fortgesetzt werden kann.</string>
+    <string name="sync_issue_validation">Dieses Element muss geprüft werden. Ein bestimmtes fehlerhaftes Feld wurde nicht ermittelt.</string>
+    <string name="sync_issue_crypto">Diese Proton-Karte konnte nicht verifiziert werden und wurde nicht als vertrauenswürdiger Ersatz übernommen.</string>
+    <string name="sync_issue_groups">Einige Gruppenvorgänge sind nicht verfügbar. Unabhängige Kontakte können weiter synchronisiert werden.</string>
+    <string name="sync_issue_remote_permission">Proton hat diesen Vorgang abgelehnt. Prüfe das Element und die verfügbaren Berechtigungen bei Proton.</string>
+    <string name="sync_issue_android_body">Diese Telefonänderung oder Kopie wurde noch nicht verifiziert. Sie bleibt ausstehend.</string>
+    <string name="sync_issue_unknown">Die Ursache ist nicht bekannt. Öffne die lokale Diagnose für den technischen Verlauf.</string>
+    <string name="sync_issue_saved">Der ausstehende Vorgang ist auf diesem Gerät gespeichert.</string>
+    <string name="sync_issue_review">Element prüfen</string>
+    <string name="sync_issue_diagnostics">Diagnose ansehen</string>
+    <string name="sync_issue_history">Der Diagnoseverlauf kann inzwischen behobene Fehler enthalten. Er belegt kein aktuelles Problem.</string>
 </resources>

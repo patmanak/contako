@@ -407,4 +407,20 @@
     <string name="initial_import_android_no_pending">Obecnie żadna kopia Android nie czeka na przetworzenie.</string>
     <string name="initial_import_view_contacts">Pokaż moje kontakty</string>
     <string name="initial_import_view_problems">Pokaż problemy</string>
+    <string name="sync_issue_account">Konto</string>
+    <string name="sync_issue_import">Import z Proton</string>
+    <string name="sync_issue_android">Kopia Android</string>
+    <string name="sync_issue_auth">Operacje zdalne są wstrzymane. Zaloguj się ponownie na to samo konto, aby wznowić.</string>
+    <string name="sync_issue_network">Praca zdalna czeka na sieć lub dozwoloną ponowną próbę. Zapisane zmiany pozostają w kolejce.</string>
+    <string name="sync_issue_conflict">Zmiany lokalne i Proton wymagają sprawdzenia przed kontynuowaniem tej operacji.</string>
+    <string name="sync_issue_validation">Ten element wymaga sprawdzenia. Nie zidentyfikowano konkretnego pola powodującego problem.</string>
+    <string name="sync_issue_crypto">Nie udało się zweryfikować tej karty Proton i nie przyjęto jej jako zaufanego zamiennika.</string>
+    <string name="sync_issue_groups">Niektóre operacje na grupach są niedostępne. Niezależne kontakty mogą nadal się synchronizować.</string>
+    <string name="sync_issue_remote_permission">Proton odrzucił tę operację. Sprawdź element i dostępne uprawnienia w Proton.</string>
+    <string name="sync_issue_android_body">Ta zmiana telefonu lub kopia nie jest jeszcze zweryfikowana. Pozostaje oczekująca.</string>
+    <string name="sync_issue_unknown">Przyczyna nie została ustalona. Otwórz lokalną diagnostykę, aby zobaczyć historię techniczną.</string>
+    <string name="sync_issue_saved">Oczekująca operacja jest zapisana na tym urządzeniu.</string>
+    <string name="sync_issue_review">Sprawdź element</string>
+    <string name="sync_issue_diagnostics">Pokaż diagnostykę</string>
+    <string name="sync_issue_history">Historia może zawierać wcześniejsze błędy, które już ustąpiły. Nie oznacza to aktualnego problemu.</string>
 </resources>

@@ -1,5 +1,13 @@
 # User-interface contracts
 
+Synchronization issues MUST share one closed cause-to-action presentation
+policy. Scope and known impact MUST remain visible, independent issues MUST NOT
+be hidden by the account banner, and a generic failure MUST NOT acquire a guessed
+field or authentication cause. A saved-operation claim requires explicit durable
+intent. Reading a card or returning from settings MUST NOT acknowledge it.
+Historical diagnostics MUST remain distinct from current errors; diagnostics
+generation/export/erasure remain explicit actions.
+
 The first-import overview MUST be dismissible and keep committed contacts
 accessible. Its persistent Sync summary MUST distinguish local availability,
 the last processed remote inventory, deferred verification and Android copies.

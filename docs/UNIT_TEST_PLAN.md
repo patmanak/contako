@@ -1,5 +1,14 @@
 # Unit test plan
 
+## Actionable issue presentation
+
+Issue presentation MUST cover every closed `SyncProblem` and scope, explicit
+durability, permission absence, offline eligibility, queued conflict choices and
+unavailable comparison. An authentication banner MUST NOT replace another known
+item cause. Current-issue aggregation MUST preserve independent groups, cards and
+Android failures; ordinary pending work and healed historical events MUST NOT
+become errors. Deleted items remain named without offering a destructive action.
+
 ## Generated compatibility sequences
 
 Run the [deterministic compatibility bench](../app/qa/compatibility/README.md)

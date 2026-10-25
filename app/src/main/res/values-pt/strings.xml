@@ -400,4 +400,20 @@
     <string name="initial_import_android_no_pending">Não há cópias Android a aguardar processamento.</string>
     <string name="initial_import_view_contacts">Ver os meus contactos</string>
     <string name="initial_import_view_problems">Ver problemas</string>
+    <string name="sync_issue_account">Conta</string>
+    <string name="sync_issue_import">Importação do Proton</string>
+    <string name="sync_issue_android">Cópia Android</string>
+    <string name="sync_issue_auth">As operações remotas estão suspensas. Inicie sessão na mesma conta para retomar.</string>
+    <string name="sync_issue_network">O trabalho remoto aguarda ligação ou uma nova tentativa permitida. As alterações guardadas continuam na fila.</string>
+    <string name="sync_issue_conflict">As alterações locais e do Proton precisam de revisão antes de continuar esta operação.</string>
+    <string name="sync_issue_validation">Este item precisa de revisão. Não foi identificado um campo específico como causa.</string>
+    <string name="sync_issue_crypto">Não foi possível verificar esta ficha do Proton e não foi aceite como substituição fiável.</string>
+    <string name="sync_issue_groups">Algumas operações de grupos estão indisponíveis. Os contactos independentes podem continuar a sincronizar.</string>
+    <string name="sync_issue_remote_permission">O Proton recusou esta operação. Reveja o item e as permissões disponíveis no Proton.</string>
+    <string name="sync_issue_android_body">Esta alteração do telefone ou cópia ainda não foi verificada. Continua pendente.</string>
+    <string name="sync_issue_unknown">A causa não foi identificada. Abra o diagnóstico local para consultar o histórico técnico.</string>
+    <string name="sync_issue_saved">A operação pendente está guardada neste dispositivo.</string>
+    <string name="sync_issue_review">Rever item</string>
+    <string name="sync_issue_diagnostics">Ver diagnóstico</string>
+    <string name="sync_issue_history">O histórico pode conter falhas anteriores já resolvidas. Não comprova um problema atual.</string>
 </resources>

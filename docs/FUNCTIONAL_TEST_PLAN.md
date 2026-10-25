@@ -50,6 +50,17 @@ successful evidence or declaring an accepted limitation fixed.
 
 ## Cases
 
+For actionable issues, combine an Android issue, rejected Proton card, blocked
+group and account-authentication prerequisite. Each independent scope MUST stay
+visible with its own known cause; resolving one MUST NOT erase the others.
+Check permission/settings return, version comparison and queued choices, named
+deletions without an edit action, unknown cause and diagnostics navigation.
+No field, saved-state promise or reconnect advice may be guessed. Ten retry
+taps and navigation/recreation MUST preserve eligibility and intent. A healed
+historical journal entry MUST NOT recreate a current badge. Run these cases
+with long localized text, 200% font and both themes; report physical coverage
+separately from presentation-policy tests.
+
 For first import, inspect the dismissible availability overview before and after
 the first durable batch, with Android permission granted and denied. Browse an
 already committed contact, dismiss/rotate/restart and return to Sync. Verify

@@ -7,6 +7,7 @@ enum class RootDestination { CONTACTS, GROUPS, SYNC }
 enum class SecondaryDestination {
     SETTINGS,
     ACTIONS,
+    DIAGNOSTICS,
     ABOUT,
     USAGE,
 }

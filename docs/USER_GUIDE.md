@@ -17,6 +17,26 @@ After restart the summary is rebuilt from saved contacts, inventory and pending
 obligations. No pending Android copy means no known copy obligation, rather
 than a promise that every field in every peer was compared simultaneously.
 
+## Understanding a synchronization issue
+
+Sync and **Items needing attention** use the same issue cards. Each card names
+its scope: account, contact, group, Proton import or Android copy. Independent
+problems remain visible even while a more urgent account issue heads the page.
+Normal pending copies and edits are waiting work, rather than errors by themselves.
+
+The main action follows the known cause: allow Contacts access, sign in to the
+same account, compare retained versions, review an item, retry through the
+normal engine or open local diagnostics. A saved-operation message appears only
+for known durable intent. The app does not guess which field caused a generic
+validation failure, and an unidentified cause stays unidentified.
+
+Opening an issue, viewing a contact or returning from Android settings does not
+resolve the issue. It stays until the relevant operation is verified. Retries
+keep the existing eligibility and backoff rules. **View diagnostics** opens a
+local page; generating, exporting and clearing history remain explicit actions.
+Historical failed attempts in a report may have recovered since then and are
+not themselves current alerts.
+
 Contako runs on Android 12 or later, with one Proton account at a time.
 See [Known limitations](KNOWN_LIMITATIONS.md) for compatibility and implementation limits.
 This guide is repository documentation; it is not yet an in-app FAQ screen.

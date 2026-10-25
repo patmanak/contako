@@ -129,6 +129,8 @@ data class ContactsUiState(
     val pendingContacts: List<CanonicalContact> = emptyList(),
     val androidPendingContacts: List<CanonicalContact> = emptyList(),
     val groups: List<ContactGroup> = emptyList(),
+    /** Affected groups outside the directory's current search filter. */
+    val actionGroups: List<ContactGroup> = emptyList(),
     val pendingMutationCount: Int = 0,
     val syncDashboard: SyncDashboardSnapshot = SyncDashboardSnapshot(SyncDashboardState.CURRENT),
     val repairProgress: RepairProgress? = null,
@@ -299,6 +301,9 @@ class ContactsViewModel(
                 ContactSearch.matches(it, activeQuery) || it.id in contactsInMatchingGroups
             },
             actionContacts = actionContacts,
+            actionGroups = groups.filter { group -> dashboard.blockedItems.any {
+                it.type == com.patmanak.contako.domain.sync.SyncBlockedItemType.GROUP && it.id == group.id
+            } },
             pendingContacts = contacts.filter { it.pendingMutationRevision != null },
             androidPendingContacts = contacts.filter { it.id in dashboard.androidPendingContactIds },
             groups = if (detailOpen) groups else groups.filter { ContactSearch.matchesGroupName(it.name, activeQuery) },

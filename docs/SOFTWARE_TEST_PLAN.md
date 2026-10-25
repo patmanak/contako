@@ -1,5 +1,11 @@
 # Software integration test plan
 
+## Issue navigation
+
+`SyncIssueNavigationDeviceTest` checks that an unknown problem opens local
+diagnostics without requesting synchronization, generating/exporting a report
+or acknowledging the issue. Returning MUST still show the same current cause.
+
 ## Import availability
 
 Exercise `InitialImportProgressDeviceTest` on an isolated local database:

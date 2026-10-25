@@ -393,4 +393,20 @@
     <string name="initial_import_android_no_pending">No Android copies are currently awaiting processing.</string>
     <string name="initial_import_view_contacts">View my contacts</string>
     <string name="initial_import_view_problems">View problems</string>
+    <string name="sync_issue_account">Account</string>
+    <string name="sync_issue_import">Proton import</string>
+    <string name="sync_issue_android">Android copy</string>
+    <string name="sync_issue_auth">Remote operations are paused. Sign in to the same account to resume.</string>
+    <string name="sync_issue_network">Remote work is waiting for connectivity or retry eligibility. Saved edits remain queued.</string>
+    <string name="sync_issue_conflict">Local and Proton changes need review before this operation can continue.</string>
+    <string name="sync_issue_validation">This item needs review. A specific problem field has not been identified.</string>
+    <string name="sync_issue_crypto">This Proton card could not be verified and has not been accepted as a trusted replacement.</string>
+    <string name="sync_issue_groups">Some group operations are unavailable. Independent contact work can continue.</string>
+    <string name="sync_issue_remote_permission">Proton denied this operation. Review the item and the permissions available on Proton.</string>
+    <string name="sync_issue_android_body">This phone change or copy has not yet been verified. It remains pending.</string>
+    <string name="sync_issue_unknown">The cause has not been identified. Open local diagnostics for the technical history.</string>
+    <string name="sync_issue_saved">The pending operation is saved on this device.</string>
+    <string name="sync_issue_review">Review item</string>
+    <string name="sync_issue_diagnostics">View diagnostics</string>
+    <string name="sync_issue_history">Diagnostic history can contain failures from earlier attempts that have since recovered. It does not establish a current problem.</string>
 </resources>
