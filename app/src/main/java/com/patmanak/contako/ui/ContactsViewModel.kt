@@ -458,6 +458,7 @@ class ContactsViewModel(
             .filter { it.accountId == accountId && !it.isDeleted } else emptyList()
         val activeNavigation = values[3] as NavigationState
         val activeQuery = activeNavigation.current.query
+        val search = ContactSearch.prepare(activeQuery)
         val detailOpen = activeNavigation.current.selectedId != null
         val pendingCount = values[2] as Int
         val publishedDashboard = values[10] as SyncDashboardSnapshot?
@@ -471,7 +472,7 @@ class ContactsViewModel(
             )
         }
         val contactsInMatchingGroups = if (activeQuery.isBlank()) emptySet() else {
-            groups.filter { ContactSearch.matchesGroupName(it.name, activeQuery) }
+            groups.filter { search.matchesGroupName(it.name) }
                 .flatMap(ContactGroup::memberships)
                 .map(GroupMembership::contactId)
                 .toSet()
@@ -487,7 +488,7 @@ class ContactsViewModel(
             it.id in failedAndroidContactIds || it.id in dashboard.blockedMutationContactIds }
         val criteria = if (acceptsMutation()) values[19] as DirectoryFilter else DirectoryFilter()
         val searchedContacts = contacts.filter {
-            ContactSearch.matches(it, activeQuery) || it.id in contactsInMatchingGroups
+            search.matches(it) || it.id in contactsInMatchingGroups
         }
         // Every new snapshot must use a fresh reference time: a just-committed change must
         // not be mistaken for a future date relative to the previous periodic clock tick.
@@ -515,7 +516,7 @@ class ContactsViewModel(
             } },
             pendingContacts = contacts.filter { it.pendingMutationRevision != null },
             androidPendingContacts = contacts.filter { it.id in dashboard.androidPendingContactIds },
-            groups = if (detailOpen) groups else groups.filter { ContactSearch.matchesGroupName(it.name, activeQuery) },
+            groups = if (detailOpen) groups else groups.filter { search.matchesGroupName(it.name) },
             pendingMutationCount = values[2] as Int,
             contactEditor = (values[4] as ContactEditorState?)?.let {
                 it.copy(assignmentsEnabled = it.recoveryDraft == null && GroupOperation.ASSIGN_EMAILS !in deniedGroups.value)

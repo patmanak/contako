@@ -100,6 +100,20 @@ closure and instrumentation admission are separate phases. ViewModel reopening
 MUST NOT be described as a cold process or evicted OS/database cache. Rendered
 timings include Compose synchronization and semantics inspection overhead.
 
+Protocol `accepted-action-v3` measures the current `observeDirectory` snapshot;
+its repository acquisition MUST NOT be compared directly with protocol-v2
+`observeContacts` results as if the paths were identical. Separate diagnostics
+cover Room plus DTO materialization, canonical conversion, sorting, organization
+facets, search/group matching and directory-section construction. Replayed
+component timings are diagnostic, not a decomposition whose P95 values may be
+summed or subtracted. Report aggregate DTO rows and UTF-8 string volume outside
+timing; these are not SQLite cursor bytes or native peak memory. The separate
+ViewModel-publication series uses an active collector with Compose detached;
+its duration MUST NOT be called rendered user latency.
+Search diagnostics MUST include query preparation inside each timed evaluation;
+preparing the query once MUST preserve the same contact identities, searchable
+families, Unicode normalization and group-member results as individual matching.
+
 `ContactSortPerformanceDeviceTest` compares two comparator strategies on identical
 seeded permutations, alternating their order. Its nanosecond companion reports
 isolate sorting, not Room, search, network or full application latency. Exact

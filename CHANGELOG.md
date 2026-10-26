@@ -12,6 +12,8 @@ Features and improvements by version.
   for existing contacts or first imports; retain them across restarts.
 - Preserve criteria during navigation/rotation, clear them for a new session or
   owner, and distinguish local read errors from no matches.
+- Reuse the normalized search query across a directory evaluation while preserving
+  Unicode matching, searchable field families and group-member results.
 
 ## 0.17.0
 

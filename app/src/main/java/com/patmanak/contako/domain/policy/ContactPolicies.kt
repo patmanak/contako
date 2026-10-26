@@ -46,22 +46,29 @@ object ContactValidation {
 }
 
 object ContactSearch {
-    fun matches(contact: CanonicalContact, query: String): Boolean {
-        val needle = normalize(query)
-        if (needle.isEmpty()) return true
-        val searchableValues = buildList {
-            add(contact.firstName)
-            add(contact.lastName)
-            add(contact.displayName)
-            contact.values
-                .filter { it.kind in SEARCHED_FAMILIES }
-                .forEach { add(it.value) }
-        }
-        return searchableValues.any { normalize(it).contains(needle) }
-    }
+    /** Reuse one immutable normalized query across a directory evaluation. */
+    fun prepare(query: String): PreparedQuery = PreparedQuery(normalize(query))
 
-    fun matchesGroupName(name: String, query: String): Boolean =
-        normalize(name).contains(normalize(query))
+    fun matches(contact: CanonicalContact, query: String): Boolean = prepare(query).matches(contact)
+
+    fun matchesGroupName(name: String, query: String): Boolean = prepare(query).matchesGroupName(name)
+
+    class PreparedQuery internal constructor(private val needle: String) {
+        fun matches(contact: CanonicalContact): Boolean {
+            if (needle.isEmpty()) return true
+            val searchableValues = buildList {
+                add(contact.firstName)
+                add(contact.lastName)
+                add(contact.displayName)
+                contact.values
+                    .filter { it.kind in SEARCHED_FAMILIES }
+                    .forEach { add(it.value) }
+            }
+            return searchableValues.any { normalize(it).contains(needle) }
+        }
+
+        fun matchesGroupName(name: String): Boolean = normalize(name).contains(needle)
+    }
 
     internal fun normalize(value: String): String =
         Normalizer.normalize(value, Normalizer.Form.NFD)

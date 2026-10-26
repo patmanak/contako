@@ -25,6 +25,8 @@ import com.patmanak.contako.BuildConfig
 import com.patmanak.contako.android.account.SignOutResult
 import com.patmanak.contako.data.local.AggregateType
 import com.patmanak.contako.data.local.ContakoDatabase
+import com.patmanak.contako.data.local.ContactWithValues
+import com.patmanak.contako.data.local.DirectoryContactRow
 import com.patmanak.contako.data.local.LocalMutationCheckpoint
 import com.patmanak.contako.data.local.LocalMutationCheckpointHook
 import com.patmanak.contako.data.local.RoomContactRepository
@@ -36,15 +38,25 @@ import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.GroupMembership
 import com.patmanak.contako.domain.model.PreservationEnvelope
+import com.patmanak.contako.domain.policy.ContactDirectoryPolicy
+import com.patmanak.contako.domain.policy.ContactSearch
 import com.patmanak.contako.ui.ContakoApp
 import com.patmanak.contako.ui.ContactsViewModel
+import com.patmanak.contako.ui.DirectorySectionIndex
 import com.patmanak.contako.ui.theme.ContakoTheme
 import java.io.ByteArrayOutputStream
 import java.util.Base64
+import java.text.Collator
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -125,25 +137,38 @@ class CachedDirectoryPerformanceDeviceTest {
             }
         })
         verifyFixture(db, repository, fixture)
+        // One immutable DTO capture and production oracle, outside every timed interval.
+        val diagnosticRows = runBlocking { db.contactContentChangesDao().observeDirectory(ACCOUNT).first() }
+        val directoryOracle = runBlocking { repository.observeDirectory(ACCOUNT).first() }
+        val materializedUtf8Bytes = materializedUtf8Bytes(diagnosticRows)
         context.writePerformanceArtifact("cached-directory-${profile.name}-scope.json", """
-            {"schemaVersion":2,"layer":"real-room-repository-viewmodel-production-compose",
+            {"schemaVersion":3,"layer":"real-room-repository-viewmodel-production-compose",
             "contactCount":${profile.contacts},"groupCount":${profile.groups},"emailsPerContact":2,
             "inlinePhotoCount":${(profile.contacts + 19) / 20},"opaqueValueCount":${(profile.contacts + 19) / 20},
             "opaqueChars":8192,"envelopeChars":16384,"groupMemberships":${fixture.groups.sumOf { it.memberships.size }},
             "remotePeer":"NOT_RUN","androidProvider":"NOT_RUN","network":"not-constructed",
             "reopenedVm":"SAME_PROCESS_AND_OPEN_DATABASE","heap":"before-after-jvm-proxy-not-native-peak",
-            "sqlRowsAndBytes":"NOT_MEASURED","mappingSortComponents":"NOT_MEASURED",
-            "timingProtocol":"accepted-action-v2","admissionWait":"recorded-separately-not-subtracted-from-total",
+            "materializedContactRows":${diagnosticRows.size},"materializedValueRows":${diagnosticRows.sumOf { it.values.size }},
+            "materializedStringUtf8Bytes":$materializedUtf8Bytes,
+            "volumeScope":"all-string-columns-in-directory-contact-and-value-dtos-excludes-payload-table-numeric-columns-and-object-overhead",
+            "volumeMethod":"aggregate-outside-timing-not-cursor-native-or-peak-memory",
+            "daoAcquisition":"Room-observation-transaction-relations-and-materialization-not-pure-SQL",
+            "mappingSortComponents":"replicated-diagnostic-components-not-production-total-do-not-sum-P95",
+            "timingProtocol":"accepted-action-v3","protocolBreak":"REPOSITORY-FIRST-now-observeDirectory-not-observeContacts-v2-not-directly-comparable",
+            "admissionWait":"recorded-separately-not-subtracted-from-total",
             "composeTestOverhead":"synchronization-and-semantics-included","photoPixels":"72x72-not-heavy-decode",
+            "searchVmPublication":"Compose-detached-active-first-collector-includes-state-predicate-observation-overhead",
             "photoCompletion":"not-a-render-prerequisite","firstUsefulRender":"displayed-name-and-local-selection"}
         """.trimIndent())
 
         measure(profile, "REPOSITORY-FIRST", Long.MAX_VALUE) { phase ->
             phase.actionAcceptedAt = SystemClock.elapsedRealtimeNanos()
-            val contacts = runBlocking { repository.observeContacts(ACCOUNT).first() }
+            val snapshot = runBlocking { repository.observeDirectory(ACCOUNT).first() }
             phase.contractFinishedAt = SystemClock.elapsedRealtimeNanos()
-            assertEquals(fixture.ids, contacts.map { it.id }.toSet())
+            assertTrue("Production directory snapshot differs", directoryOracle == snapshot)
+            assertEquals(fixture.ids, snapshot.contacts.map { it.id }.toSet())
         }
+        measureDiagnosticComponents(profile, db, diagnosticRows, directoryOracle.contacts, fixture)
         measure(profile, "REOPENED-VM", 500, prepare = { disposeViewModel() }) { phase ->
             val vm = compose.runOnIdle {
                 phase.actionAcceptedAt = SystemClock.elapsedRealtimeNanos()
@@ -154,6 +179,40 @@ class CachedDirectoryPerformanceDeviceTest {
         }
         // The last reopened VM is the only live VM. Its full Room flow remains subscribed.
         val vm = requireNotNull(shownViewModel)
+        compose.runOnIdle { shownViewModel = null }
+        compose.waitForIdle()
+        measure(profile, "SEARCH-VM-PUBLICATION", Long.MAX_VALUE, prepare = {
+            compose.runOnIdle { vm.updateQuery("") }
+            runBlocking {
+                withTimeout(TIMEOUT) {
+                    vm.uiState.first { state ->
+                        state.query.isEmpty() && state.contacts.size == profile.contacts &&
+                            state.groups.size == profile.groups && !state.directoryLoading && !state.directoryReadFailed
+                    }
+                }
+            }
+        }) { phase ->
+            val expected = setOf(fixture.contact(0).id, fixture.contact(1).id)
+            runBlocking {
+                // UNDISPATCHED enters first() before the action; no polling or Compose render oracle.
+                val publication = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) {
+                    withTimeout(TIMEOUT) {
+                        vm.uiState.first { state ->
+                            state.query == SEARCH && state.contacts.map { it.id }.toSet() == expected &&
+                                state.directoryContacts.map { it.id }.toSet() == expected
+                        }.also { phase.contractFinishedAt = SystemClock.elapsedRealtimeNanos() }
+                    }
+                }
+                compose.runOnIdle {
+                    phase.actionAcceptedAt = SystemClock.elapsedRealtimeNanos()
+                    vm.updateQuery(SEARCH)
+                }
+                val state = publication.await()
+                assertEquals(expected, state.contacts.map { it.id }.toSet())
+            }
+        }
+        compose.runOnIdle { vm.updateQuery(""); shownViewModel = vm }
+        waitForDirectory(vm, fixture)
         measure(profile, "CACHED-RENDER", 500, prepare = {
             compose.runOnIdle { shownViewModel = null }
             compose.waitForIdle()
@@ -285,6 +344,8 @@ class CachedDirectoryPerformanceDeviceTest {
                 counter.start()
                 started = SystemClock.elapsedRealtimeNanos()
                 action(phase)
+            } catch (_: TimeoutCancellationException) {
+                outcome = PerformanceSampleOutcome.TIMEOUT
             } catch (_: CancellationException) {
                 outcome = PerformanceSampleOutcome.CANCELLED
             } catch (_: androidx.compose.ui.test.ComposeTimeoutException) {
@@ -321,7 +382,7 @@ class CachedDirectoryPerformanceDeviceTest {
             context.writePerformanceArtifact("${environment.runId}.json", PerformanceMetricCollector.toJson(partial))
             context.writePerformanceArtifact("${environment.runId}.csv", PerformanceMetricCollector.toCsv(partial))
             context.writePerformanceArtifact("${environment.runId}-phases.json",
-                "{\"schemaVersion\":2,\"timingProtocol\":\"accepted-action-v2\",\"samples\":[${phases.joinToString(",")}]}")
+                "{\"schemaVersion\":3,\"timingProtocol\":\"accepted-action-v3\",\"samples\":[${phases.joinToString(",")}]}")
             if (outcome != PerformanceSampleOutcome.SUCCESS) {
                 throw AssertionError("${environment.runId}: $outcome; see local evidence", failure)
             }
@@ -332,6 +393,78 @@ class CachedDirectoryPerformanceDeviceTest {
         // A baseline is diagnostic: report budget failures without aborting later operations.
         println("CONTAKO_PERF ${environment.runId} p95=${run.p95DurationMs}ms violations=${run.violations()}")
         budgetViolations += run.violations().map { "${environment.runId}:$it" }
+    }
+
+    /** Replicated diagnostic work on identical captured data; these P95s are not additive. */
+    private fun measureDiagnosticComponents(
+        profile: Profile,
+        db: ContakoDatabase,
+        rows: List<DirectoryContactRow>,
+        oracle: List<CanonicalContact>,
+        fixture: Fixture,
+    ) {
+        val locale = Locale.getDefault()
+        val dtos = rows.map { ContactWithValues(it.contact, it.values) }
+        val mapped = dtos.map(ContactWithValues::toDomain)
+        val oracleById = oracle.associateBy { it.id }
+        assertTrue("Mapping differs from production snapshot", mapped.associateBy { it.id } == oracleById)
+        val facets = ContactDirectoryPolicy.organizationFacets(oracle)
+        assertEquals(profile.contacts, facets.size)
+        val sections = DirectorySectionIndex.create(oracle, locale, CanonicalContact::resolvedDisplayName)
+        assertEquals(oracle.map { it.id }, sections.sections.flatMap { it.items }.map { it.id })
+
+        // Same collector, monotonic clock, five warmups, thirty samples and partial failure evidence.
+        fun <T> component(name: String, work: () -> T, verify: (T) -> Unit) {
+            measure(profile, "DIAGNOSTIC-$name", Long.MAX_VALUE) { phase ->
+                phase.actionAcceptedAt = SystemClock.elapsedRealtimeNanos()
+                val result = work()
+                phase.contractFinishedAt = SystemClock.elapsedRealtimeNanos()
+                verify(result)
+            }
+        }
+        component("DAO-DIRECTORY-MATERIALIZATION", {
+            runBlocking { db.contactContentChangesDao().observeDirectory(ACCOUNT).first() }
+        }) { actual -> assertTrue("Materialized DTOs differ", rows == actual) }
+        component("CANONICAL-CONVERSION", { dtos.map(ContactWithValues::toDomain) }) { actual ->
+            assertTrue("Converted canonical fields differ", mapped == actual)
+        }
+        component("COLLATOR-SORT", {
+            val collator = Collator.getInstance(locale)
+            mapped.sortedWith { left, right -> collator.compare(left.resolvedDisplayName, right.resolvedDisplayName) }
+        }) { actual -> assertTrue("Sort differs from production order and values", oracle == actual) }
+        component("ORGANIZATION-FACETS", { ContactDirectoryPolicy.organizationFacets(oracle) }) { actual ->
+            assertTrue("Organization facets differ", facets == actual)
+        }
+        component("SEARCH-AND-GROUP-NAMES", {
+            val search = ContactSearch.prepare(SEARCH)
+            val matchingGroups = fixture.groups.filter { search.matchesGroupName(it.name) }
+            val memberIds = matchingGroups.flatMap(ContactGroup::memberships).map(GroupMembership::contactId).toSet()
+            val contacts = oracle.filter { search.matches(it) || it.id in memberIds }
+            contacts to matchingGroups
+        }) { (contacts, groups) ->
+            assertEquals(setOf(fixture.contact(0).id, fixture.contact(1).id), contacts.map { it.id }.toSet())
+            assertTrue("Unexpected matching groups", groups.isEmpty())
+            assertTrue("Search changed canonical fields", contacts.all { it == oracleById[it.id] })
+        }
+        component("DIRECTORY-SECTION-INDEX", {
+            DirectorySectionIndex.create(oracle, locale, CanonicalContact::resolvedDisplayName)
+        }) { actual -> assertTrue("Section order, offsets or contents differ", sections == actual) }
+    }
+
+    /** String-column UTF-8 aggregate only: never serialize a payload into evidence. */
+    private fun materializedUtf8Bytes(rows: List<DirectoryContactRow>): Long {
+        fun bytes(vararg values: String?): Long = values.sumOf { it?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L }
+        return rows.sumOf { row ->
+            val contact = row.contact
+            bytes(contact.accountId, contact.id, contact.ownerKey, contact.firstName, contact.lastName,
+                contact.displayName, contact.sortName, contact.remoteContactId, contact.remoteVCardUid,
+                contact.remoteVersion, contact.actionRequiredReasonsEncoding, contact.conflictState) +
+                row.values.sumOf { value ->
+                    bytes(value.accountId, value.contactId, value.ownerKey, value.id, value.kind, value.value,
+                        value.label, value.componentsEncoding, value.metadataEncoding, value.binaryReference,
+                        value.preservationKey)
+                }
+        }
     }
 
     private fun environment(profile: Profile, operation: String) = PerformanceEnvironment(
