@@ -8,6 +8,7 @@ import com.patmanak.contako.domain.model.ContactGroup
 import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.GroupMembership
+import com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import com.patmanak.contako.domain.policy.DirectoryFilter
 import com.patmanak.contako.domain.repository.ContactDirectorySnapshot
@@ -44,6 +45,97 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ContactsViewModelTest {
+    @Test fun compatibilityHelpAndBackPreserveDraftValidationAndPendingIntentWithoutSaving() = runTest(dispatcher) {
+        val original = contact("help", "Synthetic", "email", "fixture@example.test").copy(revision = 7, pendingMutationRevision = 7,
+            values = listOf(ContactValue("date", ContactValueKind.BIRTHDAY, "2000-01-02", order = 0)))
+        val repository = FakeRepository(listOf(original))
+        val recovery = FakeSyncRecoveryDataSource()
+        var committed = 0
+        val model = ContactsViewModel(repository, recovery, onMutationCommitted = { committed++ })
+        val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        runCurrent()
+        model.editContact(original)
+        runCurrent()
+        model.updateContactValue("date", "not a valid date")
+        runCurrent()
+        model.saveContact()
+        runCurrent()
+        val invalidDraft = requireNotNull(model.uiState.value.contactEditor)
+        assertEquals("not a valid date", invalidDraft.values.single().value)
+        assertEquals(UiMessage.INVALID_DATE, invalidDraft.fieldErrors["date"])
+        model.openFieldCompatibility(ContactValueKind.BIRTHDAY, "date")
+        runCurrent()
+        assertEquals(FieldCompatibilityTarget(ContactValueKind.BIRTHDAY, "date"), model.fieldCompatibility.value)
+        assertEquals(invalidDraft, model.uiState.value.contactEditor)
+        assertTrue(model.handleBack())
+        runCurrent()
+        assertNull(model.fieldCompatibility.value)
+        assertEquals(invalidDraft, model.uiState.value.contactEditor)
+        assertFalse(model.uiState.value.showUnsavedConfirmation)
+        assertNull(repository.savedContact)
+        assertEquals(listOf(original), repository.contacts.value)
+        assertEquals(7L, repository.contacts.value.single().pendingMutationRevision)
+        assertTrue(recovery.syncRequestedAccounts.isEmpty())
+        assertEquals(0, committed)
+        subscription.cancel()
+    }
+
+    @Test fun compatibilityCapabilityUpdatesPreserveTheOpenDraftWithoutSchedulingWork() = runTest(dispatcher) {
+        val original = contact("help", "Synthetic", "email", "fixture@example.test")
+        val repository = FakeRepository(listOf(original))
+        val recovery = FakeSyncRecoveryDataSource()
+        val availability = MutableStateFlow(EmailGroupAssignmentAvailability.UNKNOWN)
+        val model = ContactsViewModel(repository, recovery, groupAssignmentAvailability = availability)
+        val ui = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        val capability = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.groupAssignmentAvailability.collect {} }
+        runCurrent()
+        model.editContact(original)
+        runCurrent()
+        model.updateContactEditor(requireNotNull(model.uiState.value.contactEditor).copy(firstName = "Unsaved synthetic name"))
+        runCurrent()
+        val draft = requireNotNull(model.uiState.value.contactEditor)
+        model.openFieldCompatibility(ContactValueKind.EMAIL, "email", groups = true)
+        runCurrent()
+        assertEquals(EmailGroupAssignmentAvailability.UNKNOWN, model.groupAssignmentAvailability.value)
+        availability.value = EmailGroupAssignmentAvailability.DENIED
+        runCurrent()
+        assertEquals(EmailGroupAssignmentAvailability.DENIED, model.groupAssignmentAvailability.value)
+        assertEquals(draft, model.uiState.value.contactEditor)
+        assertEquals(FieldCompatibilityTarget(ContactValueKind.EMAIL, "email", groups = true), model.fieldCompatibility.value)
+        assertTrue(recovery.syncRequestedAccounts.isEmpty())
+        assertNull(repository.savedContact)
+        assertEquals(0, repository.groupSaveCount)
+        model.dismissFieldCompatibility()
+        ui.cancel(); capability.cancel()
+    }
+
+    @Test fun losingTheOwnerClosesCompatibilityAndRejectsLateCapabilityAndHelpRequests() = runTest(dispatcher) {
+        val original = contact("help", "Synthetic", "email", "fixture@example.test")
+        val repository = FakeRepository(listOf(original))
+        val availability = MutableStateFlow(EmailGroupAssignmentAvailability.AVAILABLE)
+        val gate = AccountLifecycleAdmission()
+        val model = ContactsViewModel(repository, mutationAdmission = gate, groupAssignmentAvailability = availability)
+        val ui = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        val capability = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.groupAssignmentAvailability.collect {} }
+        runCurrent()
+        model.editContact(original)
+        runCurrent()
+        model.openFieldCompatibility(ContactValueKind.EMAIL, "email", groups = true)
+        runCurrent()
+        assertEquals(EmailGroupAssignmentAvailability.AVAILABLE, model.groupAssignmentAvailability.value)
+        gate.cleanup {}
+        runCurrent()
+        availability.value = EmailGroupAssignmentAvailability.DENIED
+        model.openFieldCompatibility(ContactValueKind.URL)
+        runCurrent()
+        assertNull(model.fieldCompatibility.value)
+        assertNull(model.uiState.value.contactEditor)
+        assertEquals(EmailGroupAssignmentAvailability.UNKNOWN, model.groupAssignmentAvailability.value)
+        assertNull(repository.savedContact)
+        assertEquals(0, repository.deleteCount)
+        ui.cancel(); capability.cancel()
+    }
+
     @Test fun conflictInspectionReloadsTheWholeDetailForNewSnapshotGroupAndLocalRevision() = runTest(dispatcher) {
         val local = contact("compared", "Synthetic", "email", "fixture@example.test").copy(revision = 7)
         val repository = FakeRepository(listOf(local))

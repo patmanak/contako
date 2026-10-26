@@ -14,6 +14,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability
 
 /**
  * Account/session-scoped D-053 evidence around the group gateway.
@@ -34,6 +35,9 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
     private val state = MutableStateFlow(ContactGroupCapabilitySnapshot())
     private val denied = MutableStateFlow<Set<com.patmanak.contako.domain.model.GroupOperation>>(emptySet())
     val deniedOperations = denied.asStateFlow()
+    private val assignmentAvailability = MutableStateFlow(EmailGroupAssignmentAvailability.UNKNOWN)
+    /** Cached evidence for this operation only; reading it never probes the server. */
+    val emailAssignmentAvailability = assignmentAvailability.asStateFlow()
 
     fun assignments(delegate: com.patmanak.contako.data.gateway.ProtonContactEmailLabelGateway) =
         object : com.patmanak.contako.data.gateway.ProtonContactEmailLabelGateway {
@@ -77,6 +81,7 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
         synchronized(lock) {
             generation = Math.incrementExact(generation)
             availability.keys.forEach { availability[it] = ContactGroupCapabilityAvailability.UNKNOWN }
+            assignmentAvailability.value = EmailGroupAssignmentAvailability.UNKNOWN
             denied.value = emptySet()
             state.value = state.value.copy(
                 availability = ContactGroupCapabilityAvailability.UNKNOWN,
@@ -169,6 +174,11 @@ internal class AccountScopedContactGroupCapabilityCoordinator(
         synchronized(lock) {
             if (generation != operationGeneration) return
             availability[capability] = resolved
+            if (capability == ContactGroupCapability.ASSIGN_EMAILS) assignmentAvailability.value = when (resolved) {
+                ContactGroupCapabilityAvailability.AVAILABLE -> EmailGroupAssignmentAvailability.AVAILABLE
+                ContactGroupCapabilityAvailability.DENIED -> EmailGroupAssignmentAvailability.DENIED
+                ContactGroupCapabilityAvailability.UNKNOWN -> EmailGroupAssignmentAvailability.UNKNOWN
+            }
             denied.value = com.patmanak.contako.domain.model.GroupOperation.entries.filterTo(mutableSetOf()) {
                 availability[ContactGroupCapability.valueOf(it.name)] == ContactGroupCapabilityAvailability.DENIED
             }

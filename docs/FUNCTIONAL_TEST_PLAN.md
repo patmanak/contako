@@ -478,6 +478,15 @@ untouched values independently on each peer:
   progress; network failure retains intent; a newer local/remote edit requires review.
   Open comparison with structured names and preserved read-only fields; every
   canonical field type MUST have a readable label without crashing.
+- Open contextual field help in the picker, on an edited occurrence and on a
+  read-only field. Closing/Back/rotation MUST preserve the draft, validation and
+  picker position without Save, gateway/provider access or new sync work. Check
+  custom dates and complete phonetics, secondary notes/photos, URL value versus
+  local label, and preferred/secondary email groups. A successful group LIST MUST
+  leave unknown ASSIGN_EMAILS capability unknown. Explicit assignment success,
+  refusal and session invalidation MUST update only the corresponding help fact.
+  Denied Contacts permission suspends copying without changing format support.
+  Distinguish editor visibility and actual peer confirmation from these rules.
 - Compare differences first, then reveal matching fields; close without changes.
   Use repeated emails with distinct group assignments and reordered positional
   keys: unproved matches MUST remain separate. Check labels, preference, components

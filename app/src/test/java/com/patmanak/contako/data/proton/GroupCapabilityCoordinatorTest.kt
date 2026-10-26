@@ -27,6 +27,39 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GroupCapabilityCoordinatorTest {
+    @Test fun readOnlyAssignmentEvidenceRemainsOperationScopedAndResetsWithTheSession() = runTest {
+        val fake = FakeGroupGateway()
+        val coordinator = AccountScopedContactGroupCapabilityCoordinator(ACCOUNT, fake)
+        repeat(3) { assertEquals(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN, coordinator.emailAssignmentAvailability.value) }
+        assertEquals(0, fake.calls)
+        coordinator.list(ACCOUNT)
+        assertEquals(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN, coordinator.emailAssignmentAvailability.value)
+        var outcome: GatewayOutcome<Unit> = GatewayOutcome.Success(Unit)
+        var assignmentCalls = 0
+        val assignments = coordinator.assignments(object : com.patmanak.contako.data.gateway.ProtonContactEmailLabelGateway {
+            override suspend fun apply(account: AccountScope, mutation: com.patmanak.contako.data.gateway.EmailLabelMutation): GatewayOutcome<Unit> {
+                assignmentCalls++
+                return outcome
+            }
+        })
+        val mutation = com.patmanak.contako.data.gateway.EmailLabelMutation.Assign(RemoteGroupId("synthetic-group"),
+            listOf(com.patmanak.contako.data.gateway.RemoteEmailId("synthetic-email")))
+        assignments.apply(ACCOUNT, mutation)
+        assertEquals(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.AVAILABLE, coordinator.emailAssignmentAvailability.value)
+        fake.listOutcome = GatewayOutcome.Failure(GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED)
+        coordinator.list(ACCOUNT)
+        assertEquals(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.AVAILABLE, coordinator.emailAssignmentAvailability.value)
+        outcome = GatewayOutcome.Failure(GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED)
+        assignments.apply(ACCOUNT, mutation)
+        assertEquals(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.DENIED, coordinator.emailAssignmentAvailability.value)
+        coordinator.updatePaidMailHint(ACCOUNT, true)
+        assertEquals(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.DENIED, coordinator.emailAssignmentAvailability.value)
+        coordinator.invalidate(ACCOUNT)
+        assertEquals(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN, coordinator.emailAssignmentAvailability.value)
+        assertEquals(2, assignmentCalls)
+        assertEquals(2, fake.calls)
+    }
+
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     @Test fun lateDenialCannotReinstallEvidenceFromRevokedSessionGeneration() = runTest {
         val release = CompletableDeferred<Unit>()

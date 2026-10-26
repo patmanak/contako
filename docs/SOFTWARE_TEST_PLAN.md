@@ -1,5 +1,22 @@
 # Software integration test plan
 
+## Contextual field compatibility
+
+Compare compatibility descriptions against the actual pure Android mapper for
+every family, linked name/phonetic/organization IDs, primary/secondary notes and
+photos, and preferred versus secondary emails. Family help MUST NOT imply delivery
+of a particular occurrence. Test URL/relationship/address labels independently
+from value generation and preserve imported provenance/unknown data unchanged.
+
+Cached ASSIGN_EMAILS evidence MUST stay unknown after a successful LIST, become
+available or refused only from that operation, and reset on context invalidation.
+Opening help MUST NOT probe a gateway. Permission denial changes the copying
+condition, never theoretical support or allowed local validation. Test live
+capability changes, Back/rotation, picker state and exact draft preservation with
+zero Save/scheduling calls, then owner cleanup with no stale help reappearance.
+Exercise eight resource catalogs, long text and 200% scaling. OEM visibility and
+peer delivery require independent physical evidence; help is not that evidence.
+
 ## Conflict comparison and consequence previews
 
 Comparison MUST remain read-only and reuse one owned snapshot pair from a local

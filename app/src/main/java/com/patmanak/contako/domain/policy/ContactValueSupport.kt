@@ -6,9 +6,12 @@ import java.util.Locale
 
 /** Permanent local complements, independent of pending work or peer availability. */
 object ContactValueSupport {
+    /** The value itself has no generated Proton representation; labels are classified separately. */
+    fun isLocalOnlyValue(kind: ContactValueKind): Boolean =
+        kind == ContactValueKind.CUSTOM_DATE || kind == ContactValueKind.PHONETIC_NAME
+
     fun isLocalOnly(value: ContactValue): Boolean =
-        value.kind == ContactValueKind.CUSTOM_DATE || value.kind == ContactValueKind.PHONETIC_NAME ||
-            hasLocalOnlyLabel(value)
+        isLocalOnlyValue(value.kind) || hasLocalOnlyLabel(value)
 
     fun hasLocalOnlyLabel(value: ContactValue): Boolean {
         val locallyEstablished = value.metadata["contakoLocalOnlyLabel"] == "true" ||

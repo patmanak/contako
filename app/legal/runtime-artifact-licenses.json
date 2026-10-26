@@ -5,7 +5,7 @@
   "dependencyDescriptors": [
     {
       "file": "app/build.gradle.kts",
-      "sha256": "387A16EE66E0246AAD2678FCA3596983199BC477FD7C7CB25C82DFEECBE34FCB"
+      "sha256": "C60276EE51AD497D46BC82B1FAB44206020B286C9ABD3358A22CD2E36B160AA8"
     },
     {
       "file": "app/settings.gradle.kts",

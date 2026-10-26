@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="compatibility_about">About %1$s compatibility</string>
+    <string name="compatibility_title">Where can this information appear?</string>
+    <string name="compatibility_local">Storage in Contako</string>
+    <string name="compatibility_local_text">The field stays in the contact when you save. Opening this help does not save, change or send anything.</string>
+    <string name="compatibility_proton">Proton support</string>
+    <string name="compatibility_proton_generated">Supported formats can be sent to Proton. Normal field validation still applies; this is not a delivery confirmation.</string>
+    <string name="compatibility_proton_local">This value stays local and is not generated in Proton. Its intentional absence there is not a synchronization error.</string>
+    <string name="compatibility_proton_preserved">Imported unknown vCard properties are read-only and retained during compatible edits. This is not support for freely editing or converting them.</string>
+    <string name="compatibility_unknown">Compatibility is undetermined. The information stays preserved; no conversion is performed by this help.</string>
+    <string name="compatibility_local_label">The value and its label have different support: this custom label stays local. That does not make the entire value local-only.</string>
+    <string name="compatibility_android">Android representation</string>
+    <string name="compatibility_android_all">The current mapping can represent each supported occurrence in Android.</string>
+    <string name="compatibility_android_primary">Android uses the primary occurrence for this field or its structured row. Other occurrences stay in Contako and follow their own Proton support.</string>
+    <string name="compatibility_android_none">Contako does not project this field into a standard Android contact row. It stays preserved according to its Contako and Proton support.</string>
+    <string name="compatibility_occurrence_included">This occurrence is included in the theoretical projection. That does not prove it has been copied or verified.</string>
+    <string name="compatibility_occurrence_omitted">This occurrence is not included in the current projection. It is not removed from Contako.</string>
+    <string name="compatibility_permission">Android copying is currently suspended without Contacts permission. Format support and allowed local/Proton editing remain unchanged.</string>
+    <string name="compatibility_photo">The original photo and Android copy may use different representations. A thumbnail or similar appearance never proves original equality. This help does not download referenced media.</string>
+    <string name="compatibility_editor">Visibility in contact apps</string>
+    <string name="compatibility_editor_text">Visibility and editing vary between contact apps and are not verified here. A represented field can still be hidden by an editor.</string>
+    <string name="compatibility_delivery">These are support rules, not synchronization results. Check the saved contact synchronization status for actual confirmations and pending work.</string>
+    <string name="compatibility_email_groups">Proton assignments belong to each email occurrence and depend on account capability. Opening this help does not probe the account.</string>
+    <string name="compatibility_groups_available">Email-group changes: known available from a previous successful operation.</string>
+    <string name="compatibility_groups_denied">Email-group changes: explicitly refused by Proton for the current account context.</string>
+    <string name="compatibility_groups_unknown">Email-group changes: availability unknown. Offline state or subscription name cannot establish it.</string>
+    <string name="compatibility_email_preferred">This is the preferred email. Android uses its group assignments.</string>
+    <string name="compatibility_email_secondary">This is a secondary email. Its own Proton groups stay separate; Android uses the preferred email groups.</string>
+    <string name="compatibility_email_preference">Android groups come from the preferred email, not the union of all email assignments.</string>
+    <string name="compatibility_opaque_android">Unrecognized Android MIME rows stay in Android. They are not promoted into Contako or Proton by this help.</string>
+    <string name="compatibility_brief_local">Local value, no Proton transfer</string>
+    <string name="compatibility_brief_preserved">Preserved, read-only</string>
+    <string name="compatibility_brief_android_none">No Android projection</string>
+    <string name="compatibility_brief_primary">Android uses the primary occurrence</string>
+    <string name="compatibility_brief_email">Groups belong to each email</string>
+    <string name="compatibility_brief_label">Some labels stay local</string>
+</resources>

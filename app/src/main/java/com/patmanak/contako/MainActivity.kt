@@ -138,6 +138,7 @@ class MainActivity : ComponentActivity() {
                         // mutations landed in a partition no sync pass ever drained.
                         accountId = application.protonGateCRuntime.accountScope.value,
                         deniedGroupOperations = application.protonGateCRuntime.gateD.groups.deniedOperations,
+                        groupAssignmentAvailability = application.protonGateCRuntime.gateD.groups.emailAssignmentAvailability,
                         mutationAdmission = application.contactMutationAdmission,
                         navigationState = accountStore.navigationState,
                     ),

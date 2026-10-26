@@ -220,6 +220,26 @@ Remote deletion links to the separate draft-recovery choices.
 Avoid editing the same contact simultaneously: Proton does not provide an atomic
 version check for the final write.
 
+## Understand field compatibility
+
+Fields with special rules show a short indication and an information button in
+**Add a field**, the editor and read-only details. **Where can this information
+appear?** separates storage in Contako, Proton format support, Android representation
+and visibility in other contact apps. It works offline and does not save, change,
+probe or send anything. Closing it returns to the same draft or field picker.
+
+Custom dates and complete phonetic names stay local. A supported URL can still
+have a local-only label. Android may project only a primary occurrence; secondary
+values stay retained. Email groups belong to individual Proton email occurrences,
+while Android uses the preferred email groups. Account capability can be unknown,
+known available or explicitly refused; offline state is not proof of refusal.
+
+Permission denial suspends Android copying rather than changing field support.
+Unknown vCard data remains read-only; unknown Android rows stay in Android.
+Media representations and contact-app visibility can differ. Use **View
+synchronization status** for actual confirmations of a saved contact; compatibility
+help and thumbnails do not establish delivery.
+
 ## Report a problem safely
 
 Sync separates changes waiting for Proton, pending Android copies and identified

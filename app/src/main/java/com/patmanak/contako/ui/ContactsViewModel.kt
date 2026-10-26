@@ -188,6 +188,8 @@ class ContactsViewModel(
     deniedGroupOperations: kotlinx.coroutines.flow.Flow<Set<GroupOperation>> = kotlinx.coroutines.flow.flowOf(emptySet()),
     private val mutationAdmission: ContactMutationAdmission = UnrestrictedContactMutationAdmission,
     private val directoryClock: () -> Long = System::currentTimeMillis,
+    groupAssignmentAvailability: Flow<com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability> =
+        flowOf(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN),
 ) : ViewModel() {
     private val accountGeneration = mutationAdmission.access.value.generation
     private fun acceptsMutation() = mutationAdmission.accepts(accountGeneration)
@@ -199,6 +201,18 @@ class ContactsViewModel(
         }
     }
     private val deniedGroups = deniedGroupOperations.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val groupAssignmentAvailability = combine(groupAssignmentAvailability, mutationAdmission.access) { value, _ ->
+        if (acceptsMutation()) value else com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000),
+        com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN)
+    private val mutableFieldCompatibility = MutableStateFlow<FieldCompatibilityTarget?>(null)
+    val fieldCompatibility: StateFlow<FieldCompatibilityTarget?> = mutableFieldCompatibility
+
+    fun openFieldCompatibility(kind: ContactValueKind, valueId: String? = null, editing: Boolean = true, groups: Boolean = false) {
+        if (acceptsMutation()) mutableFieldCompatibility.value = FieldCompatibilityTarget(kind, valueId, editing, groups)
+    }
+
+    fun dismissFieldCompatibility() { mutableFieldCompatibility.value = null }
     val deletionRecoveries = combine(syncRecoveryDataSource.observeDeletionRecoveries(accountId), mutationAdmission.access) { rows, _ ->
         if (acceptsMutation()) rows else emptyList()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -279,6 +293,7 @@ class ContactsViewModel(
     fun openContactSyncDetail(contactId: String) {
         if (!acceptsMutation() || contactId.isBlank()) return
         dismissContactSyncDetail()
+        dismissFieldCompatibility()
         val generation = contactSyncPanelGeneration
         mutableContactSyncPanel.value = ContactSyncPanelState(contactId = contactId, loading = true)
         contactSyncObservation = viewModelScope.launch {
@@ -602,6 +617,7 @@ class ContactsViewModel(
         deletionPanelGeneration++
         mutableDeletionRecoveryPanel.value = DeletionRecoveryPanelState()
         dismissContactSyncDetail()
+        dismissFieldCompatibility()
         contactEditor.value = null
         groupEditor.value = null
         pendingContactDeletion.value = null
@@ -795,6 +811,7 @@ class ContactsViewModel(
     }
 
     fun handleBack(): Boolean = when {
+        mutableFieldCompatibility.value != null -> { dismissFieldCompatibility(); true }
         showDirectoryFilters.value -> { dismissDirectoryFilters(); true }
         showUnsavedConfirmation.value -> { showUnsavedConfirmation.value = false; true }
         pendingContactDeletion.value != null -> { pendingContactDeletion.value = null; true }
@@ -1378,6 +1395,8 @@ class ContactsViewModel(
             deniedGroupOperations: kotlinx.coroutines.flow.Flow<Set<GroupOperation>> = kotlinx.coroutines.flow.flowOf(emptySet()),
             mutationAdmission: ContactMutationAdmission = UnrestrictedContactMutationAdmission,
             navigationState: SavedStateHandle? = null,
+            groupAssignmentAvailability: Flow<com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability> =
+                flowOf(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN),
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
@@ -1391,6 +1410,7 @@ class ContactsViewModel(
                         savedStateHandle = navigationState ?: extras.createSavedStateHandle(),
                         accountId = accountId,
                         mutationAdmission = mutationAdmission,
+                        groupAssignmentAvailability = groupAssignmentAvailability,
                     ) as T
             }
     }

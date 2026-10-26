@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="compatibility_about">Informazioni sulla compatibilità di %1$s</string>
+    <string name="compatibility_title">Dove possono apparire queste informazioni?</string>
+    <string name="compatibility_local">Conservazione in Contako</string>
+    <string name="compatibility_local_text">Il campo resta nel contatto al salvataggio. Aprire questa guida non salva, modifica o invia nulla.</string>
+    <string name="compatibility_proton">Supporto di Proton</string>
+    <string name="compatibility_proton_generated">I formati supportati possono essere inviati a Proton. La normale convalida dei campi resta valida; questa non è una conferma di consegna.</string>
+    <string name="compatibility_proton_local">Questo valore resta locale e non viene generato in Proton. La sua assenza intenzionale su Proton non è un errore di sincronizzazione.</string>
+    <string name="compatibility_proton_preserved">Le proprietà vCard sconosciute importate sono in sola lettura e conservate durante le modifiche compatibili. Ciò non permette di modificarle o convertirle liberamente.</string>
+    <string name="compatibility_unknown">La compatibilità non è determinata. Le informazioni restano conservate; questa guida non esegue alcuna conversione.</string>
+    <string name="compatibility_local_label">Il valore e la sua etichetta hanno un supporto diverso: questa etichetta personalizzata resta locale. Ciò non rende l’intero valore esclusivamente locale.</string>
+    <string name="compatibility_android">Rappresentazione Android</string>
+    <string name="compatibility_android_all">La mappatura attuale può rappresentare ogni occorrenza supportata in Android.</string>
+    <string name="compatibility_android_primary">Android usa l’occorrenza principale per questo campo o la sua riga strutturata. Le altre occorrenze restano in Contako e seguono il proprio supporto Proton.</string>
+    <string name="compatibility_android_none">Contako non proietta questo campo in una riga standard dei contatti Android. Resta conservato secondo il supporto di Contako e Proton.</string>
+    <string name="compatibility_occurrence_included">Questa occorrenza è inclusa nella proiezione teorica. Ciò non dimostra che sia stata copiata o verificata.</string>
+    <string name="compatibility_occurrence_omitted">Questa occorrenza non è inclusa nella proiezione attuale. Non viene rimossa da Contako.</string>
+    <string name="compatibility_permission">La copia Android è attualmente sospesa senza il permesso Contatti. Il supporto dei formati e le modifiche locali/Proton consentite restano invariati.</string>
+    <string name="compatibility_photo">La foto originale e la copia Android possono usare rappresentazioni diverse. Una miniatura o un aspetto simile non dimostrano mai l’uguaglianza degli originali. Questa guida non scarica i contenuti multimediali referenziati.</string>
+    <string name="compatibility_editor">Visibilità nelle app dei contatti</string>
+    <string name="compatibility_editor_text">Visibilità e modifica variano tra le app dei contatti e non vengono verificate qui. Un editor può nascondere un campo anche se è rappresentato.</string>
+    <string name="compatibility_delivery">Queste sono regole di supporto, non risultati di sincronizzazione. Controlla lo stato di sincronizzazione del contatto salvato per le conferme effettive e le attività in attesa.</string>
+    <string name="compatibility_email_groups">Le assegnazioni ai gruppi Proton appartengono a ogni occorrenza e-mail e dipendono dalle capacità dell’account. Aprire questa guida non verifica le capacità dell’account.</string>
+    <string name="compatibility_groups_available">Modifiche ai gruppi per e-mail: disponibilità nota da un’operazione precedente riuscita.</string>
+    <string name="compatibility_groups_denied">Modifiche ai gruppi per e-mail: rifiutate esplicitamente da Proton nel contesto attuale dell’account.</string>
+    <string name="compatibility_groups_unknown">Modifiche ai gruppi per e-mail: disponibilità sconosciuta. Lo stato offline o il nome dell’abbonamento non permettono di determinarla.</string>
+    <string name="compatibility_email_preferred">Questa è l’e-mail preferita. Android usa le sue assegnazioni ai gruppi.</string>
+    <string name="compatibility_email_secondary">Questa è un’e-mail secondaria. I suoi gruppi Proton restano separati; Android usa i gruppi dell’e-mail preferita.</string>
+    <string name="compatibility_email_preference">I gruppi Android provengono dall’e-mail preferita, non dall’unione delle assegnazioni di tutte le e-mail.</string>
+    <string name="compatibility_opaque_android">Le righe MIME Android non riconosciute restano in Android. Questa guida non le trasferisce in Contako o Proton.</string>
+    <string name="compatibility_brief_local">Valore locale, nessun invio a Proton</string>
+    <string name="compatibility_brief_preserved">Conservato, in sola lettura</string>
+    <string name="compatibility_brief_android_none">Nessuna proiezione Android</string>
+    <string name="compatibility_brief_primary">Android usa l’occorrenza principale</string>
+    <string name="compatibility_brief_email">I gruppi appartengono a ogni e-mail</string>
+    <string name="compatibility_brief_label">Alcune etichette restano locali</string>
+</resources>

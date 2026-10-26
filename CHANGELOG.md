@@ -2,6 +2,15 @@
 
 Features and improvements by version.
 
+## 0.20.0
+
+- Explain field compatibility from the field picker, editor and read-only details,
+  with separate Contako, Proton, Android and contact-app visibility sections.
+- Derive Android occurrence support from the existing mapper and distinguish
+  local values from local-only labels, preferred email groups and media limits.
+- Show cached email-assignment capability as unknown, available or refused without
+  probing the account; keep help separate from validation and delivery evidence.
+
 ## 0.19.0
 
 - Compare saved conflict versions by field, with differences first and optional

@@ -148,6 +148,8 @@ import com.patmanak.contako.domain.model.GroupOperation
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
+import com.patmanak.contako.domain.policy.ContactValueSupport
+import com.patmanak.contako.data.android.mapping.ContactFieldCompatibility
 import com.patmanak.contako.domain.policy.PostalAddressPolicy
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
 import com.patmanak.contako.ui.components.InfoCard
@@ -211,10 +213,12 @@ fun ContakoApp(
     val contactSyncPanel by viewModel.contactSyncPanel.collectAsState()
     val deletionRecoveries by viewModel.deletionRecoveries.collectAsState()
     val deletionRecoveryPanel by viewModel.deletionRecoveryPanel.collectAsState()
+    val fieldCompatibility by viewModel.fieldCompatibility.collectAsState()
     if (deletionRecoveryPanel.contactId != null) DeletionRecoveryDialog(deletionRecoveryPanel, viewModel)
     if (contactSyncPanel.contactId != null) ContactSyncDetailDialog(contactSyncPanel, state, viewModel)
     if (targetedPanel.kind != null) TargetedRecoveryDialog(targetedPanel, viewModel)
     if (conflictPanel.contactId != null) ContactConflictDialog(conflictPanel, viewModel)
+    fieldCompatibility?.let { FieldCompatibilityDialog(it, state, viewModel) }
     var requestSearchFocus by remember(state.navigation.destination) { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -1263,7 +1267,8 @@ private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsV
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val editorListState = rememberLazyListState()
-    var sectionMenuExpanded by remember { mutableStateOf(false) }
+    val fieldPickerListState = rememberLazyListState()
+    var sectionMenuExpanded by rememberSaveable(editor.draftGeneration) { mutableStateOf(false) }
     val sectionTitles = listOf(R.string.contact_detail_title, R.string.contact_identity_gallery_section,
         R.string.contact_email_section, R.string.nav_groups) + editorSections.map { it.title }
     var expandedSections by rememberSaveable(editor.draftGeneration) {
@@ -1502,27 +1507,42 @@ private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsV
             onDismissRequest = { sectionMenuExpanded = false },
             title = { Text(stringResource(R.string.editor_add_field)) },
             text = {
-                LazyColumn(Modifier.testTag("contact_editor_field_picker")) {
+                LazyColumn(Modifier.testTag("contact_editor_field_picker"), state = fieldPickerListState) {
                     item {
-                        TextButton(onClick = {
-                            sectionMenuExpanded = false
-                            selectImage(ContactValueKind.PHOTO)
-                            expandedSections = (expandedSections + R.string.contact_identity_gallery_section).distinct()
-                        }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.field_photo)) }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = {
+                                sectionMenuExpanded = false
+                                selectImage(ContactValueKind.PHOTO)
+                                expandedSections = (expandedSections + R.string.contact_identity_gallery_section).distinct()
+                            }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.field_photo)) }
+                            FieldCompatibilityButton(ContactValueKind.PHOTO) {
+                                viewModel.openFieldCompatibility(ContactValueKind.PHOTO)
+                            }
+                        }
                     }
                     item {
-                        TextButton(onClick = {
-                            sectionMenuExpanded = false
-                            selectImage(ContactValueKind.LOGO)
-                            expandedSections = (expandedSections + R.string.contact_identity_gallery_section).distinct()
-                        }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.field_logo)) }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = {
+                                sectionMenuExpanded = false
+                                selectImage(ContactValueKind.LOGO)
+                                expandedSections = (expandedSections + R.string.contact_identity_gallery_section).distinct()
+                            }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.field_logo)) }
+                            FieldCompatibilityButton(ContactValueKind.LOGO) {
+                                viewModel.openFieldCompatibility(ContactValueKind.LOGO)
+                            }
+                        }
                     }
                     item {
-                        TextButton(onClick = {
-                            sectionMenuExpanded = false
-                            expandedSections = (expandedSections + R.string.nav_groups).distinct()
-                            scope.launch { editorListState.animateScrollToItem(3) }
-                        }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.nav_groups)) }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = {
+                                sectionMenuExpanded = false
+                                expandedSections = (expandedSections + R.string.nav_groups).distinct()
+                                scope.launch { editorListState.animateScrollToItem(3) }
+                            }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.nav_groups)) }
+                            FieldCompatibilityButton(ContactValueKind.EMAIL) {
+                                viewModel.openFieldCompatibility(ContactValueKind.EMAIL, groups = true)
+                            }
+                        }
                     }
                     val families = listOf(EditorSection(R.string.contact_detail_title, listOf(ContactValueKind.NICKNAME)),
                         EditorSection(R.string.contact_email_section, listOf(ContactValueKind.EMAIL))) + editorSections
@@ -1534,12 +1554,17 @@ private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsV
                             item { Text(stringResource(section.title), style = MaterialTheme.typography.labelLarge,
                                 modifier = Modifier.padding(top = 12.dp)) }
                             items(availableKinds, key = { it.name }) { kind ->
-                                TextButton(onClick = {
-                                    viewModel.addContactValue(kind)
-                                    sectionMenuExpanded = false
-                                    expandedSections = (expandedSections + section.title).distinct()
-                                    scope.launch { editorListState.animateScrollToItem(sectionTitles.indexOf(section.title)) }
-                                }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(contactValueLabel(kind))) }
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = {
+                                        viewModel.addContactValue(kind)
+                                        sectionMenuExpanded = false
+                                        expandedSections = (expandedSections + section.title).distinct()
+                                        scope.launch { editorListState.animateScrollToItem(sectionTitles.indexOf(section.title)) }
+                                    }, modifier = Modifier.weight(1f)) { Text(stringResource(contactValueLabel(kind))) }
+                                    if (ContactFieldCompatibility.needsExplanation(kind)) FieldCompatibilityButton(kind) {
+                                        viewModel.openFieldCompatibility(kind)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1655,6 +1680,9 @@ private fun ContactGroupAssignmentEditor(editor: ContactEditorState, viewModel: 
     val emails = editor.values.filter {
         it.kind == ContactValueKind.EMAIL && it.value.isNotBlank()
     }.sortedBy(ContactValue::order)
+    if (emails.isEmpty() || editor.groupOptions.isEmpty()) FieldCompatibilityButton(ContactValueKind.EMAIL) {
+        viewModel.openFieldCompatibility(ContactValueKind.EMAIL, groups = true)
+    }
     when {
         emails.isEmpty() -> Text(
             stringResource(R.string.groups_membership_empty),
@@ -1674,10 +1702,16 @@ private fun ContactGroupAssignmentEditor(editor: ContactEditorState, viewModel: 
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text(
-                        email.value.ifBlank { stringResource(R.string.field_email) },
-                        style = MaterialTheme.typography.labelLarge,
-                    )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            email.value.ifBlank { stringResource(R.string.field_email) },
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        FieldCompatibilityButton(ContactValueKind.EMAIL) {
+                            viewModel.openFieldCompatibility(ContactValueKind.EMAIL, email.id, groups = true)
+                        }
+                    }
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -1741,6 +1775,11 @@ private fun ContactValueFamily(
             val moveUpDescription = stringResource(R.string.field_move_up, occurrenceLabel)
             val moveDownDescription = stringResource(R.string.field_move_down, occurrenceLabel)
             Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                if (ContactFieldCompatibility.needsExplanation(kind) || ContactValueSupport.hasLocalOnlyLabel(value)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        FieldCompatibilityButton(kind) { viewModel.openFieldCompatibility(kind, value.id) }
+                    }
+                }
                 if (rows.size > 1 && value.id == preferredId) {
                     PrimaryValueBadge()
                 }
@@ -1983,6 +2022,7 @@ private fun ImageEditorRow(
                 Text(occurrenceLabel, style = MaterialTheme.typography.labelLarge)
                 if (isPrimary) PrimaryValueBadge()
             }
+            FieldCompatibilityButton(image.kind) { viewModel.openFieldCompatibility(image.kind, image.id) }
             TextButton(onClick = onChooseImage) {
                 Text(stringResource(R.string.action_replace))
             }
@@ -2315,6 +2355,11 @@ private fun ContactDetail(contact: CanonicalContact?, groups: List<ContactGroup>
                         .semantics { contentDescription = requireNotNull(singleImageLabel) }
                     else Modifier,
                 )
+                singleImage?.let { image ->
+                    FieldCompatibilityButton(image.kind) {
+                        viewModel.openFieldCompatibility(image.kind, image.id, editing = false)
+                    }
+                }
                 Text(
                     contact.resolvedDisplayName,
                     style = MaterialTheme.typography.headlineMedium,
@@ -2380,27 +2425,32 @@ private fun ContactDetail(contact: CanonicalContact?, groups: List<ContactGroup>
                                 stringResource(R.string.field_value_occurrence, familyName, family.indexOf(photo) + 1, family.size)
                             } else familyName
                             val thumbnail = rememberContactImage(contactValueImageSources(photo))
-                            TextButton(
-                                onClick = { galleryValue = photo },
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                            ) {
-                                Row(
-                                    Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(
+                                    onClick = { galleryValue = photo },
+                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                                 ) {
-                                    Surface(Modifier.size(64.dp), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-                                        if (thumbnail != null) {
-                                            Image(thumbnail, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(4.dp))
-                                        } else Box(contentAlignment = Alignment.Center) {
-                                            Icon(Icons.Default.Person, contentDescription = null)
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        Surface(Modifier.size(64.dp), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                                            if (thumbnail != null) {
+                                                Image(thumbnail, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(4.dp))
+                                            } else Box(contentAlignment = Alignment.Center) {
+                                                Icon(Icons.Default.Person, contentDescription = null)
+                                            }
+                                        }
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text(label, textAlign = TextAlign.Start)
+                                            if (family.size > 1 && photo.id == CanonicalPrimaryValuePolicy.select(family)?.id) PrimaryValueBadge()
                                         }
                                     }
-                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(label, textAlign = TextAlign.Start)
-                                        if (family.size > 1 && photo.id == CanonicalPrimaryValuePolicy.select(family)?.id) PrimaryValueBadge()
-                                    }
+                                }
+                                FieldCompatibilityButton(photo.kind) {
+                                    viewModel.openFieldCompatibility(photo.kind, photo.id, editing = false)
                                 }
                             }
                         }
@@ -2417,6 +2467,9 @@ private fun ContactDetail(contact: CanonicalContact?, groups: List<ContactGroup>
                         values = values,
                         groups = groups,
                         contactId = contact.id,
+                        onFieldHelp = { value, groupContext ->
+                            viewModel.openFieldCompatibility(value.kind, value.id, editing = false, groups = groupContext)
+                        },
                     )
                 }
             }
@@ -2435,6 +2488,12 @@ private fun ContactDetail(contact: CanonicalContact?, groups: List<ContactGroup>
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         preservedValues.forEach { value ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                FieldCompatibilityButton(ContactValueKind.UNKNOWN_VCARD_PROPERTY) {
+                                    viewModel.openFieldCompatibility(ContactValueKind.UNKNOWN_VCARD_PROPERTY,
+                                        value.id, editing = false)
+                                }
+                            }
                             SelectionContainer {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(value.label?.takeIf(String::isNotBlank)
@@ -2643,6 +2702,7 @@ private fun ContactDetailCard(
     values: List<Pair<ContactValueKind, ContactValue>>,
     groups: List<ContactGroup>,
     contactId: String,
+    onFieldHelp: (ContactValue, Boolean) -> Unit,
 ) {
     val familySizes = values.groupingBy { it.first }.eachCount()
     val primaryIds = values.groupBy { it.first }.mapValues { (_, family) ->
@@ -2672,6 +2732,7 @@ private fun ContactDetailCard(
                     groups = groups,
                     contactId = contactId,
                     showPrimary = (familySizes[kind] ?: 0) > 1 && primaryIds[kind] == value.id,
+                    onFieldHelp = onFieldHelp,
                 )
             }
         }
@@ -2686,6 +2747,7 @@ private fun ContactDetailValueRow(
     groups: List<ContactGroup>,
     contactId: String,
     showPrimary: Boolean,
+    onFieldHelp: (ContactValue, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
@@ -2742,6 +2804,10 @@ private fun ContactDetailValueRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (showPrimary) PrimaryValueBadge(Modifier.align(Alignment.CenterVertically))
+                if ((ContactFieldCompatibility.needsExplanation(kind) || ContactValueSupport.hasLocalOnlyLabel(value)) &&
+                    (kind != ContactValueKind.EMAIL || assignedGroups.isEmpty())) {
+                    FieldCompatibilityButton(kind) { onFieldHelp(value, false) }
+                }
             }
             Text(
                 displayValue,
@@ -2750,6 +2816,7 @@ private fun ContactDetailValueRow(
             )
             if (kind == ContactValueKind.EMAIL && assignedGroups.isNotEmpty()) {
                 ContactGroupChips(assignedGroups)
+                FieldCompatibilityButton(kind) { onFieldHelp(value, true) }
             }
         }
     }

@@ -11,9 +11,7 @@ import com.patmanak.contako.domain.policy.ContactValueSupport
  * A whole-contact Proton conflict choice uses the same rule as normal hydration.
  */
 internal fun retainLocalContactComplements(local: CanonicalContact, remote: CanonicalContact): CanonicalContact {
-    val localOnlyValues = local.values.filter {
-        it.kind == ContactValueKind.CUSTOM_DATE || it.kind == ContactValueKind.PHONETIC_NAME
-    }
+    val localOnlyValues = local.values.filter { ContactValueSupport.isLocalOnlyValue(it.kind) }
     // Remote decoding does not generate these local/Android-only families. Keep complete
     // values and identities, including every phonetic component and its linked row binding.
     // Refuse a value-ID collision rather than replacing either peer's value;

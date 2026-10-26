@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="compatibility_about">Over de compatibiliteit van %1$s</string>
+    <string name="compatibility_title">Waar kan deze informatie verschijnen?</string>
+    <string name="compatibility_local">Opslag in Contako</string>
+    <string name="compatibility_local_text">Het veld blijft bij het opslaan in het contact behouden. Het openen van deze hulp slaat niets op, wijzigt niets en verzendt niets.</string>
+    <string name="compatibility_proton">Ondersteuning door Proton</string>
+    <string name="compatibility_proton_generated">Ondersteunde formaten kunnen naar Proton worden verzonden. De normale veldvalidatie blijft gelden; dit is geen ontvangstbevestiging.</string>
+    <string name="compatibility_proton_local">Deze waarde blijft lokaal en wordt niet in Proton aangemaakt. Het bewust ontbreken ervan daar is geen synchronisatiefout.</string>
+    <string name="compatibility_proton_preserved">Geïmporteerde onbekende vCard-eigenschappen zijn alleen-lezen en blijven bij compatibele wijzigingen behouden. Dat betekent niet dat ze vrij bewerkt of omgezet kunnen worden.</string>
+    <string name="compatibility_unknown">De compatibiliteit is onbepaald. De informatie blijft behouden; deze hulp voert geen omzetting uit.</string>
+    <string name="compatibility_local_label">De waarde en het label worden verschillend ondersteund: dit aangepaste label blijft lokaal. Daardoor wordt niet de hele waarde uitsluitend lokaal.</string>
+    <string name="compatibility_android">Android-weergave</string>
+    <string name="compatibility_android_all">De huidige veldkoppeling kan elk ondersteund voorkomen in Android weergeven.</string>
+    <string name="compatibility_android_primary">Android gebruikt het primaire voorkomen voor dit veld of de gestructureerde rij ervan. Andere voorkomens blijven in Contako en volgen hun eigen Proton-ondersteuning.</string>
+    <string name="compatibility_android_none">Contako neemt dit veld niet op in een standaardrij van een Android-contact. Het blijft behouden volgens de ondersteuning door Contako en Proton.</string>
+    <string name="compatibility_occurrence_included">Dit voorkomen is opgenomen in de theoretische projectie. Dat bewijst niet dat het is gekopieerd of geverifieerd.</string>
+    <string name="compatibility_occurrence_omitted">Dit voorkomen is niet opgenomen in de huidige projectie. Het wordt niet uit Contako verwijderd.</string>
+    <string name="compatibility_permission">Kopiëren naar Android is momenteel opgeschort zonder toestemming voor Contacten. Formaatondersteuning en toegestane lokale/Proton-bewerking blijven ongewijzigd.</string>
+    <string name="compatibility_photo">De oorspronkelijke foto en Android-kopie kunnen verschillende representaties gebruiken. Een miniatuur of vergelijkbaar uiterlijk bewijst nooit dat de originelen gelijk zijn. Deze hulp downloadt geen media waarnaar wordt verwezen.</string>
+    <string name="compatibility_editor">Zichtbaarheid in contactapps</string>
+    <string name="compatibility_editor_text">Zichtbaarheid en bewerking verschillen tussen contactapps en worden hier niet gecontroleerd. Een editor kan een weergegeven veld toch verbergen.</string>
+    <string name="compatibility_delivery">Dit zijn ondersteuningsregels, geen synchronisatieresultaten. Bekijk de synchronisatiestatus van het opgeslagen contact voor werkelijke bevestigingen en wachtende taken.</string>
+    <string name="compatibility_email_groups">Proton-groepstoewijzingen horen bij elk e-mailvoorkomen en hangen af van de accountmogelijkheden. Het openen van deze hulp controleert die mogelijkheden niet.</string>
+    <string name="compatibility_groups_available">Wijzigingen aan e-mailgroepen: bekend als beschikbaar door een eerdere geslaagde bewerking.</string>
+    <string name="compatibility_groups_denied">Wijzigingen aan e-mailgroepen: expliciet geweigerd door Proton voor de huidige accountcontext.</string>
+    <string name="compatibility_groups_unknown">Wijzigingen aan e-mailgroepen: beschikbaarheid onbekend. Offline-status of abonnementsnaam kan deze niet aantonen.</string>
+    <string name="compatibility_email_preferred">Dit is het voorkeurse-mailadres. Android gebruikt de groepstoewijzingen ervan.</string>
+    <string name="compatibility_email_secondary">Dit is een secundair e-mailadres. De eigen Proton-groepen blijven gescheiden; Android gebruikt de groepen van het voorkeurse-mailadres.</string>
+    <string name="compatibility_email_preference">Android-groepen komen van het voorkeurse-mailadres, niet van de samenvoeging van alle e-mailtoewijzingen.</string>
+    <string name="compatibility_opaque_android">Onbekende Android-MIME-rijen blijven in Android. Deze hulp neemt ze niet over in Contako of Proton.</string>
+    <string name="compatibility_brief_local">Lokale waarde, geen overdracht naar Proton</string>
+    <string name="compatibility_brief_preserved">Behouden, alleen-lezen</string>
+    <string name="compatibility_brief_android_none">Geen Android-projectie</string>
+    <string name="compatibility_brief_primary">Android gebruikt het primaire voorkomen</string>
+    <string name="compatibility_brief_email">Groepen horen bij elk e-mailadres</string>
+    <string name="compatibility_brief_label">Sommige labels blijven lokaal</string>
+</resources>

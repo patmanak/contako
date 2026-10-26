@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="compatibility_about">Informacje o zgodności pola %1$s</string>
+    <string name="compatibility_title">Gdzie mogą pojawić się te informacje?</string>
+    <string name="compatibility_local">Przechowywanie w Contako</string>
+    <string name="compatibility_local_text">Pole pozostaje w kontakcie po zapisaniu. Otwarcie tej pomocy niczego nie zapisuje, nie zmienia ani nie wysyła.</string>
+    <string name="compatibility_proton">Obsługa w Protonie</string>
+    <string name="compatibility_proton_generated">Obsługiwane formaty można wysłać do Protona. Nadal obowiązuje zwykła walidacja pól; nie jest to potwierdzenie dostarczenia.</string>
+    <string name="compatibility_proton_local">Ta wartość pozostaje lokalna i nie jest tworzona w Protonie. Jej zamierzony brak w Protonie nie jest błędem synchronizacji.</string>
+    <string name="compatibility_proton_preserved">Zaimportowane nieznane właściwości vCard są tylko do odczytu i pozostają zachowane przy zgodnych zmianach. Nie oznacza to możliwości ich dowolnej edycji ani konwersji.</string>
+    <string name="compatibility_unknown">Zgodność jest nieokreślona. Informacje pozostają zachowane; ta pomoc nie wykonuje żadnej konwersji.</string>
+    <string name="compatibility_local_label">Wartość i jej etykieta mają różną obsługę: ta niestandardowa etykieta pozostaje lokalna. Nie oznacza to, że cała wartość jest wyłącznie lokalna.</string>
+    <string name="compatibility_android">Reprezentacja w Androidzie</string>
+    <string name="compatibility_android_all">Bieżące mapowanie może reprezentować w Androidzie każde obsługiwane wystąpienie.</string>
+    <string name="compatibility_android_primary">Android używa głównego wystąpienia dla tego pola lub jego ustrukturyzowanego wiersza. Inne wystąpienia pozostają w Contako i podlegają własnym zasadom obsługi w Protonie.</string>
+    <string name="compatibility_android_none">Contako nie odwzorowuje tego pola w standardowym wierszu kontaktu Androida. Pozostaje ono zachowane zgodnie z obsługą w Contako i Protonie.</string>
+    <string name="compatibility_occurrence_included">To wystąpienie jest uwzględnione w teoretycznym odwzorowaniu. Nie dowodzi to, że zostało skopiowane lub zweryfikowane.</string>
+    <string name="compatibility_occurrence_omitted">To wystąpienie nie jest uwzględnione w bieżącym odwzorowaniu. Nie jest usuwane z Contako.</string>
+    <string name="compatibility_permission">Kopiowanie do Androida jest obecnie wstrzymane bez uprawnienia Kontakty. Obsługa formatów i dozwolona edycja lokalna/w Protonie pozostają bez zmian.</string>
+    <string name="compatibility_photo">Oryginalne zdjęcie i kopia Androida mogą mieć różne reprezentacje. Miniatura lub podobny wygląd nigdy nie dowodzą równości oryginałów. Ta pomoc nie pobiera multimediów wskazywanych przez odwołania.</string>
+    <string name="compatibility_editor">Widoczność w aplikacjach kontaktów</string>
+    <string name="compatibility_editor_text">Widoczność i edycja różnią się między aplikacjami kontaktów i nie są tutaj weryfikowane. Edytor może nadal ukrywać reprezentowane pole.</string>
+    <string name="compatibility_delivery">Są to zasady obsługi, a nie wyniki synchronizacji. Rzeczywiste potwierdzenia i oczekujące zadania można sprawdzić w stanie synchronizacji zapisanego kontaktu.</string>
+    <string name="compatibility_email_groups">Przypisania do grup Protona dotyczą każdego wystąpienia adresu e-mail i zależą od możliwości konta. Otwarcie tej pomocy nie sprawdza tych możliwości.</string>
+    <string name="compatibility_groups_available">Zmiany grup adresów e-mail: dostępność znana z poprzedniej udanej operacji.</string>
+    <string name="compatibility_groups_denied">Zmiany grup adresów e-mail: wyraźnie odrzucone przez Protona dla bieżącego kontekstu konta.</string>
+    <string name="compatibility_groups_unknown">Zmiany grup adresów e-mail: dostępność nieznana. Stan offline ani nazwa subskrypcji nie pozwalają jej ustalić.</string>
+    <string name="compatibility_email_preferred">To jest preferowany adres e-mail. Android używa jego przypisań do grup.</string>
+    <string name="compatibility_email_secondary">To jest dodatkowy adres e-mail. Jego grupy Protona pozostają oddzielne; Android używa grup preferowanego adresu e-mail.</string>
+    <string name="compatibility_email_preference">Grupy Androida pochodzą z preferowanego adresu e-mail, a nie z sumy przypisań wszystkich adresów.</string>
+    <string name="compatibility_opaque_android">Nierozpoznane wiersze MIME Androida pozostają w Androidzie. Ta pomoc nie przenosi ich do Contako ani Protona.</string>
+    <string name="compatibility_brief_local">Wartość lokalna, bez przesyłania do Protona</string>
+    <string name="compatibility_brief_preserved">Zachowane, tylko do odczytu</string>
+    <string name="compatibility_brief_android_none">Bez odwzorowania w Androidzie</string>
+    <string name="compatibility_brief_primary">Android używa głównego wystąpienia</string>
+    <string name="compatibility_brief_email">Grupy należą do każdego adresu e-mail</string>
+    <string name="compatibility_brief_label">Niektóre etykiety pozostają lokalne</string>
+</resources>
