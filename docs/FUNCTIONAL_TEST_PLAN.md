@@ -50,6 +50,30 @@ successful evidence or declaring an accepted limitation fixed.
 
 ## Cases
 
+For performance changes, follow the comparable [measurement protocol](QA.md#performance-measurements).
+Keep local Room/Compose evidence separate from these real-peer journeys:
+
+- With 300 contacts/20 groups, then 5,000/200, open cached content and search
+  during an active import. Edit a committed rich contact while other cards and
+  photos are pending; the latest durable edit and preserved fields MUST survive.
+- Validate ten native edits from the editor gesture through detection, serialized
+  queue, Proton acknowledgement and Android verification. Record each boundary
+  rather than attributing the whole delay to network or CPU.
+- On a converged address book, measure an ordinary no-change pass and foreground return.
+  Require zero full-card fetches for unchanged contacts and zero unnecessary
+  provider rewrites, independently of final status counters.
+- Include one rejected card among healthy records, correct it and resume. Keep
+  healthy records usable and the rejected obligation durable; recovery cost and
+  nominal convergence MUST have separate results.
+- Interrupt after a peer write before acknowledgement, then resume. Verify one
+  identity/copy, preserved intent and bounded replay, including photo receipts.
+  After a 5,000-contact repair, check rest without repeated work and qualify
+  unplugged energy separately. USB execution MUST NOT establish battery life.
+
+Keep median/P95/max and failed attempts in local evidence. Fewer than thirty local
+samples, unmeasured native memory, simulated peers or unavailable OEM conditions
+MUST remain explicit limitations rather than passing the complete target.
+
 For targeted recovery, use a rejected card or Android-copy issue among 300 owned
 synthetic contacts. Preview/cancel MUST make no peer request. Confirm once and
 repeatedly; inspect a scoped result, restart before/after effect and resume.

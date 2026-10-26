@@ -3,6 +3,7 @@ package com.patmanak.contako.qa.performance
 import kotlin.math.ceil
 
 internal enum class PerformanceBuildType { DEBUG, RELEASE, BENCHMARK }
+internal enum class PerformanceSampleOutcome { SUCCESS, TIMEOUT, CANCELLED, LOCAL_FAILURE, EXPECTED_REJECTION }
 
 internal data class PerformanceEnvironment(
     val runId: String,
@@ -77,6 +78,8 @@ internal data class PerformanceSample(
     val crashCount: Int = 0,
     val anrProxyCount: Int = 0,
     val oomProxyCount: Int = 0,
+    val outcome: PerformanceSampleOutcome = PerformanceSampleOutcome.SUCCESS,
+    val fullCardFetchCount: Int = 0,
 ) {
     init {
         require(ordinal >= 0 && durationMs >= 0 && requestCount >= 0)
@@ -86,6 +89,7 @@ internal data class PerformanceSample(
         require(maxProviderBatchOperations in 0..200 && maxProviderBatchEstimatedBytes >= 0)
         require(photoStreamCount >= 0 && noChangeWriteCount >= 0 && heartbeatCount >= 0)
         require(crashCount >= 0 && anrProxyCount >= 0 && oomProxyCount >= 0)
+        require(fullCardFetchCount >= 0)
     }
 }
 
@@ -104,15 +108,13 @@ internal data class PerformanceRun(
     }
 
     val p95DurationMs: Long get() = nearestRank(samples.map(PerformanceSample::durationMs), 95)
+    val medianDurationMs: Double get() = toReport().medianDurationMs!!
+    val maxDurationMs: Long get() = samples.maxOf(PerformanceSample::durationMs)
+    val failureCount: Int get() = samples.count { it.outcome != PerformanceSampleOutcome.SUCCESS }
 
-    fun violations(): List<String> = buildList {
-        if (p95DurationMs > ceilings.durationMs) add("duration_p95")
-        if (samples.maxOf(PerformanceSample::requestCount) > ceilings.requestCount) add("requests")
-        if (samples.maxOf(PerformanceSample::providerBatchCount) > ceilings.providerBatchCount) add("provider_batches")
-        if (samples.maxOf(PerformanceSample::providerOperationCount) > ceilings.providerOperationCount) add("provider_operations")
-        if (samples.maxOf(PerformanceSample::heapDeltaBytes) > ceilings.heapDeltaBytes) add("heap_delta")
-        if (samples.maxOf(PerformanceSample::maxCursorRows) > ceilings.cursorRows) add("cursor_rows")
-    }
+    fun toReport() = PerformanceReport(environment, warmupCount, samples, ceilings, warmupSamples)
+
+    fun violations(): List<String> = toReport().violations()
 
     companion object {
         const val REQUIRED_WARMUPS = 5
@@ -123,6 +125,51 @@ internal data class PerformanceRun(
             val sorted = values.sorted()
             return sorted[ceil(percentile / 100.0 * sorted.size).toInt() - 1]
         }
+    }
+}
+
+/** A durable snapshot may be incomplete; its failures and elapsed durations MUST remain visible. */
+internal data class PerformanceReport(
+    val environment: PerformanceEnvironment,
+    val warmupCount: Int,
+    val samples: List<PerformanceSample>,
+    val ceilings: PerformanceCeilings,
+    val warmupSamples: List<PerformanceSample> = emptyList(),
+) {
+    init {
+        require(warmupCount in 0..PerformanceRun.REQUIRED_WARMUPS)
+        require(samples.size <= PerformanceRun.REQUIRED_SAMPLES)
+        require(samples.map(PerformanceSample::ordinal) == (1..samples.size).toList())
+        require(warmupSamples.isEmpty() || warmupSamples.map(PerformanceSample::ordinal) == (1..warmupCount).toList())
+        require(samples.isEmpty() || warmupCount == PerformanceRun.REQUIRED_WARMUPS)
+    }
+
+    val isComplete: Boolean get() = warmupCount == PerformanceRun.REQUIRED_WARMUPS &&
+        samples.size == PerformanceRun.REQUIRED_SAMPLES
+    val failureCount: Int get() = samples.count { it.outcome != PerformanceSampleOutcome.SUCCESS }
+    val warmupFailureCount: Int get() = warmupSamples.count { it.outcome != PerformanceSampleOutcome.SUCCESS }
+    val medianDurationMs: Double? get() {
+        if (samples.isEmpty()) return null
+        val sorted = samples.map(PerformanceSample::durationMs).sorted()
+        val middle = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[middle].toDouble()
+        else sorted[middle - 1] / 2.0 + sorted[middle] / 2.0
+    }
+    val maxDurationMs: Long? get() = samples.maxOfOrNull(PerformanceSample::durationMs)
+    // An incomplete series MUST NOT advertise a P95 comparable with the required thirty samples.
+    val p95DurationMs: Long? get() = if (isComplete)
+        PerformanceRun.nearestRank(samples.map(PerformanceSample::durationMs), 95) else null
+
+    fun violations(): List<String> = buildList {
+        if (!isComplete) add("incomplete_run")
+        if (failureCount > 0) add("failed_samples")
+        if (warmupFailureCount > 0) add("failed_warmups")
+        if (p95DurationMs?.let { it > ceilings.durationMs } == true) add("duration_p95")
+        if (samples.any { it.requestCount > ceilings.requestCount }) add("requests")
+        if (samples.any { it.providerBatchCount > ceilings.providerBatchCount }) add("provider_batches")
+        if (samples.any { it.providerOperationCount > ceilings.providerOperationCount }) add("provider_operations")
+        if (samples.any { it.heapDeltaBytes > ceilings.heapDeltaBytes }) add("heap_delta")
+        if (samples.any { it.maxCursorRows > ceilings.cursorRows }) add("cursor_rows")
     }
 }
 
@@ -146,6 +193,7 @@ internal class PerformanceCounter(private val monotonicNanos: () -> Long = Syste
     private var crashes = 0
     private var anrProxies = 0
     private var oomProxies = 0
+    private var fullCardFetches = 0
 
     fun start(heapBytes: Long = usedHeapBytes()) {
         startedAt = monotonicNanos()
@@ -154,6 +202,7 @@ internal class PerformanceCounter(private val monotonicNanos: () -> Long = Syste
     }
 
     fun request(count: Int = 1) { require(count > 0); requests += count }
+    fun fullCardFetch() { fullCardFetches++ }
     fun providerBatch(operationCount: Int, estimatedBytes: Int = 0) {
         require(operationCount in 0..200 && estimatedBytes >= 0)
         batches++
@@ -178,7 +227,11 @@ internal class PerformanceCounter(private val monotonicNanos: () -> Long = Syste
     fun commit() { commits++ }
     fun checkpoint() { checkpoints++ }
 
-    fun finish(ordinal: Int, heapBytes: Long = usedHeapBytes()): PerformanceSample {
+    fun finish(
+        ordinal: Int,
+        heapBytes: Long = usedHeapBytes(),
+        outcome: PerformanceSampleOutcome = PerformanceSampleOutcome.SUCCESS,
+    ): PerformanceSample {
         require(startedAt != 0L)
         observeHeap(heapBytes)
         return PerformanceSample(
@@ -201,6 +254,8 @@ internal class PerformanceCounter(private val monotonicNanos: () -> Long = Syste
             crashCount = crashes,
             anrProxyCount = anrProxies,
             oomProxyCount = oomProxies,
+            outcome = outcome,
+            fullCardFetchCount = fullCardFetches,
         )
     }
 

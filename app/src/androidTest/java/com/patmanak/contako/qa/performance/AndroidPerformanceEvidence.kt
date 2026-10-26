@@ -63,8 +63,12 @@ internal fun Context.writePerformanceArtifact(fileName: String, contents: String
     val externalOutput = requireNotNull(getExternalFilesDir("performance"))
     File(externalOutput, fileName).writeText(contents)
 
-    PlatformTestStorageRegistry.getInstance()
-        .openOutputFile("performance/$fileName")
-        .bufferedWriter()
-        .use { it.write(contents) }
+    // Direct, explicitly selected ADB runs may collect this app-owned directory without
+    // installing a separate test-storage service. Keep service output for Gradle-managed runs.
+    if (InstrumentationRegistry.getArguments().getString("performanceOutput") != "app-external") {
+        PlatformTestStorageRegistry.getInstance()
+            .openOutputFile("performance/$fileName")
+            .bufferedWriter()
+            .use { it.write(contents) }
+    }
 }

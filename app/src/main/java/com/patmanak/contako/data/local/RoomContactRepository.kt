@@ -76,15 +76,18 @@ internal class RoomContactRepository(
 ) : ContactRepository {
     override fun observeContacts(accountId: String): Flow<List<CanonicalContact>> =
         database.contactDao().observeActive(accountId).map { contacts ->
+            // Collator is mutable: keep one per emission, never shared across collectors.
+            val collator = Collator.getInstance(Locale.getDefault())
             contacts.map(ContactWithValues::toDomain).sortedWith { left, right ->
-                Collator.getInstance(Locale.getDefault()).compare(left.resolvedDisplayName, right.resolvedDisplayName)
+                collator.compare(left.resolvedDisplayName, right.resolvedDisplayName)
             }
         }.flowOn(ioDispatcher)
 
     override fun observeGroups(accountId: String): Flow<List<ContactGroup>> =
         database.contactGroupDao().observeActive(accountId).map { groups ->
+            val collator = Collator.getInstance(Locale.getDefault())
             groups.map(ContactGroupWithMemberships::toDomain).sortedWith { left, right ->
-                Collator.getInstance(Locale.getDefault()).compare(left.name, right.name)
+                collator.compare(left.name, right.name)
             }
         }.flowOn(ioDispatcher)
 

@@ -8,6 +8,8 @@ import com.patmanak.contako.data.sync.ProductionServerClock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.text.Collator
+import java.util.Locale
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.patmanak.contako.domain.model.CanonicalContact
@@ -20,7 +22,13 @@ import com.patmanak.contako.domain.repository.ContactGroupAssignment
 import com.patmanak.contako.domain.repository.SaveResult
 import com.patmanak.contako.domain.repository.SaveValidationIssue
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -838,6 +846,179 @@ class RoomContactRepositoryTest {
             (result as SaveResult.Rejected).issues,
         )
         assertEquals(null, repository.getContact(ACCOUNT, "duplicate"))
+    }
+
+    @Test
+    fun performanceLocaleRecollectionUsesCurrentLocaleAndRetainsRichAccountScopedData() = runBlocking {
+        val originalLocale = Locale.getDefault()
+        try {
+            performanceLocaleSeed()
+            Locale.setDefault(Locale.ENGLISH)
+            // Reuse the same Flow instances: a comparator captured at construction is stale.
+            val contacts = repository.observeContacts(ACCOUNT)
+            val groups = repository.observeGroups(ACCOUNT)
+            val english = PerformanceLocaleSnapshot(contacts.first(), groups.first())
+            performanceLocaleAssert(english)
+
+            Locale.setDefault(Locale.forLanguageTag("sv-SE"))
+            val swedish = PerformanceLocaleSnapshot(contacts.first(), groups.first())
+            performanceLocaleAssert(swedish)
+            assertFalse(english.contacts.map { it.id } == swedish.contacts.map { it.id })
+            assertFalse(english.groups.map { it.id } == swedish.groups.map { it.id })
+
+            Locale.setDefault(Locale.ENGLISH)
+            val englishAgain = PerformanceLocaleSnapshot(contacts.first(), groups.first())
+            performanceLocaleAssert(englishAgain)
+            assertEquals(english.contacts, englishAgain.contacts)
+            assertEquals(english.groups, englishAgain.groups)
+        } finally {
+            Locale.setDefault(originalLocale)
+        }
+    }
+
+    @Test
+    fun performanceLocaleConcurrentCollectorsRefreshLocaleOnEveryRoomEmission() = runBlocking {
+        val originalLocale = Locale.getDefault()
+        val channels = List(2) { Channel<PerformanceLocaleSnapshot>(Channel.UNLIMITED) }
+        val collectors = mutableListOf<kotlinx.coroutines.Job>()
+        try {
+            performanceLocaleSeed()
+            Locale.setDefault(Locale.ENGLISH)
+            channels.forEach { output ->
+                collectors += launch(Dispatchers.Default) {
+                    combine(repository.observeContacts(ACCOUNT), repository.observeGroups(ACCOUNT)) { contacts, groups ->
+                        PerformanceLocaleSnapshot(contacts, groups)
+                    }.collect { output.send(it) }
+                }
+            }
+            val english = channels.map { performanceLocaleReceive(it, 1L) }
+            english.forEach { performanceLocaleAssert(it) }
+            assertEquals(english[0], english[1])
+
+            Locale.setDefault(Locale.forLanguageTag("sv-SE"))
+            performanceLocaleInvalidate(2L)
+            val swedish = channels.map { performanceLocaleReceive(it, 2L) }
+            swedish.forEach { performanceLocaleAssert(it) }
+            assertEquals(swedish[0], swedish[1])
+            assertFalse(english[0].contacts.map { it.id } == swedish[0].contacts.map { it.id })
+            assertFalse(english[0].groups.map { it.id } == swedish[0].groups.map { it.id })
+
+            Locale.setDefault(Locale.ENGLISH)
+            performanceLocaleInvalidate(3L)
+            val englishAgain = channels.map { performanceLocaleReceive(it, 3L) }
+            englishAgain.forEach { performanceLocaleAssert(it) }
+            assertEquals(englishAgain[0], englishAgain[1])
+            assertEquals(english[0].contacts.map { it.id }, englishAgain[0].contacts.map { it.id })
+            assertEquals(english[0].groups.map { it.id }, englishAgain[0].groups.map { it.id })
+        } finally {
+            // Join before restoring the process locale so no old collector can race another test.
+            try {
+                collectors.forEach { it.cancel() }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    collectors.forEach { it.join() }
+                }
+            } finally {
+                channels.forEach { it.close() }
+                Locale.setDefault(originalLocale)
+            }
+        }
+    }
+
+    private data class PerformanceLocaleSnapshot(
+        val contacts: List<CanonicalContact>,
+        val groups: List<ContactGroup>,
+    )
+
+    private suspend fun performanceLocaleSeed() {
+        val names = listOf("Zulu", "Östen", "Élodie", "Åke", "Alpha", "李 明", "# Directory", "İpek")
+            .flatMap { listOf(it, it) }
+        database.withTransaction {
+            names.forEachIndexed { index, name ->
+                val id = "locale-${index.toString().padStart(2, '0')}"
+                val contact = CanonicalContact(
+                    ACCOUNT, id, displayName = name, revision = 1L,
+                    remoteContactId = "remote-$id", remoteVersion = "v1", remoteVCardUid = "uid-$id",
+                    values = listOf(
+                        ContactValue("email", ContactValueKind.EMAIL, "same@example.invalid", order = 0,
+                            metadata = mapOf("vcardPref" to "1")),
+                        ContactValue("photo", ContactValueKind.PHOTO,
+                            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6wSIAAAAASUVORK5CYII=", order = 0,
+                            binaryReference = "synthetic-local-reference", preservationKey = "photo-key"),
+                        ContactValue("opaque", ContactValueKind.UNKNOWN_VCARD_PROPERTY, "X-SYNTHETIC:" + "x".repeat(1024),
+                            order = 0, preservationKey = "opaque-key", metadata = mapOf("unknownParam" to "retain")),
+                    ),
+                    preservationEnvelope = PreservationEnvelope(mapOf("opaque-key" to "X-SYNTHETIC:retained"), "baseline-$id"),
+                )
+                val group = ContactGroup(ACCOUNT, id, name, revision = 1L,
+                    remoteLabelId = "label-$id", remoteVersion = "v1", memberships = listOf(GroupMembership(id, "email")))
+                database.contactDao().upsert(contact.toEntity())
+                database.contactDao().upsertValues(contact.values.map { it.toEntity(contact) })
+                database.contactPayloadDao().upsert(requireNotNull(contact.preservationEnvelope).toEntity(ACCOUNT, id))
+                database.contactGroupDao().upsert(group.toEntity())
+                database.contactGroupDao().insertMemberships(group.memberships.map { it.toEntity(group) })
+                if (index == 0) {
+                    val foreign = contact.copy(accountId = "foreign-locale-owner", displayName = "Foreign canary")
+                    val foreignGroup = group.copy(accountId = foreign.accountId, name = "Foreign group")
+                    database.contactDao().upsert(foreign.toEntity())
+                    database.contactDao().upsertValues(foreign.values.map { it.toEntity(foreign) })
+                    database.contactGroupDao().upsert(foreignGroup.toEntity())
+                    database.contactGroupDao().insertMemberships(foreignGroup.memberships.map { it.toEntity(foreignGroup) })
+                }
+            }
+        }
+    }
+
+    private suspend fun performanceLocaleInvalidate(revision: Long) {
+        database.withTransaction {
+            val contact = requireNotNull(database.contactDao().getEntity(ACCOUNT, "locale-00"))
+            val group = requireNotNull(database.contactGroupDao().get(ACCOUNT, "locale-00")).group
+            database.contactDao().upsert(contact.copy(revision = revision))
+            database.contactGroupDao().upsert(group.copy(revision = revision))
+        }
+    }
+
+    private suspend fun performanceLocaleReceive(
+        channel: Channel<PerformanceLocaleSnapshot>, revision: Long,
+    ): PerformanceLocaleSnapshot = withTimeout(30_000) {
+        // combine can publish mixed intermediate snapshots; await BOTH committed revisions.
+        var snapshot = channel.receive()
+        while (snapshot.contacts.single { it.id == "locale-00" }.revision != revision ||
+            snapshot.groups.single { it.id == "locale-00" }.revision != revision
+        ) snapshot = channel.receive()
+        snapshot
+    }
+
+    private suspend fun performanceLocaleAssert(snapshot: PerformanceLocaleSnapshot) {
+        val rawContacts = database.contactDao().observeActive(ACCOUNT).first().map { it.toDomain() }
+        val rawGroups = database.contactGroupDao().observeActive(ACCOUNT).first().map { it.toDomain() }
+        // Historical comparator is the oracle, independent of any future per-emission Collator.
+        val expectedContacts = rawContacts.sortedWith { left, right ->
+            Collator.getInstance(Locale.getDefault()).compare(left.resolvedDisplayName, right.resolvedDisplayName)
+        }
+        val expectedGroups = rawGroups.sortedWith { left, right ->
+            Collator.getInstance(Locale.getDefault()).compare(left.name, right.name)
+        }
+        assertEquals(expectedContacts, snapshot.contacts)
+        assertEquals(expectedGroups, snapshot.groups)
+        assertEquals(16, snapshot.contacts.size)
+        assertEquals(16, snapshot.groups.size)
+        assertTrue(snapshot.contacts.all { it.accountId == ACCOUNT })
+        assertTrue(snapshot.groups.all { it.accountId == ACCOUNT })
+        assertEquals(rawContacts.groupBy { it.resolvedDisplayName }.mapValues { (_, rows) -> rows.map { it.id } },
+            snapshot.contacts.groupBy { it.resolvedDisplayName }.mapValues { (_, rows) -> rows.map { it.id } })
+        assertEquals(rawGroups.groupBy { it.name }.mapValues { (_, rows) -> rows.map { it.id } },
+            snapshot.groups.groupBy { it.name }.mapValues { (_, rows) -> rows.map { it.id } })
+        snapshot.contacts.forEach { observed ->
+            val complete = requireNotNull(repository.getContact(ACCOUNT, observed.id))
+            assertEquals(observed.values, complete.values)
+            assertEquals("remote-${observed.id}", complete.remoteContactId)
+            assertEquals("uid-${observed.id}", complete.remoteVCardUid)
+            assertEquals("v1", complete.remoteVersion)
+            assertEquals(PreservationEnvelope(mapOf("opaque-key" to "X-SYNTHETIC:retained"), "baseline-${observed.id}"),
+                complete.preservationEnvelope)
+        }
+        assertEquals("Foreign canary", repository.getContact("foreign-locale-owner", "locale-00")?.displayName)
+        assertTrue(database.outboxDao().getAll(ACCOUNT).isEmpty())
     }
 
     private fun contact(id: String, firstName: String, accountId: String = ACCOUNT) =

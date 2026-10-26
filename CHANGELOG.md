@@ -2,6 +2,15 @@
 
 Features and improvements by version.
 
+## 0.17.0
+
+- Reduce repeated locale-comparator construction when loading contact and group
+  directories, retaining complete values, stable ordering and account isolation.
+- Add reproducible rich-directory measurements for 300 and 5,000 contacts,
+  separating local acquisition, useful rendering, search and durable saving.
+- Retain partial and failed performance samples, report median/P95/maximum and
+  distinguish full-card fetching from Android writes in controlled sync checks.
+
 ## 0.16.0
 
 - Add explicit recovery for local edits after a confirmed Proton deletion:

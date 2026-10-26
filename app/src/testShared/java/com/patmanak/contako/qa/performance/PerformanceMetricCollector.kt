@@ -1,9 +1,11 @@
 package com.patmanak.contako.qa.performance
 
 internal object PerformanceMetricCollector {
-    fun toJson(run: PerformanceRun): String = buildString {
+    fun toJson(run: PerformanceRun): String = toJson(run.toReport())
+
+    fun toJson(run: PerformanceReport): String = buildString {
         append('{')
-        append("\"schemaVersion\":2,")
+        append("\"schemaVersion\":3,")
         append("\"runId\":\"").append(escape(run.environment.runId)).append("\",")
         append("\"caseId\":\"").append(run.environment.caseId).append("\",")
         append("\"fixtureId\":\"").append(run.environment.fixtureId).append("\",")
@@ -23,6 +25,11 @@ internal object PerformanceMetricCollector {
         append("\"cacheState\":\"").append(run.environment.cacheState).append("\",")
         append("\"warmupCount\":").append(run.warmupCount).append(',')
         append("\"sampleCount\":").append(run.samples.size).append(',')
+        append("\"complete\":").append(run.isComplete).append(',')
+        append("\"failureCount\":").append(run.failureCount).append(',')
+        append("\"warmupFailureCount\":").append(run.warmupFailureCount).append(',')
+        append("\"medianDurationMs\":").append(run.medianDurationMs).append(',')
+        append("\"maxDurationMs\":").append(run.maxDurationMs).append(',')
         append("\"percentileMethod\":\"nearest-rank\",")
         append("\"p95DurationMs\":").append(run.p95DurationMs).append(',')
         append("\"violations\":[")
@@ -34,8 +41,10 @@ internal object PerformanceMetricCollector {
         append("]}")
     }
 
-    fun toCsv(run: PerformanceRun): String = buildString {
-        append("run_id,case_id,fixture_id,build_type,phase,ordinal,duration_ms,requests,provider_queries,query_rows,provider_batches,provider_operations,max_batch_operations,max_batch_estimated_bytes,photo_streams,no_change_writes,heap_delta_bytes,max_cursor_rows,commits,checkpoints,heartbeats,crashes,anr_proxies,oom_proxies\n")
+    fun toCsv(run: PerformanceRun): String = toCsv(run.toReport())
+
+    fun toCsv(run: PerformanceReport): String = buildString {
+        append("run_id,case_id,fixture_id,build_type,phase,ordinal,duration_ms,requests,provider_queries,query_rows,provider_batches,provider_operations,max_batch_operations,max_batch_estimated_bytes,photo_streams,no_change_writes,heap_delta_bytes,max_cursor_rows,commits,checkpoints,heartbeats,crashes,anr_proxies,oom_proxies,outcome,full_card_fetches\n")
         fun appendSample(phase: String, sample: PerformanceSample) {
             append(csv(run.environment.runId)).append(',')
             append(run.environment.caseId).append(',').append(run.environment.fixtureId).append(',')
@@ -50,7 +59,8 @@ internal object PerformanceMetricCollector {
             append(sample.commitCount).append(',')
             append(sample.checkpointCount).append(',').append(sample.heartbeatCount).append(',')
             append(sample.crashCount).append(',').append(sample.anrProxyCount).append(',')
-            append(sample.oomProxyCount).append('\n')
+            append(sample.oomProxyCount).append(',').append(sample.outcome.name).append(',')
+            append(sample.fullCardFetchCount).append('\n')
         }
         run.warmupSamples.forEach { appendSample("warmup", it) }
         run.samples.forEach { appendSample("sample", it) }
@@ -66,7 +76,8 @@ internal object PerformanceMetricCollector {
             "\"maxProviderBatchEstimatedBytes\":${sample.maxProviderBatchEstimatedBytes},\"photoStreamCount\":${sample.photoStreamCount}," +
             "\"noChangeWriteCount\":${sample.noChangeWriteCount},\"heartbeatCount\":${sample.heartbeatCount}," +
             "\"crashCount\":${sample.crashCount},\"anrProxyCount\":${sample.anrProxyCount}," +
-            "\"oomProxyCount\":${sample.oomProxyCount}}"
+            "\"oomProxyCount\":${sample.oomProxyCount},\"outcome\":\"${sample.outcome.name}\"," +
+            "\"fullCardFetchCount\":${sample.fullCardFetchCount}}"
 
     private fun escape(value: String): String = buildString {
         value.forEach { character ->

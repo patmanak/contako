@@ -3,6 +3,7 @@ package com.patmanak.contako.qa.performance
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -39,6 +40,75 @@ class PerformanceHarnessTest {
         assertEquals(5, run.warmupCount)
         assertEquals(30, run.samples.size)
         assertEquals(29L, run.p95DurationMs)
+    }
+
+    @Test
+    fun `07-HARNESS an interrupted report retains samples without claiming a comparable P95`() {
+        val complete = run((1L..30L).toList())
+        val report = complete.toReport().copy(samples = complete.samples.take(29))
+        assertFalse(report.isComplete)
+        assertNull(report.p95DurationMs)
+        assertEquals(15.0, report.medianDurationMs!!, 0.0)
+        assertEquals(29L, report.maxDurationMs)
+        assertEquals(listOf("incomplete_run"), report.violations())
+        val json = PerformanceMetricCollector.toJson(report)
+        assertTrue(json.contains("\"sampleCount\":29"))
+        assertTrue(json.contains("\"complete\":false"))
+        assertTrue(json.contains("\"p95DurationMs\":null"))
+        assertEquals(30, PerformanceMetricCollector.toCsv(report).lineSequence().filter(String::isNotEmpty).count())
+
+        val empty = report.copy(warmupCount = 0, samples = emptyList())
+        assertNull(empty.medianDurationMs)
+        assertNull(empty.maxDurationMs)
+        assertNull(empty.p95DurationMs)
+        assertTrue(empty.violations().contains("incomplete_run"))
+    }
+
+    @Test
+    fun `07-HARNESS every failed outcome retains elapsed time and fails nominal qualification`() {
+        PerformanceSampleOutcome.entries.filter { it != PerformanceSampleOutcome.SUCCESS }.forEach { outcome ->
+            val baseline = run((1L..30L).toList())
+            val failed = baseline.samples.last().copy(durationMs = 900, outcome = outcome)
+            val measured = baseline.copy(samples = baseline.samples.dropLast(1) + failed)
+            assertEquals(1, measured.failureCount)
+            assertEquals(15.5, measured.medianDurationMs, 0.0)
+            assertEquals(900L, measured.maxDurationMs)
+            assertEquals(29L, measured.p95DurationMs)
+            assertEquals(listOf("failed_samples"), measured.violations())
+            val json = PerformanceMetricCollector.toJson(measured)
+            val csv = PerformanceMetricCollector.toCsv(measured)
+            assertTrue(json.contains("\"failureCount\":1"))
+            assertTrue(json.contains("\"durationMs\":900"))
+            assertTrue(json.contains("\"outcome\":\"${outcome.name}\""))
+            assertTrue(csv.contains(",${outcome.name},"))
+        }
+    }
+
+    @Test
+    fun `07-HARNESS failed warmup cannot qualify a complete nominal series`() {
+        val warmups = (1..5).map { sample(it, 10) }.toMutableList()
+        warmups[0] = warmups[0].copy(outcome = PerformanceSampleOutcome.LOCAL_FAILURE)
+        val report = run((1L..30L).toList(), warmups = warmups).toReport()
+        assertTrue(report.isComplete)
+        assertEquals(0, report.failureCount)
+        assertEquals(1, report.warmupFailureCount)
+        assertEquals(listOf("failed_warmups"), report.violations())
+    }
+
+    @Test
+    fun `07-HARNESS full card fetch is distinct from an Android provider write`() {
+        var nanos = 1_000_000L
+        val counter = PerformanceCounter { nanos }
+        counter.start(1_000)
+        counter.request()
+        counter.fullCardFetch()
+        nanos += 30_000_000L
+        val sample = counter.finish(1, 1_000, PerformanceSampleOutcome.TIMEOUT)
+        assertEquals(30L, sample.durationMs)
+        assertEquals(1, sample.fullCardFetchCount)
+        assertEquals(0, sample.providerBatchCount)
+        assertEquals(0, sample.providerOperationCount)
+        assertEquals(PerformanceSampleOutcome.TIMEOUT, sample.outcome)
     }
 
     @Test
@@ -81,7 +151,7 @@ class PerformanceHarnessTest {
         assertEquals(csv, PerformanceMetricCollector.toCsv(run))
         assertTrue(json.contains("\"percentileMethod\":\"nearest-rank\""))
         assertTrue(json.contains("\"maxProviderBatchEstimatedBytes\""))
-        assertTrue(json.contains("\"schemaVersion\":2"))
+        assertTrue(json.contains("\"schemaVersion\":3"))
         assertTrue(json.contains("\"warmups\":[{\"ordinal\":1"))
         assertTrue(json.contains("\"chargingState\":\"unknown\""))
         assertTrue(json.contains("\"sourceRevision\":\"unspecified\""))

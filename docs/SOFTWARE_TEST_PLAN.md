@@ -1,5 +1,28 @@
 # Software integration test plan
 
+## Directory responsiveness and measurement integrity
+
+Use the [performance protocol](QA.md#performance-measurements) with isolated rich
+300/20 and 5,000/200 profiles. Compare identical minified variants and retain
+failed/incomplete samples. Verify exact search identities, useful interactive
+rendering and durable contact/outbox commit separately from editor closure.
+Unchanged values, media, preservation envelopes, duplicate occurrences, per-email
+groups and foreign-owner witnesses MUST survive Save. Reopened ViewModels MUST
+release their collectors rather than accumulate subscriptions between samples.
+
+Compare repository locale ordering against its previous comparator semantics,
+including accents, non-Latin names, duplicate names, successive locales and
+concurrent contact/group observers. A sort operation MUST NOT share a mutable
+Collator across observers. No list optimization may substitute incomplete
+canonical values into the editor or weaken revision/owner guards.
+
+With controlled remote gateways and real Room, assert no-change passes fetch no
+full cards or provider writes; verify exact changed and unchanged fields for ten
+remote changes and import. These timings do not qualify a native ten-contact
+journey or real Proton. Test report classification independently: incomplete
+series have no comparable P95, and failed warmups/samples remain failures even
+when the nominal time ceiling is met.
+
 ## Durable remote-deletion recovery
 
 Use Room transactions and reopened storage for candidate discovery, verified

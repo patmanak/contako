@@ -74,6 +74,12 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
   including during an online foreground start. Successful convergence does not
   establish that latency target; network, startup and subsequent serialized work
   MUST remain distinct when measuring it.
+- Local directory benchmarks include Compose test synchronization overhead and
+  broad benchmark-only R8 keep rules. They do not establish every release latency
+  target, large-photo decoding, cold-process startup, native memory peaks or
+  unplugged battery performance. Instrumented rendered search can exceed 100 ms;
+  reopening a ViewModel over 5,000 contacts can exceed 500 ms. Those targets are
+  not yet qualified; see the [measurement protocol](QA.md#performance-measurements).
 - The artwork has raster masters and provenance, but no fully editable layered
   or vector master. See [licensing](LICENSING.md).
 

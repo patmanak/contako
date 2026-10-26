@@ -78,6 +78,63 @@ and bounded work; the three datasets under `app/qa/dataset` define rich contact
 journeys and regression acceptance. Neither helper code nor generated load data
 belongs in application source sets.
 
+### Performance measurements
+
+Compare the same source-controlled protocol before and after one optimization.
+Record source and dirty-tree identity, both APK hashes, fixture seed, locale,
+physical API/device class, thermal state, power, cache and network conditions.
+Use a monotonic clock, five warmups and thirty local samples; retain failures,
+timeouts and cancellation with their elapsed time. JSON schema 3 reports median,
+nearest-rank P95, maximum and failure counts. An incomplete series has no comparable
+P95. A fast rejected operation MUST NOT qualify nominal convergence.
+
+`CachedDirectoryPerformanceDeviceTest` uses isolated Room storage and the production
+repository, ViewModel and Compose screen. Select `performanceProfiles=nominal`
+(300 contacts/20 groups), `robustness` (5,000/200), or both separated by a comma.
+The fixtures include duplicate email occurrences, per-email group edges, Unicode,
+opaque preservation data and small valid PNG images. They do not qualify large
+image decoding. The benchmark measures repository acquisition, a reopened
+ViewModel in the same process/open database, cached useful rendering, rendered
+search and durable Save at the transaction's AFTER_COMMIT checkpoint. Editor
+closure and instrumentation admission are separate phases. ViewModel reopening
+MUST NOT be described as a cold process or evicted OS/database cache. Rendered
+timings include Compose synchronization and semantics inspection overhead.
+
+`ContactSortPerformanceDeviceTest` compares two comparator strategies on identical
+seeded permutations, alternating their order. Its nanosecond companion reports
+isolate sorting, not Room, search, network or full application latency. Exact
+identity order and stable ties MUST agree. `RoomContactRepositoryTest` also
+checks locale changes, concurrent observers, rich values and owner isolation.
+
+`SyncRoomPerformanceDeviceTest` measures the real import/checkpoint transactions
+with controlled remote gateways for import, ten remote changes and no-change
+passes. Full-card fetches and provider writes are different counters. Its gateway
+durations MUST NOT be called real Proton, crypto, native-editor detection or
+Android projection timings. Unexercised peer and memory counters are not proof
+of zero real-world cost. Heap-before/after is a JVM proxy, not native peak memory.
+
+Build from `app/` with the documented toolchain and verified dependencies:
+
+```powershell
+.\gradlew.bat --no-daemon --max-workers=2 -PcontakoTestBuildType=benchmark -PcontakoCandidatePackageSuffix=perfcheck -PcontakoTargetAbi=arm64-v8a :assembleBenchmark :assembleBenchmarkAndroidTest
+```
+
+Use `--offline` only with a complete verified cache. Explicitly select an
+authorized physical target and review setup/cleanup before installing either APK.
+Pass instrumentation arguments `sourceRevision`, `benchmarkCommand`,
+`applicationApkSha256` and `testApkSha256`; command descriptions MUST exclude
+private paths, device identities and credentials. Direct ADB runs MAY set
+`performanceOutput=app-external` and collect only the isolated application's
+`files/performance` external-files directory before removal. Otherwise output also
+uses the Android test-storage service. Keep all raw JSON/CSV and run conditions
+under ignored `app/build/qa-results/`.
+
+The benchmark variant is non-debuggable and runs R8, but its broad test-only keep
+rules make absolute timings indicative. Compare like-for-like benchmark variants;
+compile/check the fully optimized release separately. Real Proton/provider
+convergence, process-death recovery, large repair and unplugged battery behavior
+require their own physical evidence and remain NOT RUN when not exercised.
+
 | Tool under app/qa | Purpose |
 | --- | --- |
 | dataset/prepare.py | Validate three datasets; generate local grouped imports and original picker images |

@@ -1,5 +1,14 @@
 # Unit test plan
 
+## Performance evidence integrity
+
+Verify five warmups/thirty samples, nearest-rank P95, median and maximum with a
+deterministic monotonic clock. Partial reports MUST retain elapsed failures and
+omit comparable P95. Timeout, cancellation, rejection and failed warmups MUST
+prevent nominal qualification even below the duration ceiling. Full-card fetches
+MUST remain distinct from provider writes. JSON/CSV schema and redaction checks
+MUST reject private path metadata and exclude fixture payloads.
+
 ## Remote-deletion choices
 
 Cover fresh structured absence versus transport errors, stale owner/revision

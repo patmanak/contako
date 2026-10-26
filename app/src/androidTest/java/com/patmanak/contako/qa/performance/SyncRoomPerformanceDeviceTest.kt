@@ -18,22 +18,31 @@ import com.patmanak.contako.data.gateway.RemoteVersion
 import com.patmanak.contako.data.gateway.VerifiedContactCard
 import com.patmanak.contako.data.local.ContakoDatabase
 import com.patmanak.contako.data.local.RoomContactInventoryCheckpointStore
+import com.patmanak.contako.data.local.RoomContactRepository
 import com.patmanak.contako.data.local.RoomRemoteCanonicalReconciliationStore
 import com.patmanak.contako.data.proton.PersistentContactInventoryPlanner
 import com.patmanak.contako.data.sync.IncrementalRemoteContactStage
 import com.patmanak.contako.data.sync.RemoteContactBatchObserver
 import com.patmanak.contako.data.sync.RemoteContactStageResult
+import com.patmanak.contako.data.sync.RemoteImportPhase
+import com.patmanak.contako.data.sync.SyncPassStage
+import com.patmanak.contako.data.sync.SyncPassStageObserver
 import com.patmanak.contako.domain.model.CanonicalContact
+import com.patmanak.contako.domain.model.ContactValue
+import com.patmanak.contako.domain.model.ContactValueKind
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import org.junit.After
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,78 +51,119 @@ import org.junit.runner.RunWith
 class SyncRoomPerformanceDeviceTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val evidence by lazy { context.performanceEvidence() }
-    private val databaseNames = mutableListOf<String>()
-
-    @After
-    fun tearDown() {
-        databaseNames.forEach(context::deleteDatabase)
-    }
 
     @Test
     fun deltaAndImportUseRealRoomAndKeepHeartbeatResponsive() = runBlocking {
         listOf(Scenario.NONE, Scenario.TEN, Scenario.IMPORT).forEach { scenario ->
-            val warmups = (1..PerformanceRun.REQUIRED_WARMUPS).map { execute(scenario, it) }
-            val samples = (1..PerformanceRun.REQUIRED_SAMPLES).map { execute(scenario, it) }
-            val run = PerformanceRun(
-                environment(scenario),
-                PerformanceRun.REQUIRED_WARMUPS,
-                samples,
-                scenario.ceilings,
-                warmups,
+            val environment = environment(scenario)
+            val warmups = mutableListOf<PerformanceSample>()
+            val samples = mutableListOf<PerformanceSample>()
+            fun snapshot() = PerformanceReport(
+                environment, warmups.size, samples.toList(), scenario.ceilings, warmups.toList(),
             )
-            assertTrue("${scenario.caseId}: ${run.violations()}", run.violations().isEmpty())
-            emit(run)
+            repeat(PerformanceRun.REQUIRED_WARMUPS) {
+                val sample = execute(scenario, it + 1)
+                warmups += sample
+                emit(snapshot())
+                assertTrue("${scenario.caseId}: ${sample.outcome}", sample.outcome == PerformanceSampleOutcome.SUCCESS)
+            }
+            repeat(PerformanceRun.REQUIRED_SAMPLES) {
+                val sample = execute(scenario, it + 1)
+                samples += sample
+                emit(snapshot())
+                assertTrue("${scenario.caseId}: ${sample.outcome}", sample.outcome == PerformanceSampleOutcome.SUCCESS)
+            }
+            val report = snapshot()
+            assertTrue("${scenario.caseId}: ${report.violations()}", report.violations().isEmpty())
         }
     }
 
     private suspend fun execute(scenario: Scenario, ordinal: Int): PerformanceSample {
         val databaseName = "sync-${scenario.name.lowercase()}-${SystemClock.elapsedRealtimeNanos()}.db"
-        databaseNames += databaseName
-        val database = ContakoDatabase.create(context, databaseName)
-        val checkpoint = RoomContactInventoryCheckpointStore(database)
+        var database: ContakoDatabase? = null
         val initial = inventory(1)
-        var requests = 0
-        var hydrations = 0
-        var commits = 0
+        val requests = AtomicInteger()
+        val hydrations = AtomicInteger()
         val heartbeatCount = AtomicInteger()
-        val running = AtomicBoolean(true)
-        val heartbeat = CoroutineScope(Dispatchers.Main).launch {
-            while (running.get()) {
-                heartbeatCount.incrementAndGet()
-                delay(10)
-            }
+        val running = AtomicBoolean(false)
+        val counter = PerformanceCounter(SystemClock::elapsedRealtimeNanos)
+        counter.start()
+        var heartbeat: Job? = null
+        var measuredSample: PerformanceSample? = null
+        fun sample(outcome: PerformanceSampleOutcome = PerformanceSampleOutcome.SUCCESS) =
+            (measuredSample ?: counter.finish(ordinal)).copy(
+                requestCount = requests.get(), fullCardFetchCount = hydrations.get(),
+                heartbeatCount = heartbeatCount.get(), outcome = outcome,
+            )
+        suspend fun stopHeartbeat() {
+            running.set(false)
+            heartbeat?.join()
         }
         try {
+            val opened = ContakoDatabase.create(context, databaseName)
+            database = opened
+            val checkpoint = RoomContactInventoryCheckpointStore(opened)
+            val repository = RoomContactRepository(opened)
             if (scenario != Scenario.IMPORT) {
-                val seed = stage(database, checkpoint, initial, { requests++ }, { hydrations++ }) { commits++ }
-                assertTrue(withContext(Dispatchers.IO) { seed.run(ACCOUNT) } is RemoteContactStageResult.Success)
-                requests = 0
-                hydrations = 0
-                commits = 0
+                val seed = stage(opened, checkpoint, initial, {}, {}, {})
+                check(withContext(Dispatchers.IO) { seed.run(ACCOUNT) } is RemoteContactStageResult.Success) { "SEED_FAILED" }
             }
+            val before = repository.observeContacts(ACCOUNT.value).first().associateBy { it.id }
             val current = if (scenario == Scenario.TEN) {
                 initial.mapIndexed { index, value -> if (index < 10) metadata(index, 2) else value }
             } else initial
-            val counter = PerformanceCounter(SystemClock::elapsedRealtimeNanos)
             counter.start()
-            val measured = stage(database, checkpoint, current, { requests++ }, { hydrations++ }) {
-                commits++
-                counter.commit()
-                counter.checkpoint()
-                counter.observeHeap()
+            running.set(true)
+            heartbeat = CoroutineScope(Dispatchers.Main).launch {
+                while (running.get()) {
+                    heartbeatCount.incrementAndGet()
+                    delay(10)
+                }
             }
+            val measured = stage(
+                opened, checkpoint, current,
+                onRequest = { requests.incrementAndGet() },
+                onHydration = { hydrations.incrementAndGet() },
+                onCommit = { counter.commit(); counter.observeHeap() },
+                onCheckpoint = { counter.checkpoint() },
+            )
             val result = withContext(Dispatchers.IO) { measured.run(ACCOUNT) }
-            counter.request(requests)
-            repeat(hydrations) { counter.providerBatch(1) }
-            assertTrue(result is RemoteContactStageResult.Success)
-            assertEquals(scenario.hydrations, hydrations)
-            assertEquals(scenario.requests, requests)
-            if (scenario == Scenario.IMPORT) assertTrue("UI heartbeat did not run", heartbeatCount.get() > 0)
-            return counter.finish(ordinal).also { assertEquals(commits, it.commitCount) }
+            measuredSample = sample()
+            stopHeartbeat()
+            if (result == RemoteContactStageResult.Cancelled) return sample(PerformanceSampleOutcome.CANCELLED)
+            check(result is RemoteContactStageResult.Success) { "STAGE_FAILED" }
+            check(scenario.hydrations == hydrations.get() && scenario.requests == requests.get()) { "REQUEST_ORACLE_FAILED" }
+            if (scenario == Scenario.IMPORT) check(heartbeatCount.get() > 0) { "HEARTBEAT_MISSING" }
+            val after = repository.observeContacts(ACCOUNT.value).first().associateBy { it.id }
+            check(after.keys == current.map { it.id.value }.toSet()) { "IDENTITY_ORACLE_FAILED" }
+            current.forEachIndexed { index, metadata ->
+                val actual = after.getValue(metadata.id.value)
+                val expected = canonical(metadata)
+                check(actual.values.associateBy { it.id } == expected.values.associateBy { it.id } &&
+                    actual.displayName == expected.displayName &&
+                    actual.firstName == expected.firstName && actual.lastName == expected.lastName &&
+                    actual.remoteVersion == metadata.version.value) { "FIELD_ORACLE_FAILED" }
+                if (scenario == Scenario.NONE || (scenario == Scenario.TEN && index >= 10)) {
+                    check(actual == before.getValue(actual.id)) { "UNCHANGED_ORACLE_FAILED" }
+                }
+            }
+            return sample()
+        } catch (_: TimeoutCancellationException) {
+            return sample(PerformanceSampleOutcome.TIMEOUT)
+        } catch (_: CancellationException) {
+            return sample(PerformanceSampleOutcome.CANCELLED)
+        } catch (_: Exception) {
+            return sample(PerformanceSampleOutcome.LOCAL_FAILURE)
         } finally {
             running.set(false)
-            heartbeat.join()
-            database.close()
+            withContext(NonCancellable) {
+                try {
+                    stopHeartbeat()
+                    database?.close()
+                } finally {
+                    context.deleteDatabase(databaseName)
+                }
+            }
         }
     }
 
@@ -124,6 +174,7 @@ class SyncRoomPerformanceDeviceTest {
         onRequest: () -> Unit,
         onHydration: () -> Unit,
         onCommit: () -> Unit,
+        onCheckpoint: () -> Unit = {},
     ) = IncrementalRemoteContactStage(
         ProtonContactInventoryGateway { _, cursor ->
             require(cursor == null)
@@ -133,17 +184,33 @@ class SyncRoomPerformanceDeviceTest {
         ProtonVerifiedContactCardGateway { _, id ->
             onRequest()
             onHydration()
-            val version = inventory.first { it.id == id }.version
+            val metadata = inventory.first { it.id == id }
             GatewayOutcome.Success(VerifiedContactCard(
-                id, version, CanonicalContact(ACCOUNT.value, id.value, displayName = "Synthetic"),
+                id, metadata.version, canonical(metadata),
             ))
         },
         PersistentContactInventoryPlanner(checkpoint),
         RoomRemoteCanonicalReconciliationStore(database),
         RemoteContactBatchObserver { _, _, _ -> onCommit() },
+        importObserver = object : SyncPassStageObserver {
+            override fun onStage(stage: SyncPassStage) = Unit
+            override fun onImportPhase(phase: RemoteImportPhase) {
+                if (phase == RemoteImportPhase.CHECKPOINT_COMMIT_DONE) onCheckpoint()
+            }
+        },
     )
 
-    private fun emit(run: PerformanceRun) {
+    private fun canonical(metadata: ContactInventoryMetadata) = CanonicalContact(
+        ACCOUNT.value, metadata.id.value, firstName = "Synthetic", lastName = metadata.id.value,
+        displayName = metadata.displayName.orEmpty(),
+        values = listOf(
+            ContactValue("email", ContactValueKind.EMAIL, "${metadata.id.value}@example.invalid", order = 0),
+            ContactValue("phone", ContactValueKind.PHONE, "+15550000000", order = 0),
+            ContactValue("note", ContactValueKind.NOTE, "Synthetic private note ${metadata.version.value}", order = 0),
+        ),
+    )
+
+    private fun emit(run: PerformanceReport) {
         context.writePerformanceArtifact(
             "${run.environment.runId}.json",
             PerformanceMetricCollector.toJson(run),
@@ -176,7 +243,7 @@ class SyncRoomPerformanceDeviceTest {
 
         val requests get() = 1 + hydrations
         val ceilings get() = PerformanceCeilings(
-            durationMs, requests, hydrations, hydrations, if (this == IMPORT) 96L shl 20 else 64L shl 20, 100,
+            durationMs, requests, 0, 0, if (this == IMPORT) 96L shl 20 else 64L shl 20, 100,
         )
     }
 
