@@ -121,6 +121,9 @@ internal class ProductionAndroidProjectionItemExecutor(
             ?: return repair(AndroidProjectionRepairCategory.LOCAL_LEDGER_STATE)
         if (ledger != pageLedger || ledger.providerEpoch != context.providerEpoch
         ) return replan(AndroidProjectionReplanCategory.LEDGER_CONTEXT)
+        // Recovery owns the original source until its guarded provider cleanup and final Room
+        // commit. In particular a prepared delete whose acknowledgement was lost must not be
+        // replaced by ordinary adoption/projection on the next pass.
         val canonicalEntity = database.contactDao().get(context.account.value, ledger.canonicalContactId)
             ?: return repair(AndroidProjectionRepairCategory.CANONICAL_CONTACT_STATE)
         val canonical = try {
@@ -128,6 +131,11 @@ internal class ProductionAndroidProjectionItemExecutor(
         } catch (_: IllegalArgumentException) {
             return repair(AndroidProjectionRepairCategory.CANONICAL_DECODING)
         }
+        val deletionRecovery = database.deletionRecoveryDao().get(context.account.value, ledger.canonicalContactId)
+        if (deletionRecovery != null && (!deletionRecovery.sourceRetired || canonical.revision == deletionRecovery.localRevision) &&
+            (canonical.isDeleted || deletionRecovery.choice != null ||
+                deletionRecovery.cleanupRaw != null || canonical.conflictState == "REMOTE_DELETION_RECOVERY_REQUIRED"))
+            return AndroidBoundedPageResult.Applied
         if (canonical.isDeleted) return projectDeletion(context, ledger)
         if (ledger.tombstoneState != AndroidTombstoneState.NONE.name) {
             return repair(AndroidProjectionRepairCategory.CANONICAL_CONTACT_STATE)

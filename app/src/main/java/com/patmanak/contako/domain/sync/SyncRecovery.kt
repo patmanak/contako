@@ -90,6 +90,12 @@ enum class RepairStartResult { CONFIRMATION_REQUIRED, STARTED, RESUMED }
 
 /** Presentation-neutral recovery port implemented by the synchronization data adapter. */
 interface SyncRecoveryDataSource {
+    fun observeDeletionRecoveries(accountId: String): Flow<List<DeletionRecoverySummary>> = flowOf(emptyList())
+    suspend fun loadDeletionRecovery(accountId: String, contactId: String): DeletionRecoveryDetail? = null
+    suspend fun chooseDeletionRecovery(accountId: String, expected: DeletionRecoverySummary,
+        choice: DeletionRecoveryChoice): Boolean = false
+    suspend fun saveDeletionDraft(accountId: String, expected: DeletionRecoverySummary,
+        contact: com.patmanak.contako.domain.model.CanonicalContact): Boolean = false
     /** Observes one committed contact and retained deletion intent through local reads only. */
     fun observeContactSyncDetail(accountId: String, contactId: String): Flow<ContactSyncDetail?> = flowOf(null)
     suspend fun previewTargetedRecovery(accountId: String, kind: TargetedRecoveryKind,

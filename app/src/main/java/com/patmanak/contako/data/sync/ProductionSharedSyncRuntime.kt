@@ -299,8 +299,13 @@ internal fun composeProductionSharedSyncRuntime(
             prepareTargetedProtonRead(database, androidPreflight, androidStage, command, cancelled)
         })
     val groupCatalogAvailable = java.util.concurrent.atomic.AtomicBoolean(false)
-    val mutationPreparation = RoomBackedMutationPreparationGateway(account, database, dependencies.membershipReader,
-        dependencies.verifiedCards, dependencies.existence)
+    val deletionRecoveryStore = com.patmanak.contako.data.local.RoomDeletionRecoveryStore(database)
+    val deletedContactRecovery = DeletedContactRecovery(RoomDeletedContactRecoveryExecutionStore(deletionRecoveryStore),
+        dependencies.existence, ProductionDeletedContactNativeCleanup(database, deletionRecoveryStore, androidPreflight,
+            androidStage, contactsReader, com.patmanak.contako.data.android.provider.AndroidRawContactLifecycleGateway(contentResolver)))
+    val mutationPreparation = DeletedContactRecreationPreparationGuard(account, deletionRecoveryStore, dependencies.existence,
+        RoomBackedMutationPreparationGateway(account, database, dependencies.membershipReader,
+            dependencies.verifiedCards, dependencies.existence))
     val mutationOrchestrator = DurableMutationOrchestrator(
         RoomMutationExecutionStore(database, dependencies.existence,
             recoveryGeneration = dependencies.capabilityInvalidationGeneration),
@@ -437,6 +442,7 @@ internal fun composeProductionSharedSyncRuntime(
         ),
         fullRepairCoordinator = RoomFullRepairExecutionCoordinator(account, fullRepairStore),
         targetedRecovery = targetedRecovery,
+        deletedContactRecovery = deletedContactRecovery,
     )
     completionDetails = executor
     val removalCheckpoints = SharedPreferencesAccountRemovalCheckpointStore(applicationContext)
@@ -534,6 +540,10 @@ internal fun composeProductionSharedSyncRuntime(
             noAndroidRemoval = unprovisionedSignOut::remove,
             hasIncompleteRemoval = { hasPendingCleanup() },
             lifecycleAdmission = lifecycleAdmission,
+            hasRetainedDrafts = { database.deletionRecoveryDao().getAll(account.value).any {
+                it.state !in setOf(com.patmanak.contako.domain.sync.DeletionRecoveryState.RECREATED.name,
+                    com.patmanak.contako.domain.sync.DeletionRecoveryState.DISCARDED.name)
+            } },
         ),
     )
 }

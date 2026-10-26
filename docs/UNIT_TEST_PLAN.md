@@ -1,5 +1,15 @@
 # Unit test plan
 
+## Remote-deletion choices
+
+Cover fresh structured absence versus transport errors, stale owner/revision
+consent, source reappearance and cancellation. Recreating MUST use a distinct
+stable UID, remove only recognized old service/group identities and retain
+compatible unknown/repeated fields. Unsupported provenance MUST be blocked.
+View-model tests MUST distinguish inspection, confirmation and local draft Save;
+Save MUST NOT call the ordinary repository or request synchronization. Sign-out
+with local drafts MUST return to review without an automatic sync loop.
+
 ## Contact confirmation policy
 
 Cover proof precedence independently for each peer: pending intent, known issues,

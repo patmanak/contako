@@ -866,8 +866,17 @@ internal interface AccountRemovalDao {
     suspend fun deleteTargetedRecovery(accountId: String)
     @Query("DELETE FROM remote_hydration_obligations WHERE account_id = :accountId")
     suspend fun deleteHydrationObligations(accountId: String)
-    @Query("SELECT COUNT(*) FROM outbox_mutations WHERE account_id = :accountId")
+    @Query("""SELECT (SELECT COUNT(*) FROM outbox_mutations WHERE account_id = :accountId)
+        + (SELECT COUNT(*) FROM deletion_recoveries WHERE account_id=:accountId
+            AND (has_draft=1 OR state IN ('QUEUED','CLEANUP_PENDING','BLOCKED','STALE'))
+            AND state NOT IN ('RECREATED','DISCARDED'))""")
     suspend fun countPending(accountId: String): Int
+
+    @Query("SELECT COUNT(*) FROM deletion_recoveries WHERE account_id=:accountId AND has_draft=1 AND state NOT IN ('RECREATED','DISCARDED')")
+    suspend fun countRetainedDrafts(accountId: String): Int
+
+    @Query("DELETE FROM deletion_recoveries WHERE account_id=:accountId")
+    suspend fun deleteDeletionRecoveries(accountId: String)
 
     @Query("DELETE FROM outbox_mutations WHERE account_id = :accountId")
     suspend fun deleteOutbox(accountId: String)
@@ -895,6 +904,7 @@ internal interface AccountRemovalDao {
         require(accountId.isNotBlank())
         deleteContactSyncEvidence(accountId)
         deleteTargetedRecovery(accountId)
+        deleteDeletionRecoveries(accountId)
         deleteOutbox(accountId)
         deleteHydrationObligations(accountId)
         deleteSyncStatus(accountId)

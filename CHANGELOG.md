@@ -2,6 +2,16 @@
 
 Features and improvements by version.
 
+## 0.16.0
+
+- Add explicit recovery for local edits after a confirmed Proton deletion:
+  keep a local draft, create a new contact, or discard named retained work.
+- Keep drafts durable and locally editable without sending them. Recreation
+  uses a new identity and the existing protected creation/reconciliation path.
+- Recheck remote absence and native changes before retiring the old owned
+  Android copy; unsafe field/group transfers remain blocked with work retained.
+- Include retained recovery work in sign-out protection and expose it in Sync.
+
 ## 0.15.0
 
 - Add on-demand synchronization details for one contact, including retained

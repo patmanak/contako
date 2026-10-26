@@ -124,6 +124,7 @@ internal class AndroidRawContactLifecycleGateway(
         rawContactId: Long,
         expectedRawContactVersion: Long,
         expectedSourceIdentity: AndroidExpectedSourceIdentity,
+        requireClean: Boolean = false,
     ): AndroidDeleteRawContactResult {
         validateInputs(
             accountName,
@@ -138,6 +139,7 @@ internal class AndroidRawContactLifecycleGateway(
         if (
             candidate.rawContactId != rawContactId ||
             candidate.version != expectedRawContactVersion ||
+            (requireClean && candidate.dirty) ||
             !candidate.matches(expectedSourceIdentity)
         ) {
             return AndroidDeleteRawContactResult.Stale
@@ -161,7 +163,8 @@ internal class AndroidRawContactLifecycleGateway(
             "${ContactsContract.RawContacts.ACCOUNT_NAME} = ? AND " +
             "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND " +
             "${ContactsContract.RawContacts.VERSION} = ? AND " +
-            "${ContactsContract.RawContacts.SYNC1} = ? AND $sourceClause"
+            "${ContactsContract.RawContacts.SYNC1} = ? AND $sourceClause" +
+            if (requireClean) " AND ${ContactsContract.RawContacts.DIRTY} = 0" else ""
         var deleteCommitted = false
         val deleted = try {
             contentResolver.delete(
@@ -252,7 +255,7 @@ internal class AndroidRawContactLifecycleGateway(
                             if (it.isBlank()) throw failure(AndroidRawContactLifecycleFailure.MALFORMED_PROVIDER_DATA)
                             it.requireBoundedUtf8(MAX_ID_UTF8_BYTES)
                         }
-                        add(RawContactCandidate(rawContactId, sourceIdentity, version))
+                        add(RawContactCandidate(rawContactId, sourceIdentity, version, cursor.getInt(3) != 0))
                     }
                 }
             } ?: throw failure(AndroidRawContactLifecycleFailure.PROVIDER_UNAVAILABLE)
@@ -310,6 +313,7 @@ internal class AndroidRawContactLifecycleGateway(
         val rawContactId: Long,
         val sourceIdentity: String?,
         val version: Long,
+        val dirty: Boolean,
     ) {
         fun toHandle() = AndroidOwnedRawContactHandle(rawContactId, version, sourceIdentity != null)
 
@@ -328,6 +332,7 @@ internal class AndroidRawContactLifecycleGateway(
             ContactsContract.RawContacts._ID,
             ContactsContract.RawContacts.SOURCE_ID,
             ContactsContract.RawContacts.VERSION,
+            ContactsContract.RawContacts.DIRTY,
         )
 
         fun failure(category: AndroidRawContactLifecycleFailure) =

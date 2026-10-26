@@ -31,6 +31,16 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
 
 ## Interface and runtime
 
+- Remote-deletion recovery keeps local drafts on this installation; it is not a
+  Proton backup or a general trash folder. Opaque Android-only payloads cannot
+  be captured as canonical draft data and block removal of the old source.
+  Ambiguous clear-card categories, unavailable groups and divergent assignments
+  on repeated identical email addresses can block recreation rather than silently
+  merge occurrences. If new canonical/group intent arrives after a draft was
+  preserved, both versions remain retained for review; no automatic draft merge
+  is attempted. Remote presence checks do not provide an atomic server-side
+  precondition against a change between the check and a later write.
+
 - Contact confirmation details retain per-contact proof only from explicit
   verification/acknowledgement boundaries. Earlier contacts may show unknown
   confirmation until a new qualifying observation occurs; ordinary unchanged

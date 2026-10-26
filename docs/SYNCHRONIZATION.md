@@ -6,6 +6,21 @@ Every foreground/background/system entry point MUST use one account-scoped engin
 
 ## Ordered work
 
+After remote reconciliation and before draining mutations, the shared executor
+MUST process durable remote-deletion recovery choices. Merely discovering a
+deleted source MUST NOT recreate it. A fresh structured presence check, native
+ingestion and source/revision guards MUST precede the chosen local transition.
+Pending cleanup MUST NOT be bypassed by an earlier generic Android projection.
+If the source reappears or new native work is observed, the choice MUST stop for
+review without PUT/DELETE of the old remote identity. An explicit recreation
+uses the existing upload path and MUST NOT blindly repeat an ambiguous CREATE.
+
+Keeping a draft MUST save its full supported content before any old-copy removal;
+discard MUST target only the confirmed local revision. Provider failure leaves
+cleanup pending, rather than claiming convergence. Other aggregated account
+sources MUST remain untouched. The final UI state MUST distinguish a locally
+queued creation from acknowledged Proton delivery.
+
 Contact-level proof metadata MUST be committed at a complete verified remote
 adoption, exact-revision write acknowledgement, confirmed absence, or verified
 Android completion. It MUST NOT be inferred from last account success, public

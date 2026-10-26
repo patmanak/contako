@@ -209,6 +209,9 @@ fun ContakoApp(
     val conflictPanel by viewModel.conflictPanel.collectAsState()
     val targetedPanel by viewModel.targetedRecoveryPanel.collectAsState()
     val contactSyncPanel by viewModel.contactSyncPanel.collectAsState()
+    val deletionRecoveries by viewModel.deletionRecoveries.collectAsState()
+    val deletionRecoveryPanel by viewModel.deletionRecoveryPanel.collectAsState()
+    if (deletionRecoveryPanel.contactId != null) DeletionRecoveryDialog(deletionRecoveryPanel, viewModel)
     if (contactSyncPanel.contactId != null) ContactSyncDetailDialog(contactSyncPanel, state, viewModel)
     if (targetedPanel.kind != null) TargetedRecoveryDialog(targetedPanel, viewModel)
     if (conflictPanel.contactId != null) ContactConflictDialog(conflictPanel, viewModel)
@@ -426,7 +429,9 @@ fun ContakoApp(
         confirmButton = { TextButton(onClick = viewModel::confirmRepair) { Text(stringResource(R.string.repair_confirm_action)) } },
         dismissButton = { TextButton(onClick = viewModel::dismissRepairConfirmation) { Text(stringResource(R.string.action_cancel)) } },
     )
-    val signOutNeedsPendingChoice = signOutPendingReported || state.pendingMutationCount > 0
+    val retainedRecoveries = deletionRecoveries.any { it.state !in setOf(
+        com.patmanak.contako.domain.sync.DeletionRecoveryState.RECREATED, com.patmanak.contako.domain.sync.DeletionRecoveryState.DISCARDED) }
+    val signOutNeedsPendingChoice = signOutPendingReported || state.pendingMutationCount > 0 || retainedRecoveries
     if (confirmSignOut && !signOutNeedsPendingChoice) AlertDialog(
         onDismissRequest = { confirmSignOut = false },
         title = { Text(stringResource(R.string.dialog_signout_title)) },
@@ -446,15 +451,20 @@ fun ContakoApp(
         onDismissRequest = { confirmSignOut = false },
         title = { Text(stringResource(R.string.dialog_signout_title)) },
         text = {
-            Text(if (signOutPendingReported) {
+            Text(if (retainedRecoveries) {
+                stringResource(R.string.deletion_recovery_signout)
+            } else if (signOutPendingReported) {
                 stringResource(R.string.dialog_signout_pending_unverified)
             } else {
                 pluralStringResource(R.plurals.dialog_signout_pending, state.pendingMutationCount, state.pendingMutationCount)
             })
         },
         confirmButton = {
-            TextButton(enabled = !signOutInProgress, onClick = { confirmSignOut = false; executeSignOut(SignOutChoice.SYNC_NOW) }) {
-                Text(stringResource(R.string.dialog_sync_before_signout))
+            TextButton(enabled = !signOutInProgress, onClick = {
+                confirmSignOut = false
+                if (retainedRecoveries) viewModel.selectDestination(RootDestination.SYNC) else executeSignOut(SignOutChoice.SYNC_NOW)
+            }) {
+                Text(stringResource(if (retainedRecoveries) R.string.deletion_recovery_title else R.string.dialog_sync_before_signout))
             }
         },
         dismissButton = {
@@ -946,6 +956,7 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
     val issueItems = currentSyncIssues(state, conflicts)
     val semanticColors = LocalContakoColors.current
     val syncing = state.syncActivity != SyncActivity.IDLE
+    val deletionRecoveries by viewModel.deletionRecoveries.collectAsState()
     val statusColor = when (state.syncDashboard.state) {
         SyncDashboardState.CURRENT -> semanticColors.success
         SyncDashboardState.PENDING, SyncDashboardState.OFFLINE -> semanticColors.pending
@@ -956,6 +967,17 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        items(deletionRecoveries.filter { it.state != com.patmanak.contako.domain.sync.DeletionRecoveryState.DISCARDED },
+            key = { "deleted-recovery:${it.contactId}" }) { recovery ->
+            InfoCard(recovery.displayName.ifBlank { stringResource(R.string.deletion_recovery_title) }) {
+                Text(stringResource(deletionRecoveryStateLabel(recovery.state)))
+                if (recovery.blocker != com.patmanak.contako.domain.sync.DeletionRecoveryBlocker.NONE)
+                    Text(stringResource(deletionRecoveryBlockerLabel(recovery.blocker)))
+                TextButton(onClick = { viewModel.openDeletionRecovery(recovery.contactId) }) {
+                    Text(stringResource(R.string.deletion_recovery_title))
+                }
+            }
+        }
         item {
             InfoCard(stringResource(syncStateTitle(state.syncDashboard))) {
                 Text(
@@ -1293,13 +1315,16 @@ private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsV
             topBar = {
                 Column {
                     EditorAppBar(
-                        title = stringResource(if (editor.original == null) R.string.contacts_new else R.string.contacts_edit),
+                        title = stringResource(if (editor.recoveryDraft != null) R.string.deletion_recovery_edit
+                            else if (editor.original == null) R.string.contacts_new else R.string.contacts_edit),
                         onCancel = viewModel::dismissContactEditor,
                         onSave = viewModel::saveContact,
                         saveTag = CONTACT_EDITOR_TOP_SAVE_TAG,
                         saveEnabled = !editor.saving && !readingImage,
                     )
                     if (editor.saving) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (editor.recoveryDraft != null) Text(stringResource(R.string.deletion_recovery_local_save),
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     editor.validationError?.let { error ->
                         Surface(color = MaterialTheme.colorScheme.errorContainer) {
                             Text(uiMessage(error), Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)

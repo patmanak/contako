@@ -135,6 +135,31 @@ otherwise, apply the common setup, exact field comparison and cleanup above.
 | FT-25 | Rich contact with Call/Message/Email actions, normal and narrow screen, long locale labels and large text. | Three actions share a row when measured labels fit; deliberate large-text reflow allowed; primary badges align with values. |
 | FT-26 | On ordinary and diagnostic variants, generate/export/dismiss diagnostics after manual/native/local-change triggers and an authorized failure; rotate more than 128 events, restart, clear history and exercise picker cancel/storage error. | Schema 3 includes UTC/process-relative times, trigger/disposition, failure stage/phase and known field category, broad Android-copy backlog and sync reason. The latest detailed failure survives rotation and subsequent generic banners; process restarts are marked. No values/credentials/private IDs/raw errors/authentication traces; unknown fields remain unknown. Journal storage failure cannot change sync behavior; failed clearing is visible and never claims durable deletion. Clearing history/dismissing the report leaves exported documents intact. |
 
+## Remote-deletion recovery
+
+Use separate disposable contacts and compare exact values, preserved properties,
+photo content and per-email group occurrences. Inventory omission and a generic
+404 MUST NOT enable a destructive choice. With structured absence and a retained
+local edit, exercise all three confirmed choices, cancellation without a choice,
+restart and an owner change. Keeping/editing a draft MUST create no remote
+mutation or new Android copy. The full local draft MUST remain available after
+process restart and count toward sign-out protection with an empty outbox.
+
+Recreate a rich contact with duplicate emails and distinct groups. Verify a new
+canonical ID and UID, no reused service tokens/provider receipts, one durable
+CREATE and eventual exact occurrence assignments. Lose the acknowledgement and
+retry: reconcile the same identity, never create another destination. A source
+that reappears before execution MUST stop the choice without a remote DELETE.
+
+Change a native field before cleanup and between observation/deletion; no new
+intent or foreign linked source may be lost. Inject storage failure before draft
+commit and interruption after provider deletion: preserve the former work and
+resume only a matching durable cleanup intent. Opaque Android-only payloads,
+unknown groups and unsafe category mappings MUST block rather than be omitted.
+Abandonment after confirmation must resume cleanup without resurrecting edits.
+Check eight locales, narrow/large-text scrolling and explicitly record unexecuted
+physical/Web/accessibility variants in the private QA result.
+
 ## Per-contact confirmation evidence
 
 From a saved contact and a named Sync contact issue, open/close synchronization

@@ -32,6 +32,9 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import com.patmanak.contako.domain.sync.DeletionRecoverySummary
+import com.patmanak.contako.domain.sync.DeletionRecoveryChoice
+import com.patmanak.contako.domain.sync.DeletionRecoveryState
 
 /**
  * Account scope used before a Proton account is connected, and the default for tests and previews.
@@ -60,6 +63,7 @@ data class ContactEditorState(
     val fieldErrors: Map<String, UiMessage> = emptyMap(),
     val validationError: UiMessage? = null,
     val saving: Boolean = false,
+    val recoveryDraft: DeletionRecoverySummary? = null,
 )
 
 data class ContactGroupOption(
@@ -172,6 +176,60 @@ class ContactsViewModel(
         }
     }
     private val deniedGroups = deniedGroupOperations.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val deletionRecoveries = combine(syncRecoveryDataSource.observeDeletionRecoveries(accountId), mutationAdmission.access) { rows, _ ->
+        if (acceptsMutation()) rows else emptyList()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val mutableDeletionRecoveryPanel = MutableStateFlow(DeletionRecoveryPanelState())
+    val deletionRecoveryPanel: StateFlow<DeletionRecoveryPanelState> = mutableDeletionRecoveryPanel
+    private var deletionPanelGeneration = 0L
+
+    fun dismissDeletionRecovery() {
+        if (mutableDeletionRecoveryPanel.value.busy) return
+        deletionPanelGeneration++
+        mutableDeletionRecoveryPanel.value = DeletionRecoveryPanelState()
+    }
+
+    fun openDeletionRecovery(contactId: String) {
+        if (!acceptsMutation() || mutableDeletionRecoveryPanel.value.busy) return
+        val generation = ++deletionPanelGeneration
+        mutableDeletionRecoveryPanel.value = DeletionRecoveryPanelState(contactId = contactId, busy = true)
+        launchMutation(onRejected = { mutableDeletionRecoveryPanel.value = DeletionRecoveryPanelState(contactId, failed = true) }) {
+            val detail = try { syncRecoveryDataSource.loadDeletionRecovery(accountId, contactId) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+            if (acceptsMutation() && generation == deletionPanelGeneration)
+                mutableDeletionRecoveryPanel.value = DeletionRecoveryPanelState(contactId,
+                    detail?.takeIf { it.summary.contactId == contactId && it.contact.accountId == accountId && it.contact.id == contactId },
+                    failed = detail == null || detail.summary.contactId != contactId || detail.contact.accountId != accountId || detail.contact.id != contactId)
+        }
+    }
+
+    fun chooseDeletionRecovery(choice: DeletionRecoveryChoice) {
+        val panel = mutableDeletionRecoveryPanel.value
+        val expected = panel.detail?.summary ?: return
+        if (panel.busy || !acceptsMutation()) return
+        mutableDeletionRecoveryPanel.value = panel.copy(busy = true)
+        launchMutation(onRejected = { mutableDeletionRecoveryPanel.value = panel.copy(failed = true) }) {
+            val chosen = try { syncRecoveryDataSource.chooseDeletionRecovery(accountId, expected, choice) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { false }
+            if (acceptsMutation()) {
+                mutableDeletionRecoveryPanel.value = panel.copy(failed = !chosen)
+                if (chosen) openDeletionRecovery(expected.contactId)
+            }
+        }
+    }
+
+    fun editDeletionDraft() {
+        val detail = mutableDeletionRecoveryPanel.value.detail ?: return
+        if (!detail.summary.hasDraft || mutableDeletionRecoveryPanel.value.busy ||
+            detail.summary.choice != null || detail.summary.destinationRevision != null ||
+            detail.summary.state in setOf(DeletionRecoveryState.RECREATED, DeletionRecoveryState.DISCARDED)) return
+        dismissDeletionRecovery()
+        editContact(detail.contact)
+        contactEditor.value = contactEditor.value?.copy(recoveryDraft = detail.summary, groupOptions = emptyList(),
+            initialGroupAssignments = emptySet(), selectedGroupAssignments = emptySet(), assignmentsEnabled = false)
+    }
     val conflicts = syncRecoveryDataSource.observeConflicts(accountId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     private val mutableConflictPanel = MutableStateFlow(ConflictPanelState())
@@ -387,7 +445,9 @@ class ContactsViewModel(
             androidPendingContacts = contacts.filter { it.id in dashboard.androidPendingContactIds },
             groups = if (detailOpen) groups else groups.filter { ContactSearch.matchesGroupName(it.name, activeQuery) },
             pendingMutationCount = values[2] as Int,
-            contactEditor = (values[4] as ContactEditorState?)?.copy(assignmentsEnabled = GroupOperation.ASSIGN_EMAILS !in deniedGroups.value),
+            contactEditor = (values[4] as ContactEditorState?)?.let {
+                it.copy(assignmentsEnabled = it.recoveryDraft == null && GroupOperation.ASSIGN_EMAILS !in deniedGroups.value)
+            },
             groupEditor = (values[5] as GroupEditorState?)?.let { editor -> editor.copy(
                 detailsEnabled = (if (editor.original == null) GroupOperation.CREATE else GroupOperation.UPDATE) !in deniedGroups.value,
                 membershipsEnabled = GroupOperation.ASSIGN_EMAILS !in deniedGroups.value,
@@ -413,6 +473,17 @@ class ContactsViewModel(
 
     init {
         viewModelScope.launch {
+            deletionRecoveries.collect { rows ->
+                val panel = mutableDeletionRecoveryPanel.value
+                val previous = panel.detail?.summary
+                val current = rows.firstOrNull { it.contactId == panel.contactId }
+                if (acceptsMutation() && !panel.busy && previous != null &&
+                    ((current != null && current != previous) || (current == null && previous.state !in setOf(
+                        DeletionRecoveryState.RECREATED, DeletionRecoveryState.DISCARDED))))
+                    openDeletionRecovery(previous.contactId)
+            }
+        }
+        viewModelScope.launch {
             mutationAdmission.access.collect {
                 if (!acceptsMutation()) clearAccountDrafts()
             }
@@ -420,6 +491,8 @@ class ContactsViewModel(
     }
 
     private fun clearAccountDrafts() {
+        deletionPanelGeneration++
+        mutableDeletionRecoveryPanel.value = DeletionRecoveryPanelState()
         dismissContactSyncDetail()
         contactEditor.value = null
         groupEditor.value = null
@@ -653,7 +726,10 @@ class ContactsViewModel(
             }
         }) {
             val result = try {
-                repository.saveContactWithGroupAssignments(
+                if (editor.recoveryDraft != null) {
+                    if (syncRecoveryDataSource.saveDeletionDraft(accountId, editor.recoveryDraft, contact)) SaveResult.Saved(contact)
+                    else SaveResult.Rejected(setOf(com.patmanak.contako.domain.repository.SaveValidationIssue.STALE_CONTACT_EDIT))
+                } else repository.saveContactWithGroupAssignments(
                     contact = contact,
                     assignments = assignments,
                     managedGroupIds = editor.groupOptions.map(ContactGroupOption::id).toSet(),
@@ -681,7 +757,8 @@ class ContactsViewModel(
                         navigationStore.selectItem(result.value.id)
                         navigation.value = navigationStore.snapshot()
                     }
-                    onMutationCommitted()
+                    if (editor.recoveryDraft == null) onMutationCommitted()
+                    else openDeletionRecovery(editor.recoveryDraft.contactId)
                 }
                 is SaveResult.Rejected -> if (contactEditor.value?.draftGeneration == editor.draftGeneration) {
                     contactEditor.value = editor.copy(validationError =

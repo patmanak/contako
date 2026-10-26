@@ -14,6 +14,17 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AccountSignOutCoordinatorTest {
+    @Test fun `retained local draft prevents sync then logout without scheduling or cleanup`() = runTest {
+        var synced = false
+        var removed = false
+        val coordinator = AccountSignOutCoordinator(AccountScope("synthetic-owner"), PendingMutationReader { 1 },
+            BoundAndroidAccountReader { error("Must remain connected") },
+            AccountSyncRunner(backgroundScope) { synced = true; SyncPassOutcome.SUCCESS },
+            InAppAccountRemoval { _, _ -> removed = true; true }, hasRetainedDrafts = { true })
+        assertEquals(SignOutResult.PendingChanges, coordinator.signOut(SignOutChoice.SYNC_NOW))
+        assertFalse(synced)
+        assertFalse(removed)
+    }
     @Test fun `unprovisioned account signs out only through explicitly supplied safe cleanup`() = runTest {
         val account = AccountScope("scope")
         var cleaned = false

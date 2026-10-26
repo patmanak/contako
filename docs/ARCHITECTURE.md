@@ -1,5 +1,30 @@
 # Architecture
 
+## Retained remote-deletion work
+
+Remote-deletion recovery MUST retain complete canonical content and preservation
+data in independent account-owned, bounded chunks. A local draft MUST have its
+own revision and MUST NOT be an uploadable contact or an Android projection.
+Saving it MUST be a local compare-and-set operation with no outbox side effect.
+Account cleanup MUST include these records; normal sign-out MUST treat them as
+retained work even when the upload queue is empty.
+
+Consent MUST bind the source identity, local/draft revisions and recovery
+generation. The serialized engine MUST revalidate structured absence of that exact
+Proton identity before execution. Inventory omission, generic HTTP failure or an
+old conflict choice MUST NOT authorize recreation or cleanup. The old canonical
+contact remains retained and blocked while cleanup is unresolved. A provider
+deletion MUST be linked to an exact ingested, owned, clean observation and a
+durable prepared cleanup marker. An acknowledgement lost between provider and
+Room commits MUST resume this same intent; absence alone is insufficient.
+
+Recreation MUST allocate one new canonical identity/UID and use the ordinary
+durable CREATE and ambiguous-delivery reconciliation. Provider receipts, source
+bindings and old Proton email identities MUST NOT be copied. Compatible unknown
+vCard data, repeated values, images and local fields MUST survive; exact email
+occurrences and group identities govern membership remapping. Non-transferable
+data MUST remain retained with an explicit blocker, never silently discarded.
+
 ## Contact confirmation evidence
 
 The local contact detail read model MUST query one owner/contact partition and

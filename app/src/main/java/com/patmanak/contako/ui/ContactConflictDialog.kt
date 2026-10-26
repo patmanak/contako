@@ -52,7 +52,7 @@ internal fun ContactConflictDialog(panel: ConflictPanelState, viewModel: Contact
 }
 
 @Composable
-private fun ConflictVersion(title: String, contact: CanonicalContact) {
+internal fun ConflictVersion(title: String, contact: CanonicalContact) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)

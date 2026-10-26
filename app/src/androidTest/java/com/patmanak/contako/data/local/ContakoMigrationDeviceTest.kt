@@ -24,6 +24,21 @@ class ContakoMigrationDeviceTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
 
+    @Test fun deletionRecoveryMigrationPreservesContactsWithoutInventingDraftOrAbsenceEvidence() {
+        val name = "migration-deletion-recovery.db"
+        context.deleteDatabase(name)
+        migrations.createDatabase(name, 24).use(MigrationFixture::seed)
+        try {
+            migrations.runMigrationsAndValidate(name, 25, true, ContakoDatabase.MIGRATION_24_25).use { upgraded ->
+                assertEquals("Synthetic Person", upgraded.scalar("SELECT display_name FROM contacts"))
+                assertEquals("0", upgraded.scalar("SELECT COUNT(*) FROM deletion_recoveries"))
+                assertEquals("0", upgraded.scalar("SELECT COUNT(*) FROM deletion_recovery_chunks"))
+                assertEquals("0", upgraded.scalar("SELECT COUNT(*) FROM deletion_recovery_groups"))
+                upgraded.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
+            }
+        } finally { context.deleteDatabase(name) }
+    }
+
     @Test fun contactEvidenceMigrationPreservesLegacyRowsWithoutInventingConfirmationHistory() {
         val name = "migration-contact-sync-evidence.db"
         context.deleteDatabase(name)
@@ -257,7 +272,7 @@ class ContakoMigrationDeviceTest {
     private class SimulatedMigrationProcessDeath : RuntimeException()
 
     private companion object {
-        const val CURRENT_VERSION = 24
+        const val CURRENT_VERSION = 25
         val ALL_MIGRATIONS = arrayOf(
             ContakoDatabase.MIGRATION_1_2,
             ContakoDatabase.MIGRATION_2_3,
@@ -282,6 +297,7 @@ class ContakoMigrationDeviceTest {
             ContakoDatabase.MIGRATION_21_22,
             ContakoDatabase.MIGRATION_22_23,
             ContakoDatabase.MIGRATION_23_24,
+            ContakoDatabase.MIGRATION_24_25,
         )
     }
 }

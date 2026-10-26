@@ -32,7 +32,7 @@ Screenshots show the application interface with fictional contacts.
   with timestamps and synchronization failure categories.
 
 Android 12 or later is required. One Proton account is supported at a time.
-The current source version is **0.15.0**; see the
+The current source version is **0.16.0**; see the
 [changelog](CHANGELOG.md) and [known limitations](docs/KNOWN_LIMITATIONS.md).
 The signed universal APK and corresponding sources are available from the
 [0.10.2 release](https://github.com/patmanak/contako/releases/tag/v0.10.2).

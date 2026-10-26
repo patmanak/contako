@@ -1,5 +1,17 @@
 # Software integration test plan
 
+## Durable remote-deletion recovery
+
+Use Room transactions and reopened storage for candidate discovery, verified
+absence, each explicit choice, draft editing and cleanup. Check double taps,
+revision/generation mismatch, failure rollback, exact group mappings, account
+cleanup and conservative migrations. Retained snapshots MUST contain complete
+canonical preservation and inline media. Draft saves MUST leave canonical,
+outbox and provider state unchanged. Test provider version/DIRTY/source/epoch
+guards and opaque rows; lost deletion acknowledgement requires a matching
+prepared intent. Test ordinary and full-repair ordering before upload, plus
+ambiguous CREATE reconciliation and the first-send source-presence guard.
+
 ## Contact confirmation details
 
 Exercise the metadata-only one-contact read model against isolated Room with

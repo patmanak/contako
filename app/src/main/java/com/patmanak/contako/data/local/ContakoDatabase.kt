@@ -15,6 +15,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TargetedRecoveryRequestEntity::class,
         ContactConflictEntity::class,
         ContactConflictChunk::class,
+        DeletionRecoveryEntity::class,
+        DeletionRecoveryChunk::class,
+        DeletionRecoveryGroup::class,
         ContactValueEntity::class,
         ContactPayloadEntity::class,
         ContactGroupEntity::class,
@@ -44,7 +47,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AndroidPhotoProjectionReceiptEntity::class,
         AndroidContactIssueEntity::class,
     ],
-    version = 24,
+    version = 25,
     exportSchema = true,
 )
 internal abstract class ContakoDatabase : RoomDatabase() {
@@ -53,6 +56,7 @@ internal abstract class ContakoDatabase : RoomDatabase() {
     abstract fun remoteHydrationObligationDao(): RemoteHydrationObligationDao
     abstract fun targetedRecoveryRequestDao(): TargetedRecoveryRequestDao
     abstract fun contactConflictDao(): ContactConflictDao
+    abstract fun deletionRecoveryDao(): DeletionRecoveryDao
     abstract fun contactGroupDao(): ContactGroupDao
     abstract fun contactPayloadDao(): ContactPayloadDao
     abstract fun accountRemovalDao(): AccountRemovalDao
@@ -95,8 +99,43 @@ internal abstract class ContakoDatabase : RoomDatabase() {
                     MIGRATION_21_22,
                     MIGRATION_22_23,
                     MIGRATION_23_24,
+                    MIGRATION_24_25,
                 )
                 .build()
+
+        val MIGRATION_24_25: Migration = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS deletion_recoveries (
+                        account_id TEXT NOT NULL,contact_id TEXT NOT NULL,generation TEXT NOT NULL,
+                        local_revision INTEGER NOT NULL,draft_revision INTEGER NOT NULL,remote_id TEXT NOT NULL,
+                        display_name TEXT NOT NULL,state TEXT NOT NULL,choice TEXT,blocker TEXT NOT NULL,
+                        has_draft INTEGER NOT NULL,absence_verified INTEGER NOT NULL,destination_contact_id TEXT,
+                        cleanup_epoch INTEGER,cleanup_raw INTEGER,cleanup_version INTEGER,cleanup_ledger_revision INTEGER,destination_revision INTEGER,
+                        verification_order INTEGER NOT NULL DEFAULT 0,
+                        source_retired INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY(account_id,contact_id)
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS deletion_recovery_chunks (
+                        account_id TEXT NOT NULL,contact_id TEXT NOT NULL,position INTEGER NOT NULL,bytes BLOB NOT NULL,
+                        PRIMARY KEY(account_id,contact_id,position),
+                        FOREIGN KEY(account_id,contact_id) REFERENCES deletion_recoveries(account_id,contact_id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS deletion_recovery_groups (
+                        account_id TEXT NOT NULL,contact_id TEXT NOT NULL,group_id TEXT NOT NULL,email_value_id TEXT NOT NULL,
+                        remote_label_id TEXT,group_name TEXT NOT NULL,
+                        PRIMARY KEY(account_id,contact_id,group_id,email_value_id),
+                        FOREIGN KEY(account_id,contact_id) REFERENCES deletion_recoveries(account_id,contact_id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+            }
+        }
 
         val MIGRATION_23_24: Migration = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {

@@ -1,5 +1,31 @@
 # User guide and FAQ
 
+## Recover edits after a Proton deletion
+
+When a Proton contact has been deleted while local edits are waiting, Sync keeps
+the local work and offers **Recover local changes**. Opening the recovery view
+does not contact a peer or apply a choice. Use the explicit verification action
+if the source's absence has not yet been confirmed.
+
+Choose **Keep a local draft**, **Create a new contact**, or **Discard local
+changes**, then confirm the named action. Keeping a draft does not back it up on
+Proton: it remains on this installation and can be edited from Sync without
+uploading it. Recreating makes a distinct contact, with a new identity, through
+the ordinary synchronization queue. It does not undo the original deletion.
+Discarding abandons the retained local edits; it does not delete another Proton
+contact.
+
+The old Contako-owned Android copy is removed only after safe preservation and
+checks. A changed native source, unavailable Android access or opaque data that
+cannot be retained safely can leave cleanup blocked. Work stays available for
+review; other account sources of a linked system contact are not removed.
+Unresolved group mappings remain explicit rather than being guessed.
+
+Retained drafts prevent normal sign-out from treating an empty upload queue as
+fully backed up. Review/recreate them or separately confirm discarding local
+work. Uninstalling, clearing application data or explicitly removing the Android
+account still follows the application's destructive local cleanup policy.
+
 ## Inspect one contact's synchronization
 
 Open a saved contact, then choose **Synchronization details** in its overflow

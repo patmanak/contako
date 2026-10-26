@@ -1,5 +1,21 @@
 # User-interface contracts
 
+## Deleted-contact recovery
+
+Sync MUST expose retained local work when an original Proton contact was deleted.
+Inspection MUST remain local and read-only. The named confirmation for keeping a
+draft, creating a new contact or discarding local edits MUST explain the scope;
+no choice is preselected. Draft editing MUST use the existing field validations
+while saving only independent local content, with an explicit local-only label.
+
+The view MUST distinguish unverified absence, review, queued choice, unresolved
+cleanup, saved draft and locally prepared recreation. It MUST NOT call a queued
+CREATE a confirmed Proton contact. New native edits, reappearing source identities,
+unsafe Android-only data and unresolved groups MUST have explanations without
+technical identifiers or raw errors. Drafts MUST remain discoverable from Sync
+and normal sign-out MUST direct the user to their review rather than promise
+that another synchronization will upload a local-only draft.
+
 ## Contact synchronization details
 
 A saved contact MUST offer an on-demand synchronization panel in its overflow

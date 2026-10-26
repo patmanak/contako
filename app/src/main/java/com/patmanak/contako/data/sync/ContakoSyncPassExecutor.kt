@@ -37,6 +37,7 @@ internal enum class SyncPassStage {
     FULL_REPAIR_FINALIZATION,
     COMPLETE,
     TARGETED_RECOVERY,
+    REMOTE_DELETION_RECOVERY,
 }
 
 internal fun interface SyncPassStageObserver {
@@ -96,6 +97,7 @@ internal class ContakoSyncPassExecutor(
     private val onPassStarted: (com.patmanak.contako.domain.sync.SyncPassRequest) -> Unit = {},
     private val onGroupCatalogAvailability: (Boolean) -> Unit = {},
     private val targetedRecovery: TargetedContactRecovery? = null,
+    private val deletedContactRecovery: DeletedContactRecoveryPhase? = null,
 ) : SyncPassExecutor, com.patmanak.contako.domain.sync.SyncPassCompletionDetailsSource {
     override var completionCause: com.patmanak.contako.domain.sync.SyncCompletionCause? = null
         private set
@@ -188,6 +190,22 @@ internal class ContakoSyncPassExecutor(
     private fun observe(stage: SyncPassStage) {
         // Diagnostics must never be able to change synchronization behavior.
         runCatching { stageObserver.onStage(stage) }
+    }
+
+    private suspend fun recoverDeletedContacts(isCancelled: () -> Boolean): SyncPassOutcome? {
+        val recovery = deletedContactRecovery ?: return null
+        if (isCancelled()) return SyncPassOutcome.CANCELLED
+        observe(SyncPassStage.REMOTE_DELETION_RECOVERY)
+        return when (val result = recovery.run(account, isCancelled)) {
+            SyncPassOutcome.SUCCESS -> null
+            SyncPassOutcome.ACTION_REQUIRED, SyncPassOutcome.RETRY_WAITING -> {
+                independentOutcome = combineTerminalOutcomes(independentOutcome, result)
+                if (result == SyncPassOutcome.ACTION_REQUIRED && completionCause == null)
+                    completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.CONFLICT
+                null
+            }
+            else -> result
+        }
     }
 
     private suspend fun checkAndroidPreflight(account: AccountScope, cancelled: () -> Boolean): AndroidInteroperabilityPreflightResult =
@@ -376,6 +394,7 @@ internal class ContakoSyncPassExecutor(
             RemoteContactStageResult.LocalPersistenceFailure -> return persistenceFailure(remoteStage.lastExceptionCategory)
         }
         if (cancelled()) return SyncPassOutcome.CANCELLED
+        recoverDeletedContacts(::cancelled)?.let { return it }
         if (!repair.progress.completed(FullRepairPhase.REMOTE_ENUMERATION) &&
             !repair.checkpoint(FullRepairPhase.REMOTE_ENUMERATION, 1, 1)
         ) return if (cancelled()) SyncPassOutcome.CANCELLED else SyncPassOutcome.FAILED
@@ -661,6 +680,7 @@ internal class ContakoSyncPassExecutor(
             RemoteContactStageResult.LocalPersistenceFailure -> return persistenceFailure(remoteStage.lastExceptionCategory)
         }
         if (request.isAccountCancellationRequested()) return SyncPassOutcome.CANCELLED
+        recoverDeletedContacts(request::isAccountCancellationRequested)?.let { return it }
         observe(SyncPassStage.OUTBOX_DRAIN)
         val drained = drainImmediateProgress(request::isAccountCancellationRequested)
         val drainOutcome = drainOutcome(drained)

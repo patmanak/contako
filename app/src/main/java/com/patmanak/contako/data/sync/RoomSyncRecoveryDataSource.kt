@@ -40,6 +40,22 @@ internal class RoomSyncRecoveryDataSource(
     private val conflicts = com.patmanak.contako.data.local.RoomContactConflictStore(database)
     private val targeted = com.patmanak.contako.data.local.RoomTargetedRecoveryStore(database)
     private val contactDetails = com.patmanak.contako.data.local.RoomContactSyncDetailStore(database)
+    private val deletionRecovery = com.patmanak.contako.data.local.RoomDeletionRecoveryStore(database)
+
+    override fun observeDeletionRecoveries(accountId: String) = deletionRecovery.observe(boundAccount(accountId).value)
+    override suspend fun loadDeletionRecovery(accountId: String, contactId: String) =
+        deletionRecovery.detail(boundAccount(accountId).value, contactId)
+    override suspend fun chooseDeletionRecovery(accountId: String,
+        expected: com.patmanak.contako.domain.sync.DeletionRecoverySummary,
+        choice: com.patmanak.contako.domain.sync.DeletionRecoveryChoice): Boolean {
+        val queued = deletionRecovery.queue(boundAccount(accountId).value, expected, choice)
+        if (queued) runner.request(SyncTrigger.MUTATION_COMMITTED, SyncScope.INCREMENTAL)
+        return queued
+    }
+    override suspend fun saveDeletionDraft(accountId: String,
+        expected: com.patmanak.contako.domain.sync.DeletionRecoverySummary,
+        contact: com.patmanak.contako.domain.model.CanonicalContact): Boolean =
+        deletionRecovery.saveDraft(boundAccount(accountId).value, expected, contact)
 
     override fun observeContactSyncDetail(accountId: String, contactId: String) =
         contactDetails.observe(boundAccount(accountId).value, contactId)

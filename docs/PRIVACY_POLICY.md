@@ -1,6 +1,6 @@
 # Contako Privacy Policy
 
-Effective date: 18 October 2026.
+Effective date: 26 October 2026.
 
 This policy applies to **Contako**, the Android contact-management and
 synchronization application (`com.patmanak.contako`), developed and maintained
@@ -18,6 +18,9 @@ processes the following data to provide that functionality:
   keeps a local copy for offline use, and synchronizes supported edits and
   deletions between Contako, Proton and its Android contact account. Additional
   unsupported contact fields may be retained to preserve existing data.
+  If a Proton contact is deleted while local edits remain, Contako can retain
+  those edits in a local recovery draft. Saving or editing that draft does not
+  send it to Proton; an explicit recreation queues a distinct contact.
 - **Authentication and session data:** your Proton account identifier, the
   credentials or verification codes you enter, authentication proofs, session
   tokens and cryptographic key material needed to sign in and access your
@@ -107,6 +110,9 @@ exposure but cannot guarantee security on a compromised device.
 
 Local contacts and pending changes are retained while your Contako session is
 in use. Signing out removes the scoped local data and Contako's Android copies.
+Recovery drafts have no automatic expiry and are not remote backups. Retained
+recovery content and synchronization evidence remain in app-private storage
+until explicitly discarded or removed through scoped account/data cleanup.
 Normal sign-out checks for pending edits; explicitly choosing to abandon them
 discards unsynchronized local work. Removing the Contako Android account also
 removes its scoped local data.

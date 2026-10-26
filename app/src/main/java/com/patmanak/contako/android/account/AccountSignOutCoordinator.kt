@@ -37,6 +37,7 @@ internal class AccountSignOutCoordinator(
     private val noAndroidRemoval: suspend (discardPendingChanges: Boolean) -> Boolean = { false },
     private val hasIncompleteRemoval: suspend () -> Boolean = { false },
     private val lifecycleAdmission: AccountLifecycleAdmission = AccountLifecycleAdmission(),
+    private val hasRetainedDrafts: suspend () -> Boolean = { false },
 ) {
     suspend fun pendingCount(): Int = pendingMutations.count(accountScope)
     suspend fun requiresRecovery(): Boolean = hasIncompleteRemoval()
@@ -53,6 +54,12 @@ internal class AccountSignOutCoordinator(
         }
         if (pending > 0 && choice == SignOutChoice.CONFIRM) return SignOutResult.PendingChanges
         if (choice == SignOutChoice.SYNC_NOW) {
+            // A local recovery draft is intentionally not uploadable. Repeated synchronization
+            // cannot resolve the owner's required choice and MUST NOT purge it as a side effect.
+            val retained = try { hasRetainedDrafts() } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) { return SignOutResult.PendingChanges }
+            if (retained) return SignOutResult.PendingChanges
             runner.request(SyncTrigger.MANUAL)
             runner.awaitIdle()
             val remaining = try { pendingCount() } catch (cancelled: CancellationException) {
