@@ -90,6 +90,8 @@ enum class RepairStartResult { CONFIRMATION_REQUIRED, STARTED, RESUMED }
 
 /** Presentation-neutral recovery port implemented by the synchronization data adapter. */
 interface SyncRecoveryDataSource {
+    /** Observes one committed contact and retained deletion intent through local reads only. */
+    fun observeContactSyncDetail(accountId: String, contactId: String): Flow<ContactSyncDetail?> = flowOf(null)
     suspend fun previewTargetedRecovery(accountId: String, kind: TargetedRecoveryKind,
         targetId: String): TargetedRecoveryPreview? = null
     suspend fun requestTargetedRecovery(accountId: String,

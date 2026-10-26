@@ -14,6 +14,7 @@ internal class RoomMutationExecutionStore(
     private val database: ContakoDatabase,
     private val existence: com.patmanak.contako.data.gateway.ProtonContactExistenceGateway? = null,
     private val recoveryGeneration: () -> Long = { 0 },
+    private val evidenceClock: () -> Long = System::currentTimeMillis,
 ) : MutationExecutionStore {
     private val store = RoomOutboxStore(database)
     private val recoveryLock = Mutex()
@@ -178,7 +179,16 @@ internal class RoomMutationExecutionStore(
             }
         }
         val acknowledged = entity(command) ?: return@withTransaction false
-        store.finishAcknowledged(acknowledged)
+        val finished = store.finishAcknowledged(acknowledged)
+        if (finished && stored != null && acknowledgement.remoteIdentity != null &&
+            command.operation != com.patmanak.contako.data.sync.RemoteMutationOperation.ASSIGNMENTS) {
+            val kind = if (command.operation == com.patmanak.contako.data.sync.RemoteMutationOperation.DELETE)
+                com.patmanak.contako.domain.sync.ContactSyncEvidenceKind.CONFIRMED_ABSENCE
+                else com.patmanak.contako.domain.sync.ContactSyncEvidenceKind.WRITE_ACKNOWLEDGEMENT
+            RoomContactSyncEvidenceStore(database).recordProton(command.accountId, command.aggregateId, command.revision,
+                acknowledgement.remoteIdentity, acknowledgement.remoteVersion, kind, evidenceClock())
+        }
+        finished
     }
 
     override suspend fun supersedeAfterRemoteWinner(command: DurableMutationCommand): Boolean {

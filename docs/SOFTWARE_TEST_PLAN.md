@@ -1,5 +1,22 @@
 # Software integration test plan
 
+## Contact confirmation details
+
+Exercise the metadata-only one-contact read model against isolated Room with
+foreign-owner canaries. Verify legacy unknown state, revision/context changes,
+independent Proton conflict and Android proof, current issues, retained deletion
+intent, timestamps only from proof boundaries and cleanup. Check every migration
+to the current schema without inventing evidence for old contacts. Repeated
+observation MUST leave contact, outbox, receipts and proof rows unchanged.
+
+Use the production acknowledgement/readback transactions with controlled peers:
+successful complete read/write/deletion records the exact revision/context;
+rejection, cancellation and stale callbacks do not create current confirmation.
+Include proof-insert failure rollback and a missing/excluded photo receipt.
+Compose tests MUST distinguish version/time/peer sections, preserve read-only
+behavior on restoration, and keep refresh explicit. Controlled provider seams
+and Compose rendering do not qualify real Proton or an OEM photo transformation.
+
 ## Durable targeted recovery
 
 Exercise request persistence/reopening, source generations, transaction rollback,

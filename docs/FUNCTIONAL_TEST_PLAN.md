@@ -135,6 +135,32 @@ otherwise, apply the common setup, exact field comparison and cleanup above.
 | FT-25 | Rich contact with Call/Message/Email actions, normal and narrow screen, long locale labels and large text. | Three actions share a row when measured labels fit; deliberate large-text reflow allowed; primary badges align with values. |
 | FT-26 | On ordinary and diagnostic variants, generate/export/dismiss diagnostics after manual/native/local-change triggers and an authorized failure; rotate more than 128 events, restart, clear history and exercise picker cancel/storage error. | Schema 3 includes UTC/process-relative times, trigger/disposition, failure stage/phase and known field category, broad Android-copy backlog and sync reason. The latest detailed failure survives rotation and subsequent generic banners; process restarts are marked. No values/credentials/private IDs/raw errors/authentication traces; unknown fields remain unknown. Journal storage failure cannot change sync behavior; failed clearing is visible and never claims durable deletion. Clearing history/dismissing the report leaves exported documents intact. |
 
+## Per-contact confirmation evidence
+
+From a saved contact and a named Sync contact issue, open/close synchronization
+details repeatedly, rotate and return. Compare the exact canonical revision,
+payload and obligations before/after. Consultation MUST issue no remote GET,
+provider query, mutation, acknowledgement or recovery request. Refresh MUST be
+an explicit ordinary request through the same account runner. A retained deleted
+contact MUST show its deletion summary without recreating a directory entry.
+
+Compare Contako saving, Proton confirmation and Android verification separately:
+an offline local note makes older Proton proof historical/pending; an independent
+Proton conflict MUST NOT invalidate a still-current Android readback. Existing
+legacy contacts MUST remain unknown when no sufficient proof exists. An ordinary
+unchanged refresh need not manufacture a new proof or fetch all legacy cards.
+Advance the provider epoch and verify that old Android evidence no longer
+confirms the current context, without invalidating unrelated Proton evidence.
+
+Include a canonical photo whose bytes are unavailable and hence omitted by the
+mapper: a values-only readback MUST NOT confirm a complete Android copy. Compare
+receipt-backed transformations separately from original canonical bytes. Check
+local-only dates/phonetics and local labels on otherwise remote values without
+calling them upload failures. Pending email-group assignments MUST stay separate
+from contact-field confirmation. Owner cleanup MUST remove all panel identity
+and reject a delayed old-owner observation. Exercise scrolling at 200% and keep
+unexecuted TalkBack/physical fault cases explicit in the local result.
+
 ## Required regressions for each functional campaign
 
 Select rows from [the regression matrix](REGRESSION_MATRIX.md) according to changed

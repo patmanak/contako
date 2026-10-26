@@ -1,5 +1,15 @@
 # Unit test plan
 
+## Contact confirmation policy
+
+Cover proof precedence independently for each peer: pending intent, known issues,
+missing evidence, older revision/context and last known current confirmation.
+A global success or absence of an outbox row MUST NOT supply evidence. Display
+models MUST redact private identity/time metadata in string representations.
+View-model tests MUST prove read-only open/dismiss/reopen, reactive revision and
+deletion updates, explicit account-scoped refresh, cancelled observations and
+rejection of delayed/mismatched contact or owner results.
+
 ## Actionable issue presentation
 
 Issue presentation MUST cover every closed `SyncProblem` and scope, explicit

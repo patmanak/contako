@@ -21,6 +21,7 @@ import com.patmanak.contako.domain.model.GroupMembership
 /** Room transaction implementing remote adoption and the single D-024/D-006 conflict policy. */
 internal class RoomRemoteCanonicalReconciliationStore(
     private val database: ContakoDatabase,
+    private val evidenceClock: () -> Long = System::currentTimeMillis,
 ) : RemoteCanonicalReconciliationStore {
     override suspend fun identityRepairContacts(account: AccountScope): Set<RemoteContactId> = database.withTransaction {
         val result = mutableSetOf<RemoteContactId>()
@@ -122,8 +123,7 @@ internal class RoomRemoteCanonicalReconciliationStore(
                 dao.getUnboundCreateCandidates(account.value, uid).singleOrNull()
             }
         if (stored == null) {
-            replaceContact(
-                remote.copy(
+            val adopted = remote.copy(
                     accountId = account.value,
                     // A remote opaque ID can equal an unrelated local draft ID. Neither
                     // that coincidence nor a shared UID authorizes replacing the draft.
@@ -139,8 +139,9 @@ internal class RoomRemoteCanonicalReconciliationStore(
                     pendingMutationRevision = null,
                     conflictState = null,
                     isDeleted = false,
-                ),
-            )
+                )
+            replaceContact(adopted)
+            recordProtonEvidence(adopted, com.patmanak.contako.domain.sync.ContactSyncEvidenceKind.VERIFIED_READ)
             return
         }
 
@@ -210,6 +211,8 @@ internal class RoomRemoteCanonicalReconciliationStore(
                         outbox.revision,
                     ) == 1,
                 )
+                recordProtonEvidence(local.copy(pendingMutationRevision = null, conflictState = null, isDeleted = true),
+                    com.patmanak.contako.domain.sync.ContactSyncEvidenceKind.CONFIRMED_ABSENCE)
                 return
             }
             database.contactConflictDao().get(account.value, local.id)?.let {
@@ -228,6 +231,8 @@ internal class RoomRemoteCanonicalReconciliationStore(
             ),
         )
         database.contactDao().deleteValues(account.value, local.id)
+        recordProtonEvidence(local.copy(revision = local.revision + 1, pendingMutationRevision = null,
+            conflictState = null, isDeleted = true), com.patmanak.contako.domain.sync.ContactSyncEvidenceKind.CONFIRMED_ABSENCE)
     }
 
     /** @param modifiedAtEpochSeconds `null` for a public-directory inventory; see `D-096`. */
@@ -236,9 +241,8 @@ internal class RoomRemoteCanonicalReconciliationStore(
         remote: CanonicalContact,
         verified: VerifiedContactCard,
         modifiedAtEpochSeconds: Long?,
-    ) {
-        replaceContact(
-            retainLocalContactComplements(local, remote).copy(
+    ) = database.withTransaction {
+        val adopted = retainLocalContactComplements(local, remote).copy(
                 accountId = local.accountId,
                 id = local.id,
                 revision = local.revision + 1,
@@ -249,8 +253,15 @@ internal class RoomRemoteCanonicalReconciliationStore(
                 pendingMutationRevision = null,
                 conflictState = null,
                 isDeleted = false,
-            ),
-        )
+            )
+        replaceContact(adopted)
+        recordProtonEvidence(adopted, com.patmanak.contako.domain.sync.ContactSyncEvidenceKind.VERIFIED_READ)
+    }
+
+    private suspend fun recordProtonEvidence(contact: CanonicalContact, kind: com.patmanak.contako.domain.sync.ContactSyncEvidenceKind) {
+        val source = contact.remoteContactId ?: return
+        RoomContactSyncEvidenceStore(database).recordProton(contact.accountId, contact.id, contact.revision, source,
+            contact.remoteVersion, kind, evidenceClock())
     }
 
     internal suspend fun canAdoptRemote(contact: CanonicalContact): Boolean = pendingMembershipsFor(contact) != null

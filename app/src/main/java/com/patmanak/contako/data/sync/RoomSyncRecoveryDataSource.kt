@@ -39,6 +39,10 @@ internal class RoomSyncRecoveryDataSource(
     private val hydrationDao = database.remoteHydrationObligationDao()
     private val conflicts = com.patmanak.contako.data.local.RoomContactConflictStore(database)
     private val targeted = com.patmanak.contako.data.local.RoomTargetedRecoveryStore(database)
+    private val contactDetails = com.patmanak.contako.data.local.RoomContactSyncDetailStore(database)
+
+    override fun observeContactSyncDetail(accountId: String, contactId: String) =
+        contactDetails.observe(boundAccount(accountId).value, contactId)
 
     override suspend fun previewTargetedRecovery(accountId: String,
         kind: com.patmanak.contako.domain.sync.TargetedRecoveryKind, targetId: String) =

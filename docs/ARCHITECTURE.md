@@ -1,5 +1,27 @@
 # Architecture
 
+## Contact confirmation evidence
+
+The local contact detail read model MUST query one owner/contact partition and
+observe local invalidation only. It MUST NOT fetch a remote card, scan the system
+provider, write an acknowledgement or create a synchronization request merely
+because it is observed.
+
+Per-peer confirmation metadata MUST be recorded at verified Proton adoption,
+durable write/absence acknowledgement, or a guarded Android readback/deletion
+completion. It retains the covered local revision, proof kind and known local
+observation time; Android also binds the provider/source and receipt context.
+Existing legacy records MUST NOT receive fabricated confirmation timestamps.
+Editing dates, global last success and an opaque remote version are insufficient
+to establish confirmation. Current obligations, conflicts and context changes
+MUST prevent older evidence from confirming the current intention.
+
+The metadata MUST NOT duplicate contact payloads, become an authorization to
+write, enter diagnostics/notifications, or survive account cleanup. Contact proof
+does not confirm independent email-group assignments. Android proof covers its
+representable projection, not all canonical fields or identical original image
+bytes. See [Synchronization](SYNCHRONIZATION.md) and [interface](DESIGN.md).
+
 ## Targeted recovery metadata
 
 Targeted contact recovery is a durable request model, separate from the contact

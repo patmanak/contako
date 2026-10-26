@@ -62,6 +62,7 @@ class FoundationI18nContractTest {
             "TargetedRecoveryDialog.kt" to setOf(
                 "TargetedRecoveryPanelState(REDACTED, loading=\$loading, submitting=\$submitting)",
             ),
+            "ContactSyncDetailDialog.kt" to setOf("ContactSyncPanelState(REDACTED)"),
         )
 
         allowedLiterals.forEach { (name, allowed) ->
@@ -215,6 +216,7 @@ class FoundationI18nContractTest {
     fun translationsDoNotSilentlyReuseEnglishCopy() {
         val source = catalog(projectFile("src/main/res/values/strings.xml"))
         val identicalEnglishAllowlist = setOf(
+            "contact_sync_local", "contact_sync_proton", "contact_sync_android",
             "app_name",
             "auth_welcome_title",
             "about_version",

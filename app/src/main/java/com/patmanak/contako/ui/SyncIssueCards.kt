@@ -192,6 +192,12 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
             }))
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Import-only remote targets have no committed local contact to inspect yet.
+            if (item.targetId != null && item.advice.scope in setOf(SyncIssueScope.CONTACT, SyncIssueScope.ANDROID_COPY)) {
+                TextButton(onClick = { viewModel.openContactSyncDetail(item.targetId) }) {
+                    Text(stringResource(R.string.contact_sync_title))
+                }
+            }
             // Diagnostic/sign-in advice must not remove the original scoped recovery path.
             // Queueing a fresh preview still revalidates its source and retained retry budget.
             if (targetedKind != null && item.targetId != null && !targetIsPrimary &&

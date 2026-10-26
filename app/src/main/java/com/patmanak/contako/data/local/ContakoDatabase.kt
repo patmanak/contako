@@ -10,6 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         ContactEntity::class,
+        ContactSyncEvidenceEntity::class,
         RemoteHydrationObligationEntity::class,
         TargetedRecoveryRequestEntity::class,
         ContactConflictEntity::class,
@@ -43,11 +44,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AndroidPhotoProjectionReceiptEntity::class,
         AndroidContactIssueEntity::class,
     ],
-    version = 23,
+    version = 24,
     exportSchema = true,
 )
 internal abstract class ContakoDatabase : RoomDatabase() {
     abstract fun contactDao(): ContactDao
+    abstract fun contactSyncEvidenceDao(): ContactSyncEvidenceDao
     abstract fun remoteHydrationObligationDao(): RemoteHydrationObligationDao
     abstract fun targetedRecoveryRequestDao(): TargetedRecoveryRequestDao
     abstract fun contactConflictDao(): ContactConflictDao
@@ -92,8 +94,27 @@ internal abstract class ContakoDatabase : RoomDatabase() {
                     MIGRATION_20_21,
                     MIGRATION_21_22,
                     MIGRATION_22_23,
+                    MIGRATION_23_24,
                 )
                 .build()
+
+        val MIGRATION_23_24: Migration = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS contact_sync_evidence (
+                        account_id TEXT NOT NULL,contact_id TEXT NOT NULL,peer TEXT NOT NULL,
+                        canonical_revision INTEGER NOT NULL,confirmed_at INTEGER NOT NULL,kind TEXT NOT NULL,
+                        source_identity TEXT,source_version TEXT,provider_epoch INTEGER,android_account_name TEXT,
+                        raw_contact_locator INTEGER,ledger_revision INTEGER,canonical_fingerprint TEXT,baseline_fingerprint TEXT,
+                        membership_revision INTEGER,membership_fingerprint TEXT,membership_baseline_fingerprint TEXT,
+                        membership_baseline_integrity TEXT,preferred_email_id TEXT,photo_receipt_key TEXT,
+                        PRIMARY KEY(account_id,contact_id,peer),
+                        FOREIGN KEY(account_id,contact_id) REFERENCES contacts(account_id,id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+            }
+        }
 
         val MIGRATION_22_23: Migration = object : Migration(22, 23) {
             override fun migrate(db: SupportSQLiteDatabase) {

@@ -1,5 +1,26 @@
 # User guide and FAQ
 
+## Inspect one contact's synchronization
+
+Open a saved contact, then choose **Synchronization details** in its overflow
+menu. Identified contact and Android-copy issues in Sync also offer this action,
+including a retained summary for a pending deletion. Opening or closing the
+panel reads local records only; it does not contact Proton or the system provider.
+
+The panel separates what is saved in Contako, the last known Proton confirmation
+and Android's last verified copy. A confirmation identifies the local version
+it covers, its source and its time when known. An earlier version or Android
+context is historical. Existing records without sufficient evidence show an
+unknown confirmation rather than a date inferred from editing or account sync.
+A last confirmation does not rule out newer changes on Proton or in Android.
+
+Proton confirmation covers supported contact fields, not independent email-group
+assignments. Android verification covers its representable subset and supported
+normalizations, not an identical copy of every Contako field. Fields retained
+only locally are not synchronization errors. **Refresh synchronization** explicitly
+requests an ordinary pass through the existing engine; viewing the panel never
+starts that work implicitly.
+
 ## Getting your contacts ready
 
 The first import opens an overview that can be closed at any time. **View my

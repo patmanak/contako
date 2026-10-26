@@ -31,6 +31,15 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
 
 ## Interface and runtime
 
+- Contact confirmation details retain per-contact proof only from explicit
+  verification/acknowledgement boundaries. Earlier contacts may show unknown
+  confirmation until a new qualifying observation occurs; ordinary unchanged
+  sync MUST NOT fetch every full card merely to populate these dates. Proof
+  times are local observation times, not server edit timestamps or live peer
+  equality. Contact evidence does not confirm independent email-group writes.
+  Real fault/physical accessibility qualification remains distinct from the
+  controlled Room/provider and interface regressions.
+
 - The import-availability overview has deterministic state coverage and retained
   Room/Compose integration tests. Physical first-import navigation, recreation,
   large-font and accessibility behavior still require separate qualification.

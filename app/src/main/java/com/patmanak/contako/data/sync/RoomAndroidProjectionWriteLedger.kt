@@ -15,6 +15,7 @@ import com.patmanak.contako.data.android.provider.AndroidUnclaimedDataRowAuthori
 import com.patmanak.contako.data.local.AndroidGroupMembershipBaselineEntity
 import com.patmanak.contako.data.local.AndroidProjectionBaselineEntity
 import com.patmanak.contako.data.local.ContakoDatabase
+import com.patmanak.contako.data.local.RoomContactSyncEvidenceStore
 import com.patmanak.contako.data.local.toDomain
 
 internal sealed interface AndroidProjectionWriteLedgerResult {
@@ -206,6 +207,18 @@ internal class RoomAndroidProjectionWriteLedger(
             AndroidGroupMembershipSnapshotBinaryCodec.integrityFingerprint(encodedMembership).sha256Hex,
             encodedMembership,
         ))
+        // Confirmation metadata belongs to this verified commit, never to CLEAN traversal or
+        // opening the detail panel. The evidence store rechecks the exact durable context.
+        RoomContactSyncEvidenceStore(database).recordAndroidReadback(
+            accountId = context.account.value,
+            contactId = canonicalContactId,
+            canonicalRevision = expectedCanonicalRevision,
+            providerEpoch = context.providerEpoch,
+            sourceIdentity = ledger.sourceIdentity,
+            confirmedAtEpochMillis = System.currentTimeMillis(),
+            expectedAndroidAccountName = context.androidAccountName,
+            expectedRawContactLocator = ledger.rawContactLocator,
+        )
         AndroidProjectionWriteLedgerResult.Applied
     }
 

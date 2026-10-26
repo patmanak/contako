@@ -2,6 +2,17 @@
 
 Features and improvements by version.
 
+## 0.15.0
+
+- Add on-demand synchronization details for one contact, including retained
+  deletion intent, from its detail menu or an identified synchronization issue.
+- Separate local saving, the last known Proton confirmation and Android copy
+  verification. Show the covered local version, evidence source and known time;
+  older proofs and missing historical dates remain explicit.
+- Keep consultation local and read-only. Refresh is an explicit request through
+  the shared synchronization engine; local-only fields and independent group
+  assignments are distinguished from failed contact delivery.
+
 ## 0.14.0
 
 - Keep Android-copy recovery unresolved until deletion is proven, and retain the

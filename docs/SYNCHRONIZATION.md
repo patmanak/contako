@@ -6,6 +6,17 @@ Every foreground/background/system entry point MUST use one account-scoped engin
 
 ## Ordered work
 
+Contact-level proof metadata MUST be committed at a complete verified remote
+adoption, exact-revision write acknowledgement, confirmed absence, or verified
+Android completion. It MUST NOT be inferred from last account success, public
+inventory equality, a remote version token, CLEAN alone or mere visual presence.
+The per-contact read model observes those local records without contacting any
+peer. New revisions, outstanding intent and provider/source changes limit the
+scope of previous proof; its date is a local observation marker, never an input
+to conflict winner selection. Email-group confirmation remains independent.
+
+### Ordinary pass
+
 An ordinary pass checks prerequisites and session generation, ingests owned Android changes,
 reads a bounded remote index, reconciles remote changes and durable local intent,
 drains eligible uploads, then converges Android projection and records outcomes.

@@ -860,6 +860,8 @@ internal interface AndroidProjectionLedgerDao {
 
 @Dao
 internal interface AccountRemovalDao {
+    @Query("DELETE FROM contact_sync_evidence WHERE account_id=:accountId")
+    suspend fun deleteContactSyncEvidence(accountId: String)
     @Query("DELETE FROM targeted_recovery_requests WHERE account_id=:accountId")
     suspend fun deleteTargetedRecovery(accountId: String)
     @Query("DELETE FROM remote_hydration_obligations WHERE account_id = :accountId")
@@ -891,6 +893,7 @@ internal interface AccountRemovalDao {
     @Transaction
     suspend fun deleteAccount(accountId: String) {
         require(accountId.isNotBlank())
+        deleteContactSyncEvidence(accountId)
         deleteTargetedRecovery(accountId)
         deleteOutbox(accountId)
         deleteHydrationObligations(accountId)

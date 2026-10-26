@@ -208,6 +208,8 @@ fun ContakoApp(
     }
     val conflictPanel by viewModel.conflictPanel.collectAsState()
     val targetedPanel by viewModel.targetedRecoveryPanel.collectAsState()
+    val contactSyncPanel by viewModel.contactSyncPanel.collectAsState()
+    if (contactSyncPanel.contactId != null) ContactSyncDetailDialog(contactSyncPanel, state, viewModel)
     if (targetedPanel.kind != null) TargetedRecoveryDialog(targetedPanel, viewModel)
     if (conflictPanel.contactId != null) ContactConflictDialog(conflictPanel, viewModel)
     var requestSearchFocus by remember(state.navigation.destination) { mutableStateOf(false) }
@@ -566,6 +568,10 @@ private fun ContactDetailAppBarActions(contact: CanonicalContact, viewModel: Con
         Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.contact_more_actions))
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.contact_sync_title)) },
+            onClick = { expanded = false; viewModel.openContactSyncDetail(contact.id) },
+        )
         DropdownMenuItem(
             text = { Text(stringResource(R.string.action_delete)) },
             leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },

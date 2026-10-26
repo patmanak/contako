@@ -38,7 +38,7 @@ internal fun retainLocalContactComplements(local: CanonicalContact, remote: Cano
 private fun ContactValue.sameComplementTarget(other: ContactValue): Boolean =
     kind == other.kind && value == other.value && components == other.components
 
-private fun ContactValue.hasLocalOnlyLabel(): Boolean {
+internal fun ContactValue.hasLocalOnlyLabel(): Boolean {
     val locallyEstablished = metadata[LOCAL_LABEL_METADATA] == "true" ||
         !metadata["androidSemanticType"].isNullOrBlank() ||
         (preservationKey == null && metadata["vcardTypeTokens"].isNullOrBlank())

@@ -1,5 +1,22 @@
 # User-interface contracts
 
+## Contact synchronization details
+
+A saved contact MUST offer an on-demand synchronization panel in its overflow
+menu. Current contact/Android issues MUST also permit inspection of their local
+target, including retained deletion summaries. Unimported remote targets with no
+canonical contact retain their separate import-recovery actions.
+
+The scrollable panel MUST distinguish the committed local version, last known
+Proton evidence and last known Android evidence. Proof source, covered version
+and known time MUST remain distinct from editing dates and global success. Text
+MUST explain unknown or historical evidence and representation limits without
+using color alone. Refresh and review of issues MUST be explicit actions; merely
+opening, dismissing or restoring the panel MUST NOT start synchronization or
+read a peer. Account cleanup MUST cancel observations and erase panel identity.
+
+## Shared synchronization presentation
+
 Synchronization issues MUST share one closed cause-to-action presentation
 policy. Scope and known impact MUST remain visible, independent issues MUST NOT
 be hidden by the account banner, and a generic failure MUST NOT acquire a guessed

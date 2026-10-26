@@ -343,7 +343,7 @@ class ProjectInvariantTest {
         assertTrue(extractionRules.contains("<cloud-backup"))
         assertTrue(extractionRules.contains("<device-transfer>"))
 
-        assertTrue(databaseSource.contains("version = 23"))
+        assertTrue(databaseSource.contains("version = 24"))
         assertTrue(databaseSource.contains("exportSchema = true"))
         assertFalse(databaseSource.contains("fallbackToDestructiveMigration"))
         listOf(
@@ -369,6 +369,7 @@ class ProjectInvariantTest {
             "MIGRATION_20_21",
             "MIGRATION_21_22",
             "MIGRATION_22_23",
+            "MIGRATION_23_24",
         )
             .forEach { migration -> assertTrue(databaseSource.contains(migration)) }
         assertTrue(schema.contains("\"version\": 16"))

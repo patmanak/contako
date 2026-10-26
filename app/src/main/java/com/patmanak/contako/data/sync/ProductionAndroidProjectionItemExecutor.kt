@@ -59,6 +59,7 @@ import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.data.local.AndroidProjectionLedgerEntity
 import com.patmanak.contako.data.local.AndroidProviderAccountMutationLocks
 import com.patmanak.contako.data.local.ContakoDatabase
+import com.patmanak.contako.data.local.RoomContactSyncEvidenceStore
 import com.patmanak.contako.data.local.MutationOperation
 import com.patmanak.contako.data.local.toDomain
 import kotlinx.coroutines.CancellationException
@@ -600,6 +601,18 @@ internal class ProductionAndroidProjectionItemExecutor(
             pendingProjectionFingerprint = null,
             observedAndroidFingerprint = null,
         )) == 1)
+        // Only the completed durable tombstone proves absence. The earlier Applied return
+        // while a delete is still pending MUST NOT manufacture a confirmation.
+        RoomContactSyncEvidenceStore(database).recordAndroidAbsence(
+            accountId = context.account.value,
+            contactId = canonical.id,
+            canonicalRevision = canonical.revision,
+            providerEpoch = context.providerEpoch,
+            sourceIdentity = expectedLedger.sourceIdentity,
+            confirmedAtEpochMillis = System.currentTimeMillis(),
+            expectedAndroidAccountName = context.androidAccountName,
+            expectedRawContactLocator = expectedLedger.rawContactLocator,
+        )
         AndroidBoundedPageResult.Applied
     }
 

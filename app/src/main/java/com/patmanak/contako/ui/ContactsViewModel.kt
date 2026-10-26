@@ -180,6 +180,39 @@ class ContactsViewModel(
     private val mutableTargetedRecoveryPanel = MutableStateFlow(TargetedRecoveryPanelState())
     val targetedRecoveryPanel: StateFlow<TargetedRecoveryPanelState> = mutableTargetedRecoveryPanel
     private var targetedRecoveryPanelGeneration = 0L
+    private val mutableContactSyncPanel = MutableStateFlow(ContactSyncPanelState())
+    val contactSyncPanel: StateFlow<ContactSyncPanelState> = mutableContactSyncPanel
+    private var contactSyncPanelGeneration = 0L
+    private var contactSyncObservation: kotlinx.coroutines.Job? = null
+
+    fun dismissContactSyncDetail() {
+        contactSyncPanelGeneration++
+        contactSyncObservation?.cancel()
+        contactSyncObservation = null
+        mutableContactSyncPanel.value = ContactSyncPanelState()
+    }
+
+    /** A local observation only. It neither requests synchronization nor acknowledges a problem. */
+    fun openContactSyncDetail(contactId: String) {
+        if (!acceptsMutation() || contactId.isBlank()) return
+        dismissContactSyncDetail()
+        val generation = contactSyncPanelGeneration
+        mutableContactSyncPanel.value = ContactSyncPanelState(contactId = contactId, loading = true)
+        contactSyncObservation = viewModelScope.launch {
+            try {
+                syncRecoveryDataSource.observeContactSyncDetail(accountId, contactId).collect { detail ->
+                    if (acceptsMutation() && generation == contactSyncPanelGeneration) {
+                        mutableContactSyncPanel.value = ContactSyncPanelState(contactId,
+                            detail?.takeIf { it.contactId == contactId }, failed = detail != null && detail.contactId != contactId)
+                    }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (acceptsMutation() && generation == contactSyncPanelGeneration)
+                    mutableContactSyncPanel.value = ContactSyncPanelState(contactId = contactId, failed = true)
+            }
+        }
+    }
 
     fun dismissTargetedRecovery() {
         if (mutableTargetedRecoveryPanel.value.submitting) return
@@ -387,6 +420,7 @@ class ContactsViewModel(
     }
 
     private fun clearAccountDrafts() {
+        dismissContactSyncDetail()
         contactEditor.value = null
         groupEditor.value = null
         pendingContactDeletion.value = null
