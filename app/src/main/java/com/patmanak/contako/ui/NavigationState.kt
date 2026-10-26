@@ -109,6 +109,12 @@ class NavigationStateStore(private val savedState: SavedStateHandle = SavedState
         it.copy(scrollIndex = index.coerceAtLeast(0), scrollOffset = offset.coerceAtLeast(0))
     }
 
+    fun resetScroll(destination: RootDestination) {
+        state = updateDestination(destination) { it.copy(scrollIndex = 0, scrollOffset = 0,
+            reselectionRevision = it.reselectionRevision + 1) }
+        persist()
+    }
+
     fun back(): Boolean = when {
         state.secondary != null -> {
             closeSecondary()

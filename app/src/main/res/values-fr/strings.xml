@@ -500,4 +500,23 @@
     <string name="deletion_recovery_local_save">Enregistrer ne modifie que ce brouillon local, sans envoi à Proton. Supprimer un e-mail retire aussi les affectations de cette occurrence aux groupes conservés.</string>
     <string name="deletion_recovery_two_versions">Le brouillon sauvegardé et les nouvelles modifications du contact ou des groupes sont conservés séparément. Examinez les deux versions ; aucune fusion automatique n’a été faite.</string>
     <string name="deletion_recovery_signout">Des brouillons de récupération ou des modifications non résolues de contacts supprimés restent sur cet appareil. Se déconnecter en abandonnant les données locales les effacera. Examinez la récupération avant de vous déconnecter.</string>
+    <string name="directory_filter">Filtrer</string>
+    <string name="directory_filters_active">Filtres actifs</string>
+    <string name="directory_without_phone">Sans numéro de téléphone</string>
+    <string name="directory_without_email">Sans adresse email</string>
+    <string name="directory_local_only">Contient des données locales uniquement</string>
+    <string name="directory_local_only_description">Inclut des champs ou libellés non représentables dans Proton. Une attente d’envoi seule ne suffit pas.</string>
+    <string name="directory_recent_changes">Changements reçus ou saisis — 7 jours</string>
+    <string name="directory_recent_changes_description">Changements de champs de fiche observés sur cet appareil, et non dates de modification dans Proton. L’import initial, les tentatives répétées, les acquittements, les affectations aux groupes et les changements du catalogue de groupes sont exclus.</string>
+    <string name="directory_organizations">Entreprises</string>
+    <string name="directory_organizations_description">Au moins une entreprise sélectionnée doit correspondre. Les autres critères et la recherche doivent aussi correspondre.</string>
+    <string name="directory_organizations_empty">Aucune entreprise disponible</string>
+    <string name="directory_apply_filters">Appliquer</string>
+    <string name="directory_result_count">Contacts : %1$d</string>
+    <string name="directory_remove_filter">Retirer le filtre : %1$s</string>
+    <string name="directory_filtered_empty">Aucun contact ne correspond à ces critères</string>
+    <string name="directory_clear_filters">Effacer les filtres</string>
+    <string name="directory_loading">Chargement des contacts</string>
+    <string name="directory_read_failed">Impossible de lire les contacts sur cet appareil.</string>
+    <string name="directory_retry_read">Réessayer la lecture locale</string>
 </resources>

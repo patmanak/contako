@@ -1,5 +1,21 @@
 # User-interface contracts
 
+## Contact-directory filters
+
+Contacts MUST offer a sheet with a separate draft, explicit Apply and Cancel.
+Removable chips, count and list MUST reflect one result. Clearing criteria MUST
+preserve search text. A filtered-empty state MUST offer distinct reset actions;
+loading/failed local reads MUST NOT look like zero matches. Facets and actions
+MUST work at 200% text size, with lazy composition for large organization lists.
+Accessible descriptions MUST name removable criteria without announcing every
+search keystroke.
+
+Filters MUST affect only the directory, including its tablet pane. Detail and
+group-member resolution MUST use complete owned data. Preserve compatible scroll
+position on return; applying different criteria MAY reset to the beginning.
+State MUST stay in the owner-scoped ViewModel rather than persisted preferences
+or diagnostics. Fresh sessions/owner cleanup MUST clear criteria, drafts and facets.
+
 ## Deleted-contact recovery
 
 Sync MUST expose retained local work when an original Proton contact was deleted.

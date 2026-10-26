@@ -3,11 +3,26 @@ package com.patmanak.contako.domain.repository
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactGroup
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
+
+/** A local directory read, with observation dates separate from contact/conflict content. */
+data class ContactDirectorySnapshot(
+    val contacts: List<CanonicalContact> = emptyList(),
+    val contentChanges: Map<String, Long> = emptyMap(),
+) {
+    override fun toString() = "ContactDirectorySnapshot(REDACTED)"
+}
 
 interface ContactRepository {
     fun observeContacts(accountId: String): Flow<List<CanonicalContact>>
     fun observeGroups(accountId: String): Flow<List<ContactGroup>>
     fun observePendingMutationCount(accountId: String): Flow<Int>
+    fun observeContentChanges(accountId: String): Flow<Map<String, Long>> = flowOf(emptyMap())
+    fun observeDirectory(accountId: String): Flow<ContactDirectorySnapshot> =
+        combine(observeContacts(accountId), observeContentChanges(accountId)) { contacts, changes ->
+            ContactDirectorySnapshot(contacts, changes)
+        }
 
     suspend fun getContact(accountId: String, contactId: String): CanonicalContact?
     suspend fun saveContact(contact: CanonicalContact): SaveResult<CanonicalContact>

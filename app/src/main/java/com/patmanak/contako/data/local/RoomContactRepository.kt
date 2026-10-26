@@ -14,6 +14,7 @@ import com.patmanak.contako.domain.policy.PostalAddressPolicy
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
 import com.patmanak.contako.domain.repository.ContactEditBaseline
 import com.patmanak.contako.domain.repository.ContactRepository
+import com.patmanak.contako.domain.repository.ContactDirectorySnapshot
 import com.patmanak.contako.domain.repository.SaveResult
 import com.patmanak.contako.domain.repository.SaveValidationIssue
 import com.patmanak.contako.domain.sync.LocalWriteEvidenceFactory
@@ -74,6 +75,23 @@ internal class RoomContactRepository(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val checkpointHook: LocalMutationCheckpointHook = LocalMutationCheckpointHook.NONE,
 ) : ContactRepository {
+    override fun observeDirectory(accountId: String): Flow<ContactDirectorySnapshot> =
+        database.contactContentChangesDao().observeDirectory(accountId).map { rows ->
+            val collator = Collator.getInstance(Locale.getDefault())
+            ContactDirectorySnapshot(
+                contacts = rows.map { ContactWithValues(it.contact, it.values).toDomain() }
+                    .sortedWith { left, right -> collator.compare(left.resolvedDisplayName, right.resolvedDisplayName) },
+                contentChanges = rows.mapNotNull { row ->
+                    row.contentObservedAt?.let { row.contact.id to it }
+                }.toMap(),
+            )
+        }.flowOn(ioDispatcher)
+
+    override fun observeContentChanges(accountId: String): Flow<Map<String, Long>> =
+        database.contactContentChangesDao().observeActive(accountId).map { changes ->
+            changes.associate { it.contactId to it.observedAtEpochMillis }
+        }.flowOn(ioDispatcher)
+
     override fun observeContacts(accountId: String): Flow<List<CanonicalContact>> =
         database.contactDao().observeActive(accountId).map { contacts ->
             // Collator is mutable: keep one per emission, never shared across collectors.
@@ -284,6 +302,13 @@ internal class RoomContactRepository(
             )
         }
         dao.upsert(committed.toEntity())
+        val previous = existing?.toDomain()
+        if (previous == null || (previous.isDeleted && previous.revision == 0L) ||
+            !sameContactContent(previous, committed)) {
+            database.contactContentChangesDao().upsert(
+                ContactContentChangeEntity(committed.accountId, committed.id, now),
+            )
+        }
         checkpoint(LocalMutationCheckpoint.CONTACT_SAVE_AFTER_AGGREGATE)
         val previousValuesById = existing?.values.orEmpty().associateBy(ContactValueEntity::id)
         val changedValues = committed.values.map { it.toEntity(committed) }.filter { value ->

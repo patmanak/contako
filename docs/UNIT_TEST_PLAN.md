@@ -1,5 +1,14 @@
 # Unit test plan
 
+## Directory criteria
+
+Cover intersection with search, union of organizations, accent/case equivalence,
+all blank/nonblank occurrences and invalid-but-present phone/email values.
+Check shared local-only field/label provenance independently of pending delivery.
+Use a fixed clock for inclusive seven-day boundaries, unknown/future dates and
+clock rollback. Preserve multiplicity and original values; filters MUST NOT
+mutate contacts, enqueue work or read a peer.
+
 ## Performance evidence integrity
 
 Verify five warmups/thirty samples, nearest-rank P95, median and maximum with a

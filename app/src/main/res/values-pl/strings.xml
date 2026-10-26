@@ -507,4 +507,23 @@
     <string name="deletion_recovery_local_save">Zapis zmienia tylko ten lokalny szkic i niczego nie wysyła do Proton. Usunięcie adresu e-mail usuwa też zachowane przypisania tego wpisu do grup.</string>
     <string name="deletion_recovery_two_versions">Zapisany szkic oraz nowsze zmiany kontaktu lub grup pozostają zachowane. Przejrzyj je oddzielnie; nie zostały automatycznie scalone.</string>
     <string name="deletion_recovery_signout">Na tym urządzeniu pozostały szkice do odzyskania lub nierozstrzygnięte zmiany usuniętych kontaktów. Wylogowanie z odrzuceniem lokalnych danych je usunie. Przejrzyj odzyskiwanie przed wylogowaniem.</string>
+    <string name="directory_filter">Filtruj</string>
+    <string name="directory_filters_active">Filtry aktywne</string>
+    <string name="directory_without_phone">Bez numeru telefonu</string>
+    <string name="directory_without_email">Bez adresu email</string>
+    <string name="directory_local_only">Zawiera dane tylko lokalne</string>
+    <string name="directory_local_only_description">Obejmuje pola lub etykiety, których Proton nie obsługuje. Samo oczekiwanie na wysłanie nie wystarcza.</string>
+    <string name="directory_recent_changes">Odebrane lub wprowadzone zmiany — 7 dni</string>
+    <string name="directory_recent_changes_description">Zmiany pól kontaktu zaobserwowane na tym urządzeniu, a nie daty modyfikacji w Proton. Wyklucza import początkowy, ponowienia, potwierdzenia, przypisania do grup i zmiany katalogu grup.</string>
+    <string name="directory_organizations">Firmy</string>
+    <string name="directory_organizations_description">Musi pasować co najmniej jedna wybrana firma. Pozostałe kryteria i wyszukiwanie również muszą pasować.</string>
+    <string name="directory_organizations_empty">Brak dostępnych firm</string>
+    <string name="directory_apply_filters">Zastosuj</string>
+    <string name="directory_result_count">Kontakty: %1$d</string>
+    <string name="directory_remove_filter">Usuń filtr: %1$s</string>
+    <string name="directory_filtered_empty">Żaden kontakt nie spełnia tych kryteriów</string>
+    <string name="directory_clear_filters">Wyczyść filtry</string>
+    <string name="directory_loading">Wczytywanie kontaktów</string>
+    <string name="directory_read_failed">Nie udało się odczytać kontaktów na tym urządzeniu.</string>
+    <string name="directory_retry_read">Ponów odczyt lokalny</string>
 </resources>

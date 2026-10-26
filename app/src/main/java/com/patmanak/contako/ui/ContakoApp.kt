@@ -235,7 +235,7 @@ fun ContakoApp(
     BackHandler(
         enabled = state.navigation != NavigationState() || state.contactEditor != null ||
             state.groupEditor != null || state.showAccountMenu || state.pendingContactDeletion != null ||
-            state.pendingGroupDeletion != null || state.showUnsavedConfirmation,
+            state.pendingGroupDeletion != null || state.showUnsavedConfirmation || state.showDirectoryFilters,
     ) {
         viewModel.handleBack()
     }
@@ -280,12 +280,16 @@ fun ContakoApp(
                                     Icon(Icons.Default.Search, contentDescription = stringResource(R.string.directory_search))
                                 }
                             }
+                            if (directoryVisible && state.navigation.destination == RootDestination.CONTACTS) {
+                                DirectoryFilterAction(state.directoryFilter.isActive, viewModel::openDirectoryFilters)
+                            }
                             val selectedContact = state.navigation.current.selectedId
                                 ?.takeIf {
                                     state.navigation.secondary == null &&
                                         state.navigation.destination == RootDestination.CONTACTS
                                 }
-                                ?.let { id -> state.contacts.firstOrNull { it.id == id } }
+                                ?.let { id -> state.selectedContact?.takeIf { it.id == id }
+                                    ?: state.contacts.firstOrNull { it.id == id } }
                             val selectedGroup = state.navigation.current.selectedId
                                 ?.takeIf {
                                     state.navigation.secondary == null &&
@@ -405,6 +409,13 @@ fun ContakoApp(
         }
         }
     }
+    if (state.showDirectoryFilters) DirectoryFilterSheet(
+        draft = state.directoryFilterDraft,
+        organizations = state.organizationFacets,
+        onDraftChange = viewModel::updateDirectoryFilterDraft,
+        onApply = viewModel::applyDirectoryFilters,
+        onDismiss = viewModel::dismissDirectoryFilters,
+    )
     state.pendingContactDeletion?.let { contact ->
         NamedDeleteDialog(
             name = contact.resolvedDisplayName,
@@ -647,7 +658,9 @@ private fun CreationButton(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun ContactsDestination(state: ContactsUiState, viewModel: ContactsViewModel, expanded: Boolean) {
-    val selected = state.navigation.current.selectedId?.let { id -> state.contacts.firstOrNull { it.id == id } }
+    val selected = state.navigation.current.selectedId?.let { id ->
+        state.selectedContact?.takeIf { it.id == id } ?: state.contacts.firstOrNull { it.id == id }
+    }
     if (expanded) Row(Modifier.fillMaxSize()) {
         Box(Modifier.weight(0.44f)) { ContactsDirectory(state, viewModel) }
         HorizontalDivider(Modifier.width(1.dp).fillMaxSize())
@@ -658,7 +671,27 @@ private fun ContactsDestination(state: ContactsUiState, viewModel: ContactsViewM
 @Composable
 private fun ContactsDirectory(state: ContactsUiState, viewModel: ContactsViewModel) {
     Column(Modifier.fillMaxSize()) {
-        if (state.contacts.isEmpty()) {
+        if (!state.directoryLoading && !state.directoryReadFailed) DirectoryFilterSummary(
+            filter = state.directoryFilter,
+            organizations = state.organizationFacets,
+            resultCount = state.directoryContacts.size,
+            onFilterChange = viewModel::setDirectoryFilter,
+        )
+        if (state.directoryLoading || state.directoryReadFailed) {
+            DirectoryReadStatus(
+                failed = state.directoryReadFailed,
+                onRetry = viewModel::retryDirectoryRead,
+                modifier = Modifier.weight(1f),
+            )
+        } else if (state.directoryContacts.isEmpty() && (state.directoryFilter.isActive || state.query.isNotBlank())) {
+            FilteredDirectoryEmpty(
+                hasFilters = state.directoryFilter.isActive,
+                hasQuery = state.query.isNotBlank(),
+                onClearFilters = viewModel::clearDirectoryFilters,
+                onClearQuery = { viewModel.updateQuery("") },
+                modifier = Modifier.weight(1f),
+            )
+        } else if (state.directoryContacts.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f)) {
                 EmptyDirectory(
                     title = stringResource(if (state.query.isBlank()) R.string.contacts_empty_title else R.string.contacts_search_empty_title),
@@ -671,8 +704,8 @@ private fun ContactsDirectory(state: ContactsUiState, viewModel: ContactsViewMod
             }
         } else {
             val locale = LocalConfiguration.current.locales[0]
-            val index = remember(state.contacts, locale) {
-                DirectorySectionIndex.create(state.contacts, locale, CanonicalContact::resolvedDisplayName)
+            val index = remember(state.directoryContacts, locale) {
+                DirectorySectionIndex.create(state.directoryContacts, locale, CanonicalContact::resolvedDisplayName)
             }
             IndexedDirectory(
                 index = index,

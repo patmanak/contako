@@ -50,6 +50,18 @@ successful evidence or declaring an accepted limitation fixed.
 
 ## Cases
 
+For directory filters, use rich contacts with duplicate emails, secondary-email
+groups, multiple organizations, blank values, a nonblank invalid phone and a
+local date. Apply/cancel, remove criteria, combine search/organizations, clear
+filters without clearing search, open/back and rotate at normal/200% text.
+Compare exact identities/counts and original fields. A contact leaving criteria
+after an edit MUST keep its detail open; Sync MUST retain all issues and counts.
+Check offline/permission-denied use, explicit local read failure/retry and owner
+cleanup without a peer request caused by filtering. A fresh process MUST start
+without criteria. Compare first import, unchanged delayed upload/read and a real
+field change: only the last renews observation time. Group-only edits MUST NOT
+renew it. The date is local observation, never a claimed Proton modification date.
+
 For performance changes, follow the comparable [measurement protocol](QA.md#performance-measurements).
 Keep local Room/Compose evidence separate from these real-peer journeys:
 

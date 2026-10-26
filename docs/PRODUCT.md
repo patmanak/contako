@@ -15,6 +15,10 @@ product target; [known limitations](KNOWN_LIMITATIONS.md) describe current gaps.
   Other Android address books MUST NOT be adopted, merged or edited by Contako.
 - Cached browsing and local search MUST work offline. Creation, editing, deletion
   and per-email group assignments MUST persist intent before upload.
+- Contacts MUST support local filters for no phone/email, organizations, locally
+  retained fields/labels and observed field changes within seven days. Criteria
+  intersect search; selected organizations form a union. Filtering MUST NOT
+  change contacts, access peers or restrict Sync work, errors or counts.
 - Contact detail/editing MUST support repeated values, primary selection,
   structured/display names, photos/logos and the advanced fields in
   [the mapping contract](CONTACTS.md). Compatible edits MUST preserve unknown
@@ -81,7 +85,7 @@ a separate biometric/PIN app lock, FIDO login, an email client and synchronizati
 of unrelated address books are outside the target. Frequency/sort pickers,
 Android dynamic color and tablet-exclusive features are not requirements.
 
-Activity history, extra filters, batch operations, integrated news/help feeds and
+Activity history, additional filter families, batch operations, integrated news/help feeds and
 an in-app updater are not committed target features. Their mention in an older
 proposal MUST NOT be interpreted as implemented behavior or release scope.
 

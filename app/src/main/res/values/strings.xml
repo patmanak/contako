@@ -493,4 +493,23 @@
     <string name="deletion_recovery_local_save">Save changes updates only this local draft. It does not send edits to Proton. Removing an email also removes that occurrence’s retained group assignments.</string>
     <string name="deletion_recovery_two_versions">The saved draft and newer contact or group edits are both retained. Review them separately; they have not been merged automatically.</string>
     <string name="deletion_recovery_signout">Recovery drafts or unresolved deleted-contact edits remain on this device. Signing out and discarding local data will erase them. Review recovery before signing out.</string>
+    <string name="directory_filter">Filter</string>
+    <string name="directory_filters_active">Filters active</string>
+    <string name="directory_without_phone">Without a phone number</string>
+    <string name="directory_without_email">Without an email address</string>
+    <string name="directory_local_only">Contains local-only data</string>
+    <string name="directory_local_only_description">Includes fields or labels that Proton cannot represent. Pending uploads alone do not qualify.</string>
+    <string name="directory_recent_changes">Changes received or entered — 7 days</string>
+    <string name="directory_recent_changes_description">Contact field changes observed on this device, not modification times on Proton. Initial import, retries, acknowledgements, group assignments and group catalog changes are excluded.</string>
+    <string name="directory_organizations">Organizations</string>
+    <string name="directory_organizations_description">Match any selected organization. Other criteria and search must also match.</string>
+    <string name="directory_organizations_empty">No organizations available</string>
+    <string name="directory_apply_filters">Apply</string>
+    <string name="directory_result_count">Contacts: %1$d</string>
+    <string name="directory_remove_filter">Remove filter: %1$s</string>
+    <string name="directory_filtered_empty">No contacts match these criteria</string>
+    <string name="directory_clear_filters">Clear filters</string>
+    <string name="directory_loading">Loading contacts</string>
+    <string name="directory_read_failed">Contacts could not be read from this device.</string>
+    <string name="directory_retry_read">Retry local read</string>
 </resources>

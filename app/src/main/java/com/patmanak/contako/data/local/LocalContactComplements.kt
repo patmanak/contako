@@ -3,7 +3,7 @@ package com.patmanak.contako.data.local
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
-import java.util.Locale
+import com.patmanak.contako.domain.policy.ContactValueSupport
 
 /**
  * Retains only explicitly local-only data when adopting a verified Proton version.
@@ -38,13 +38,7 @@ internal fun retainLocalContactComplements(local: CanonicalContact, remote: Cano
 private fun ContactValue.sameComplementTarget(other: ContactValue): Boolean =
     kind == other.kind && value == other.value && components == other.components
 
-internal fun ContactValue.hasLocalOnlyLabel(): Boolean {
-    val locallyEstablished = metadata[LOCAL_LABEL_METADATA] == "true" ||
-        !metadata["androidSemanticType"].isNullOrBlank() ||
-        (preservationKey == null && metadata["vcardTypeTokens"].isNullOrBlank())
-    if (!locallyEstablished) return false
-    return hasUnsupportedGeneratedLabel()
-}
+internal fun ContactValue.hasLocalOnlyLabel(): Boolean = ContactValueSupport.hasLocalOnlyLabel(this)
 
 /** Called only at the durable local-edit boundary, never while adopting remote data. */
 internal fun markEditedLocalContactLabels(previous: CanonicalContact?, edited: CanonicalContact): CanonicalContact {
@@ -59,14 +53,7 @@ internal fun markEditedLocalContactLabels(previous: CanonicalContact?, edited: C
     })
 }
 
-private fun ContactValue.hasUnsupportedGeneratedLabel(): Boolean {
-    val type = label?.trim()?.takeIf(String::isNotEmpty)?.uppercase(Locale.ROOT) ?: return false
-    return when (kind) {
-        ContactValueKind.URL, ContactValueKind.RELATIONSHIP -> true
-        ContactValueKind.POSTAL_ADDRESS -> type !in setOf("HOME", "WORK", "OTHER")
-        else -> false
-    }
-}
+private fun ContactValue.hasUnsupportedGeneratedLabel(): Boolean = ContactValueSupport.hasUnsupportedGeneratedLabel(this)
 
 private val LOCAL_TYPE_METADATA = setOf("androidSemanticType", "androidCustomLabel")
 private const val LOCAL_LABEL_METADATA = "contakoLocalOnlyLabel"

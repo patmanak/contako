@@ -2,6 +2,17 @@
 
 Features and improvements by version.
 
+## 0.18.0
+
+- Add offline directory filters for missing phone/email, organizations, locally
+  retained data and field changes received or entered within seven days.
+- Combine filters with search, show removable criteria and result counts, and
+  keep open contact details and synchronization issues independent of filtering.
+- Record field-change observation times transactionally without inventing dates
+  for existing contacts or first imports; retain them across restarts.
+- Preserve criteria during navigation/rotation, clear them for a new session or
+  owner, and distinguish local read errors from no matches.
+
 ## 0.17.0
 
 - Reduce repeated locale-comparator construction when loading contact and group

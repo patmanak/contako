@@ -255,6 +255,20 @@ internal class RoomRemoteCanonicalReconciliationStore(
                 isDeleted = false,
             )
         replaceContact(adopted)
+        // An acknowledged full-card fingerprint already proves an unchanged readback, even
+        // when the codec materializes generated N/ORG/date forms absent from the local editor.
+        // Unknown legacy baselines cannot prove a new remote field change; establish the
+        // verified baseline first rather than invent an observation date during migration.
+        val knownFullBaseline = local.remoteVersion?.let {
+            it.startsWith("content-v3:") || it.startsWith("content-v1:")
+        } == true
+        val mayObserveChange = local.pendingMutationRevision != null ||
+            (knownFullBaseline && !verified.matchesBaseline(local.remoteVersion))
+        if (mayObserveChange && !sameContactContent(local, adopted)) {
+            database.contactContentChangesDao().upsert(
+                ContactContentChangeEntity(adopted.accountId, adopted.id, evidenceClock()),
+            )
+        }
         recordProtonEvidence(adopted, com.patmanak.contako.domain.sync.ContactSyncEvidenceKind.VERIFIED_READ)
     }
 

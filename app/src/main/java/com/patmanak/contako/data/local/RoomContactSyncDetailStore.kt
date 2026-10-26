@@ -3,6 +3,7 @@ package com.patmanak.contako.data.local
 import androidx.room.withTransaction
 import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
+import com.patmanak.contako.domain.policy.ContactValueSupport
 import com.patmanak.contako.domain.sync.*
 import kotlinx.coroutines.flow.map
 
@@ -37,9 +38,8 @@ internal class RoomContactSyncDetailStore(private val database: ContakoDatabase)
             val page = dao.localComplementMetadata(accountId, contactId, afterId)
             localOnlyCount += page.count { row ->
                 val kind = ContactValueKind.valueOf(row.kind)
-                kind in setOf(ContactValueKind.CUSTOM_DATE, ContactValueKind.PHONETIC_NAME) ||
-                    ContactValue("metadata-only", kind, "", row.label, 0,
-                        metadata = StringMapCodec.decode(row.metadataEncoding), preservationKey = row.preservationKey).hasLocalOnlyLabel()
+                ContactValueSupport.isLocalOnly(ContactValue("metadata-only", kind, "", row.label, 0,
+                    metadata = StringMapCodec.decode(row.metadataEncoding), preservationKey = row.preservationKey))
             }
             afterId = page.lastOrNull()?.id
         }

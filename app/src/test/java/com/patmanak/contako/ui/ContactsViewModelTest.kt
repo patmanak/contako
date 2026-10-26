@@ -9,6 +9,8 @@ import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.GroupMembership
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
+import com.patmanak.contako.domain.policy.DirectoryFilter
+import com.patmanak.contako.domain.repository.ContactDirectorySnapshot
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
 import com.patmanak.contako.domain.repository.ContactRepository
 import com.patmanak.contako.domain.repository.SaveResult
@@ -25,6 +27,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -38,8 +41,128 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ContactsViewModelTest {
+    @Test fun directoryFiltersApplyOnceKeepSearchAndNeverHideSyncWork() = runTest(dispatcher) {
+        val a = contact("a", "Ana", "email", "a@example.invalid").copy(values = listOf(
+            ContactValue("org", ContactValueKind.ORGANIZATION, "École", order = 0),
+            ContactValue("blank", ContactValueKind.PHONE, "  ", order = 0),
+        ))
+        val b = contact("b", "Bob", "email", "b@example.invalid").copy(values = listOf(
+            ContactValue("org", ContactValueKind.ORGANIZATION, "ECOLE", order = 0),
+            ContactValue("invalid", ContactValueKind.PHONE, "invalid-but-present", order = 0),
+        ), actionRequiredReasons = setOf("INVALID_EMAIL"), pendingMutationRevision = 2)
+        val repository = FakeRepository(listOf(a, b))
+        val recovery = FakeSyncRecoveryDataSource()
+        val model = ContactsViewModel(repository, recovery)
+        val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        runCurrent()
+        assertEquals(1, model.uiState.value.organizationFacets.size)
+        model.updateQuery("Ana")
+        model.openDirectoryFilters()
+        model.updateDirectoryFilterDraft(DirectoryFilter(withoutPhone = true, organizations = setOf("école")))
+        runCurrent()
+        assertFalse(model.uiState.value.directoryFilter.isActive)
+        assertTrue(model.handleBack())
+        model.openDirectoryFilters()
+        runCurrent()
+        assertFalse(model.uiState.value.directoryFilterDraft.isActive)
+        model.updateDirectoryFilterDraft(DirectoryFilter(withoutPhone = true, organizations = setOf("école")))
+        model.applyDirectoryFilters()
+        runCurrent()
+        assertEquals(listOf("a"), model.uiState.value.directoryContacts.map { it.id })
+        assertEquals(setOf("ecole"), model.uiState.value.directoryFilter.organizations)
+        model.selectDestination(RootDestination.SYNC)
+        runCurrent()
+        assertEquals(listOf("b"), model.uiState.value.actionContacts.map { it.id })
+        assertEquals(listOf("b"), model.uiState.value.pendingContacts.map { it.id })
+        model.selectDestination(RootDestination.CONTACTS)
+        model.clearDirectoryFilters()
+        runCurrent()
+        assertEquals("Ana", model.uiState.value.query)
+        assertFalse(model.uiState.value.directoryFilter.isActive)
+        assertNull(repository.savedContact)
+        assertEquals(0, repository.deleteCount)
+        assertTrue(recovery.syncRequestedAccounts.isEmpty())
+        subscription.cancel()
+    }
+
+    @Test fun filteredOutContactKeepsItsDetailAndSecondaryEmailGroupSearch() = runTest(dispatcher) {
+        val a = contact("a", "Ana", "secondary", "a@example.invalid")
+        val group = ContactGroup(LOCAL_ACCOUNT_ID, "g", "Amis",
+            memberships = listOf(GroupMembership("a", "secondary")))
+        val repository = FakeRepository(listOf(a), listOf(group))
+        val model = ContactsViewModel(repository)
+        val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        runCurrent()
+        model.updateQuery("amis")
+        model.setDirectoryFilter(DirectoryFilter(withoutPhone = true))
+        model.selectContact(a)
+        runCurrent()
+        assertEquals(listOf("a"), model.uiState.value.directoryContacts.map { it.id })
+        repository.contacts.value = listOf(a.copy(values = a.values + ContactValue("phone", ContactValueKind.PHONE, "+15550000", order = 0)))
+        runCurrent()
+        assertTrue(model.uiState.value.directoryContacts.isEmpty())
+        assertEquals("a", model.uiState.value.selectedContact?.id)
+        assertEquals("a", model.uiState.value.navigation.current.selectedId)
+        model.handleBack()
+        runCurrent()
+        assertTrue(model.uiState.value.directoryContacts.isEmpty())
+        assertEquals("amis", model.uiState.value.query)
+        assertTrue(model.uiState.value.directoryFilter.withoutPhone)
+        subscription.cancel()
+    }
+
+    @Test fun recentFilterUsesFreshSnapshotTimeAndDoesNotSurviveANewModel() = runTest(dispatcher) {
+        var now = 1_000_000_000L
+        val repository = FakeRepository(listOf(contact("a", "Ana", "email", "a@example.invalid")))
+        val model = ContactsViewModel(repository, directoryClock = { now })
+        val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        runCurrent()
+        model.setDirectoryFilter(DirectoryFilter(recentChanges = true))
+        runCurrent()
+        assertTrue(model.uiState.value.directoryContacts.isEmpty())
+        now += 5_000
+        repository.changes.value = mapOf("a" to now)
+        runCurrent()
+        assertEquals(1, model.uiState.value.directoryContacts.size)
+        now += 7L * 24 * 60 * 60 * 1_000 + 1
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertTrue(model.uiState.value.directoryContacts.isEmpty())
+        model.clearDirectoryFilters()
+        runCurrent()
+        val next = ContactsViewModel(repository)
+        val other = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { next.uiState.collect {} }
+        runCurrent()
+        assertFalse(next.uiState.value.directoryFilter.isActive)
+        subscription.cancel(); other.cancel()
+    }
+
+    @Test fun directoryReadFailureIsExplicitAndRetryOnlyReadsLocalState() = runTest(dispatcher) {
+        val repository = FakeRepository(listOf(contact("a", "Ana", "email", "a@example.invalid")))
+        var fail = true
+        val boundary = object : ContactRepository by repository {
+            override fun observeDirectory(accountId: String): Flow<ContactDirectorySnapshot> =
+                if (fail) kotlinx.coroutines.flow.flow { error("synthetic-local-read-failure") }
+                else repository.observeDirectory(accountId)
+        }
+        val model = ContactsViewModel(boundary)
+        val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        runCurrent()
+        assertTrue(model.uiState.value.directoryReadFailed)
+        assertFalse(model.uiState.value.directoryLoading)
+        fail = false
+        model.retryDirectoryRead()
+        runCurrent()
+        assertFalse(model.uiState.value.directoryReadFailed)
+        assertEquals(1, model.uiState.value.directoryContacts.size)
+        assertNull(repository.savedContact)
+        subscription.cancel()
+    }
+
     @Test fun cleanupDestroysAccountDraftsAndStoreBeforeAnotherOwnerUsesTheSamePartition() = runTest(dispatcher) {
-        val original = contact("owner-a", "Owner A", "email", "fixture@example.test")
+        val original = contact("owner-a", "Owner A", "email", "fixture@example.test").let {
+            it.copy(values = it.values + ContactValue("org", ContactValueKind.ORGANIZATION, "Owner A company", order = 0))
+        }
         val repository = FakeRepository(listOf(original))
         val gate = AccountLifecycleAdmission()
         val stores = AccountContactsViewModelStore()
@@ -53,6 +176,8 @@ class ContactsViewModelTest {
         model.requestContactDeletion(original)
         model.updateQuery("Owner A private query")
         model.selectContact(original)
+        model.setDirectoryFilter(DirectoryFilter(withoutPhone = true, organizations = setOf("owner a company")))
+        model.openDirectoryFilters()
         runCurrent()
         val oldDraft = requireNotNull(model.uiState.value.contactEditor)
         // The Activity-retained owner keeps the exact same model and navigation on rotation.
@@ -66,6 +191,10 @@ class ContactsViewModelTest {
         assertNull(model.uiState.value.contactEditor)
         assertNull(model.uiState.value.groupEditor)
         assertNull(model.uiState.value.pendingContactDeletion)
+        assertFalse(model.uiState.value.directoryFilter.isActive)
+        assertFalse(model.uiState.value.directoryFilterDraft.isActive)
+        assertTrue(model.uiState.value.organizationFacets.isEmpty())
+        assertFalse(model.uiState.value.showDirectoryFilters)
         assertEquals(NavigationState(), model.uiState.value.navigation)
         model.editContact(original)
         model.updateContactEditor(oldDraft)
@@ -855,6 +984,10 @@ class ContactsViewModelTest {
         val delayedContacts = kotlinx.coroutines.flow.MutableSharedFlow<List<CanonicalContact>>()
         val delayedRepository = object : ContactRepository by repository {
             override fun observeContacts(accountId: String): Flow<List<CanonicalContact>> = delayedContacts
+            override fun observeDirectory(accountId: String): Flow<ContactDirectorySnapshot> =
+                kotlinx.coroutines.flow.combine(delayedContacts, repository.changes) { contacts, changes ->
+                    ContactDirectorySnapshot(contacts, changes)
+                }
         }
         val restored = ContactsViewModel(delayedRepository, savedStateHandle = SavedStateHandle(mapOf(
             "navigation.CONTACTS.selection" to selected.id,
@@ -1880,6 +2013,8 @@ class ContactsViewModelTest {
         var savedManagedGroupIds: Set<String>? = null
         val groups = MutableStateFlow(groups)
         val pending = MutableStateFlow(0)
+        val changes = MutableStateFlow<Map<String, Long>>(emptyMap())
+        override fun observeContentChanges(accountId: String): Flow<Map<String, Long>> = changes
 
         override fun observeContacts(accountId: String): Flow<List<CanonicalContact>> {
             contactsObserveCount++

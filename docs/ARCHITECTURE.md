@@ -1,5 +1,18 @@
 # Architecture
 
+## Directory observation metadata
+
+Contact-field observation times MUST remain in an owner/contact-scoped local
+table with cascading cleanup, separate from canonical revisions and conflict
+chronology. A Room transaction MUST expose fields and their observation date in
+one directory snapshot. Creation/local/native edits and verified changed remote
+adoption MUST write dates in the same transaction as their content. A matching
+verified full-card baseline after acknowledgement MUST retain the prior date
+despite codec normalization. A pending local conflict still requires comparison
+with the local fields. Unknown historical baselines MUST first establish proof
+without inventing chronology. Migration MUST NOT backfill dates. Group-only work,
+projection, retries and read-only filtering MUST NOT renew field-change dates.
+
 ## Retained remote-deletion work
 
 Remote-deletion recovery MUST retain complete canonical content and preservation

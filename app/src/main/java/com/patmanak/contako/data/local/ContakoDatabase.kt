@@ -10,6 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         ContactEntity::class,
+        ContactContentChangeEntity::class,
         ContactSyncEvidenceEntity::class,
         RemoteHydrationObligationEntity::class,
         TargetedRecoveryRequestEntity::class,
@@ -47,11 +48,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AndroidPhotoProjectionReceiptEntity::class,
         AndroidContactIssueEntity::class,
     ],
-    version = 25,
+    version = 26,
     exportSchema = true,
 )
 internal abstract class ContakoDatabase : RoomDatabase() {
     abstract fun contactDao(): ContactDao
+    abstract fun contactContentChangesDao(): ContactContentChangesDao
     abstract fun contactSyncEvidenceDao(): ContactSyncEvidenceDao
     abstract fun remoteHydrationObligationDao(): RemoteHydrationObligationDao
     abstract fun targetedRecoveryRequestDao(): TargetedRecoveryRequestDao
@@ -100,8 +102,23 @@ internal abstract class ContakoDatabase : RoomDatabase() {
                     MIGRATION_22_23,
                     MIGRATION_23_24,
                     MIGRATION_24_25,
+                    MIGRATION_25_26,
                 )
                 .build()
+
+        val MIGRATION_25_26: Migration = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Legacy revisions and timestamps do not prove a post-import field change.
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS contact_content_changes (
+                        account_id TEXT NOT NULL,contact_id TEXT NOT NULL,observed_at INTEGER NOT NULL,
+                        PRIMARY KEY(account_id,contact_id),
+                        FOREIGN KEY(account_id,contact_id) REFERENCES contacts(account_id,id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+            }
+        }
 
         val MIGRATION_24_25: Migration = object : Migration(24, 25) {
             override fun migrate(db: SupportSQLiteDatabase) {

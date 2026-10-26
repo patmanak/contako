@@ -493,4 +493,23 @@
     <string name="deletion_recovery_local_save">Opslaan wijzigt alleen dit lokale concept en stuurt niets naar Proton. Een e-mailadres verwijderen wist ook de bewaarde groepstoewijzingen van die vermelding.</string>
     <string name="deletion_recovery_two_versions">Het opgeslagen concept en nieuwere contact- of groepswijzigingen blijven beide bewaard. Beoordeel ze apart; ze zijn niet automatisch samengevoegd.</string>
     <string name="deletion_recovery_signout">Er staan nog herstelconcepten of onopgeloste wijzigingen van verwijderde contacten op dit apparaat. Afmelden en lokale gegevens verwerpen wist deze gegevens. Bekijk het herstel voordat u zich afmeldt.</string>
+    <string name="directory_filter">Filteren</string>
+    <string name="directory_filters_active">Filters actief</string>
+    <string name="directory_without_phone">Zonder telefoonnummer</string>
+    <string name="directory_without_email">Zonder e-mailadres</string>
+    <string name="directory_local_only">Bevat uitsluitend lokale gegevens</string>
+    <string name="directory_local_only_description">Bevat velden of labels die Proton niet kan weergeven. Alleen wachten op uploaden telt niet mee.</string>
+    <string name="directory_recent_changes">Ontvangen of ingevoerde wijzigingen — 7 dagen</string>
+    <string name="directory_recent_changes_description">Wijzigingen aan contactvelden waargenomen op dit apparaat, geen wijzigingstijden in Proton. Eerste import, nieuwe pogingen, bevestigingen, groepstoewijzingen en wijzigingen in de groepscatalogus tellen niet mee.</string>
+    <string name="directory_organizations">Bedrijven</string>
+    <string name="directory_organizations_description">Minstens één geselecteerd bedrijf moet overeenkomen. Ook andere criteria en de zoekopdracht moeten overeenkomen.</string>
+    <string name="directory_organizations_empty">Geen bedrijven beschikbaar</string>
+    <string name="directory_apply_filters">Toepassen</string>
+    <string name="directory_result_count">Contacten: %1$d</string>
+    <string name="directory_remove_filter">Filter verwijderen: %1$s</string>
+    <string name="directory_filtered_empty">Geen contacten voldoen aan deze criteria</string>
+    <string name="directory_clear_filters">Filters wissen</string>
+    <string name="directory_loading">Contacten laden</string>
+    <string name="directory_read_failed">De contacten op dit apparaat konden niet worden gelezen.</string>
+    <string name="directory_retry_read">Lokaal lezen opnieuw proberen</string>
 </resources>

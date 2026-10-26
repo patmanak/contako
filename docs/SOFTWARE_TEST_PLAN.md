@@ -1,5 +1,22 @@
 # Software integration test plan
 
+## Directory filters and observation dates
+
+Use isolated Room for atomic contact/value/date snapshots. Migration MUST retain
+all existing contacts, values and outbox rows without inventing observation dates.
+Compare local/native creation and field edits, first import, changed adoption
+and unchanged wire-format/identity rebinding. Dates MUST commit or roll back with
+canonical/outbox changes, never from acknowledgement, retry, projection or groups
+alone. Preserve duplicates, real label/preference changes, foreign-owner and
+unchanged-field witnesses. Verify FK/account cleanup and tombstone exclusion.
+Dates MUST NOT enter conflict selection.
+
+Compose cases MUST cover Apply/Cancel, chips, independent reset actions, 5,000
+lazy facets and 200% text. View-model cases MUST keep an out-of-filter detail open,
+secondary-email group search and complete Sync issues; distinguish local read
+failures and clear private filter state on owner invalidation. These local cases
+do not establish real Proton or OEM-editor convergence.
+
 ## Directory responsiveness and measurement integrity
 
 Use the [performance protocol](QA.md#performance-measurements) with isolated rich

@@ -21,6 +21,8 @@ Screenshots show the application interface with fictional contacts.
 ## Features
 
 - Browse and search your contacts offline, with alphabet navigation.
+- Filter missing phone/email, organizations, locally retained fields and recent
+  field changes without restricting synchronization work.
 - Create, edit and delete contacts, including repeated fields and contact images.
 - Manage Proton groups and assign them to individual email addresses.
 - Use compatible system contact applications to edit the Contako contact account.
@@ -32,7 +34,7 @@ Screenshots show the application interface with fictional contacts.
   with timestamps and synchronization failure categories.
 
 Android 12 or later is required. One Proton account is supported at a time.
-The current source version is **0.17.0**; see the
+The current source version is **0.18.0**; see the
 [changelog](CHANGELOG.md) and [known limitations](docs/KNOWN_LIMITATIONS.md).
 The signed universal APK and corresponding sources are available from the
 [0.10.2 release](https://github.com/patmanak/contako/releases/tag/v0.10.2).

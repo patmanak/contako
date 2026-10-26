@@ -500,4 +500,23 @@
     <string name="deletion_recovery_local_save">Il salvataggio modifica solo questa bozza locale, senza inviare dati a Proton. Rimuovere un indirizzo e-mail elimina anche le assegnazioni conservate ai gruppi di quella voce.</string>
     <string name="deletion_recovery_two_versions">La bozza salvata e le modifiche più recenti al contatto o ai gruppi sono entrambe conservate. Esaminale separatamente; non sono state unite automaticamente.</string>
     <string name="deletion_recovery_signout">Su questo dispositivo sono ancora presenti bozze di recupero o modifiche irrisolte di contatti eliminati. Uscire e scartare i dati locali le cancellerà. Esamina il recupero prima di uscire.</string>
+    <string name="directory_filter">Filtra</string>
+    <string name="directory_filters_active">Filtri attivi</string>
+    <string name="directory_without_phone">Senza numero di telefono</string>
+    <string name="directory_without_email">Senza indirizzo email</string>
+    <string name="directory_local_only">Contiene dati solo locali</string>
+    <string name="directory_local_only_description">Include campi o etichette che Proton non può rappresentare. I soli invii in attesa non sono sufficienti.</string>
+    <string name="directory_recent_changes">Modifiche ricevute o inserite — 7 giorni</string>
+    <string name="directory_recent_changes_description">Modifiche ai campi dei contatti osservate su questo dispositivo, non date di modifica su Proton. Sono esclusi importazione iniziale, tentativi ripetuti, conferme, assegnazioni ai gruppi e modifiche al catalogo dei gruppi.</string>
+    <string name="directory_organizations">Aziende</string>
+    <string name="directory_organizations_description">Deve corrispondere ad almeno un’azienda selezionata. Devono corrispondere anche gli altri criteri e la ricerca.</string>
+    <string name="directory_organizations_empty">Nessuna azienda disponibile</string>
+    <string name="directory_apply_filters">Applica</string>
+    <string name="directory_result_count">Contatti: %1$d</string>
+    <string name="directory_remove_filter">Rimuovi filtro: %1$s</string>
+    <string name="directory_filtered_empty">Nessun contatto corrisponde a questi criteri</string>
+    <string name="directory_clear_filters">Cancella filtri</string>
+    <string name="directory_loading">Caricamento dei contatti</string>
+    <string name="directory_read_failed">Impossibile leggere i contatti su questo dispositivo.</string>
+    <string name="directory_retry_read">Riprova la lettura locale</string>
 </resources>

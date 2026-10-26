@@ -12,6 +12,10 @@ import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.GroupMembership
 import com.patmanak.contako.domain.policy.ContactSearch
+import com.patmanak.contako.domain.policy.ContactDirectoryPolicy
+import com.patmanak.contako.domain.policy.DirectoryFilter
+import com.patmanak.contako.domain.policy.OrganizationFacet
+import com.patmanak.contako.domain.repository.ContactDirectorySnapshot
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import com.patmanak.contako.domain.policy.PostalAddressPolicy
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
@@ -28,6 +32,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -129,6 +138,14 @@ data class ContactsUiState(
     val navigation: NavigationState = NavigationState(),
     val query: String = "",
     val contacts: List<CanonicalContact> = emptyList(),
+    val directoryContacts: List<CanonicalContact> = contacts,
+    val selectedContact: CanonicalContact? = null,
+    val directoryFilter: DirectoryFilter = DirectoryFilter(),
+    val directoryFilterDraft: DirectoryFilter = DirectoryFilter(),
+    val organizationFacets: List<OrganizationFacet> = emptyList(),
+    val showDirectoryFilters: Boolean = false,
+    val directoryLoading: Boolean = false,
+    val directoryReadFailed: Boolean = false,
     val actionContacts: List<CanonicalContact> = emptyList(),
     val pendingContacts: List<CanonicalContact> = emptyList(),
     val androidPendingContacts: List<CanonicalContact> = emptyList(),
@@ -154,6 +171,7 @@ data class ContactsUiState(
     val totalGroupCount: Int = groups.size,
 )
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ContactsViewModel(
     private val repository: ContactRepository,
     private val syncRecoveryDataSource: SyncRecoveryDataSource = EmptySyncRecoveryDataSource,
@@ -165,6 +183,7 @@ class ContactsViewModel(
     private val accountId: String = LOCAL_ACCOUNT_ID,
     deniedGroupOperations: kotlinx.coroutines.flow.Flow<Set<GroupOperation>> = kotlinx.coroutines.flow.flowOf(emptySet()),
     private val mutationAdmission: ContactMutationAdmission = UnrestrictedContactMutationAdmission,
+    private val directoryClock: () -> Long = System::currentTimeMillis,
 ) : ViewModel() {
     private val accountGeneration = mutationAdmission.access.value.generation
     private fun acceptsMutation() = mutationAdmission.accepts(accountGeneration)
@@ -362,7 +381,37 @@ class ContactsViewModel(
     private val showAccountMenu = MutableStateFlow(false)
     private val showUnsavedConfirmation = MutableStateFlow(false)
     private val showRepairConfirmation = MutableStateFlow(false)
-    private val allContacts = repository.observeContacts(accountId)
+    private val directoryFilter = MutableStateFlow(DirectoryFilter())
+    private val directoryFilterDraft = MutableStateFlow(DirectoryFilter())
+    private val showDirectoryFilters = MutableStateFlow(false)
+    private val directoryRefresh = MutableStateFlow(0L)
+    private data class PreparedDirectory(
+        val snapshot: ContactDirectorySnapshot = ContactDirectorySnapshot(),
+        val facets: List<OrganizationFacet> = emptyList(),
+        val loading: Boolean = false,
+        val failed: Boolean = false,
+    )
+    private val directory = directoryRefresh.flatMapLatest {
+        repository.observeDirectory(accountId).map { snapshot ->
+            val scoped = snapshot.contacts.filter { it.accountId == accountId && !it.isDeleted }
+            PreparedDirectory(snapshot.copy(contacts = scoped), ContactDirectoryPolicy.organizationFacets(scoped))
+        }.catch { error ->
+            if (error is CancellationException) throw error
+            emit(PreparedDirectory(failed = true))
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, PreparedDirectory(loading = true))
+    private val filterClock = directoryFilter.flatMapLatest { criteria ->
+        flow {
+            emit(directoryClock())
+            // Only the recent criterion needs periodic wall-clock re-evaluation. Dates never
+            // enter canonical data, conflict selection or diagnostics from this presentation flow.
+            if (criteria.recentChanges) while (true) {
+                delay(60_000)
+                emit(directoryClock())
+            }
+        }
+    }
+    private val allContacts = directory.filter { !it.loading && !it.failed }.map { it.snapshot.contacts }
         .onEach { contacts ->
             clearMissingSelection(RootDestination.CONTACTS, contacts.map { it.id }.toSet())
         }
@@ -374,7 +423,7 @@ class ContactsViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val uiState: StateFlow<ContactsUiState> = combine(
-        allContacts,
+        directory,
         allGroups,
         repository.observePendingMutationCount(accountId),
         navigation,
@@ -396,11 +445,17 @@ class ContactsViewModel(
         contactDeletionStatus,
         groupDeletionStatus,
         deniedGroups,
+        directoryFilter,
+        directoryFilterDraft,
+        showDirectoryFilters,
+        filterClock,
+        mutationAdmission.access,
     ) { values ->
+        val prepared = values[0] as PreparedDirectory
+        val contacts = if (acceptsMutation()) prepared.snapshot.contacts else emptyList()
         @Suppress("UNCHECKED_CAST")
-        val contacts = values[0] as List<CanonicalContact>
-        @Suppress("UNCHECKED_CAST")
-        val groups = values[1] as List<ContactGroup>
+        val groups = if (acceptsMutation()) (values[1] as List<ContactGroup>)
+            .filter { it.accountId == accountId && !it.isDeleted } else emptyList()
         val activeNavigation = values[3] as NavigationState
         val activeQuery = activeNavigation.current.query
         val detailOpen = activeNavigation.current.selectedId != null
@@ -430,13 +485,30 @@ class ContactsViewModel(
         } else emptySet()
         val actionContacts = contacts.filter { it.actionRequiredReasons.isNotEmpty() || it.conflictState != null ||
             it.id in failedAndroidContactIds || it.id in dashboard.blockedMutationContactIds }
+        val criteria = if (acceptsMutation()) values[19] as DirectoryFilter else DirectoryFilter()
+        val searchedContacts = contacts.filter {
+            ContactSearch.matches(it, activeQuery) || it.id in contactsInMatchingGroups
+        }
+        // Every new snapshot must use a fresh reference time: a just-committed change must
+        // not be mistaken for a future date relative to the previous periodic clock tick.
+        val filterNow = directoryClock()
+        val filteredContacts = if (!criteria.isActive) searchedContacts else searchedContacts.filter {
+            ContactDirectoryPolicy.matches(it, criteria, prepared.snapshot.contentChanges[it.id], filterNow)
+        }
         ContactsUiState(
             deniedGroupOperations = values[18] as Set<GroupOperation>,
             navigation = activeNavigation,
             query = activeQuery,
-            contacts = if (detailOpen) contacts else contacts.filter {
-                ContactSearch.matches(it, activeQuery) || it.id in contactsInMatchingGroups
-            },
+            contacts = if (detailOpen) contacts else searchedContacts,
+            directoryContacts = filteredContacts,
+            selectedContact = contacts.firstOrNull { it.id == activeNavigation.current.selectedId &&
+                activeNavigation.destination == RootDestination.CONTACTS },
+            directoryFilter = criteria,
+            directoryFilterDraft = if (acceptsMutation()) values[20] as DirectoryFilter else DirectoryFilter(),
+            showDirectoryFilters = acceptsMutation() && values[21] as Boolean,
+            organizationFacets = if (acceptsMutation()) prepared.facets else emptyList(),
+            directoryLoading = prepared.loading,
+            directoryReadFailed = prepared.failed,
             actionContacts = actionContacts,
             actionGroups = groups.filter { group -> dashboard.blockedItems.any {
                 it.type == com.patmanak.contako.domain.sync.SyncBlockedItemType.GROUP && it.id == group.id
@@ -469,7 +541,7 @@ class ContactsViewModel(
             totalContactCount = contacts.size,
             totalGroupCount = groups.size,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ContactsUiState())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ContactsUiState(directoryLoading = true))
 
     init {
         viewModelScope.launch {
@@ -491,6 +563,9 @@ class ContactsViewModel(
     }
 
     private fun clearAccountDrafts() {
+        directoryFilter.value = DirectoryFilter()
+        directoryFilterDraft.value = DirectoryFilter()
+        showDirectoryFilters.value = false
         deletionPanelGeneration++
         mutableDeletionRecoveryPanel.value = DeletionRecoveryPanelState()
         dismissContactSyncDetail()
@@ -522,6 +597,41 @@ class ContactsViewModel(
         navigationStore.updateQuery(value)
         navigation.value = navigationStore.snapshot()
     }
+
+    fun openDirectoryFilters() {
+        if (!acceptsMutation()) return
+        directoryFilterDraft.value = directoryFilter.value
+        showDirectoryFilters.value = true
+    }
+
+    fun updateDirectoryFilterDraft(value: DirectoryFilter) {
+        if (acceptsMutation() && showDirectoryFilters.value) directoryFilterDraft.value = normalizedFilter(value)
+    }
+
+    fun dismissDirectoryFilters() { showDirectoryFilters.value = false }
+
+    fun applyDirectoryFilters() {
+        if (!acceptsMutation() || !showDirectoryFilters.value) return
+        setDirectoryFilter(directoryFilterDraft.value)
+        showDirectoryFilters.value = false
+    }
+
+    fun setDirectoryFilter(value: DirectoryFilter) {
+        if (!acceptsMutation()) return
+        directoryFilter.value = normalizedFilter(value)
+        navigationStore.resetScroll(RootDestination.CONTACTS)
+        navigation.value = navigationStore.snapshot()
+    }
+
+    fun clearDirectoryFilters() = setDirectoryFilter(DirectoryFilter())
+
+    fun retryDirectoryRead() {
+        if (acceptsMutation()) directoryRefresh.value += 1
+    }
+
+    private fun normalizedFilter(value: DirectoryFilter) = value.copy(
+        organizations = value.organizations.map(ContactSearch::normalize).filter(String::isNotBlank).toSet(),
+    )
 
     fun updateScroll(index: Int, offset: Int) {
         navigationStore.updateScroll(index, offset)
@@ -650,6 +760,7 @@ class ContactsViewModel(
     }
 
     fun handleBack(): Boolean = when {
+        showDirectoryFilters.value -> { dismissDirectoryFilters(); true }
         showUnsavedConfirmation.value -> { showUnsavedConfirmation.value = false; true }
         pendingContactDeletion.value != null -> { pendingContactDeletion.value = null; true }
         pendingGroupDeletion.value != null -> { pendingGroupDeletion.value = null; true }

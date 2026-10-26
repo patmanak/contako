@@ -1,5 +1,32 @@
 # User guide and FAQ
 
+## Filter the contact directory
+
+Use **Filter** in Contacts, choose criteria and press **Apply filters**. Closing
+the sheet cancels its draft. The directory shows a result count and removable
+criteria. **Clear filters** keeps search text; clearing search is separate.
+Search and different criteria intersect. Selecting several organizations matches
+any of them, ignoring case and accents without changing stored names.
+
+**Without phone/email** considers every nonblank occurrence, including secondary
+and invalid values. **Locally retained data** finds custom dates, phonetic names
+and established labels that Proton cannot represent. Pending delivery alone does
+not make data local-only.
+
+**Changes received or entered — 7 days** uses local observation time of contact
+field changes. It does not claim when a field was edited on Proton. First imports
+and migrated contacts without a known observation date are excluded. An unknown
+historical remote baseline is first verified without inventing a change date. Unchanged
+reads, acknowledgements, retries and group-only changes do not renew the date.
+Future dates are excluded. Results update on new data and periodically while
+this criterion is active.
+
+Filters work offline and survive navigation and rotation. A new application
+session or owner starts without them. A detail stays open if an edit makes it
+stop matching; returning shows the current results. Sync keeps its complete
+issues and work. A local read error offers a local retry and does not look like
+an empty address book. Filtering never starts synchronization.
+
 ## Recover edits after a Proton deletion
 
 When a Proton contact has been deleted while local edits are waiting, Sync keeps

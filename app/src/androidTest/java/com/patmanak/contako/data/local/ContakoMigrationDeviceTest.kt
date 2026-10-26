@@ -24,6 +24,23 @@ class ContakoMigrationDeviceTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
 
+    @Test fun contentChangesMigrationPreservesFieldsAndDoesNotInventHistoricalChanges() {
+        val name = "migration-contact-content-changes.db"
+        context.deleteDatabase(name)
+        val before = migrations.createDatabase(name, 25).use { old ->
+            MigrationFixture.seed(old)
+            MigrationFixture.snapshot(old)
+        }
+        try {
+            migrations.runMigrationsAndValidate(name, 26, true, ContakoDatabase.MIGRATION_25_26).use { upgraded ->
+                assertEquals("Synthetic Person", upgraded.scalar("SELECT display_name FROM contacts"))
+                assertEquals(before, MigrationFixture.snapshot(upgraded))
+                assertEquals("0", upgraded.scalar("SELECT COUNT(*) FROM contact_content_changes"))
+                upgraded.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
+            }
+        } finally { context.deleteDatabase(name) }
+    }
+
     @Test fun deletionRecoveryMigrationPreservesContactsWithoutInventingDraftOrAbsenceEvidence() {
         val name = "migration-deletion-recovery.db"
         context.deleteDatabase(name)
@@ -272,7 +289,7 @@ class ContakoMigrationDeviceTest {
     private class SimulatedMigrationProcessDeath : RuntimeException()
 
     private companion object {
-        const val CURRENT_VERSION = 25
+        const val CURRENT_VERSION = 26
         val ALL_MIGRATIONS = arrayOf(
             ContakoDatabase.MIGRATION_1_2,
             ContakoDatabase.MIGRATION_2_3,
@@ -298,6 +315,7 @@ class ContakoMigrationDeviceTest {
             ContakoDatabase.MIGRATION_22_23,
             ContakoDatabase.MIGRATION_23_24,
             ContakoDatabase.MIGRATION_24_25,
+            ContakoDatabase.MIGRATION_25_26,
         )
     }
 }
