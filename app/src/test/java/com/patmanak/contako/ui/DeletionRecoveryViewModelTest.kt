@@ -199,7 +199,7 @@ class DeletionRecoveryViewModelTest {
         val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore().also(stores::add) }
         return ViewModelProvider(owner, ContactsViewModel.factory(repository, port, accountId = contact.accountId,
             mutationAdmission = admission, onMutationCommitted = onCommitted,
-            navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
+            navigationState = SavedStateHandle(), directoryDispatcher = dispatcher))[ContactsViewModel::class.java]
     }
 
     private class Recovery(var detail: DeletionRecoveryDetail) : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {

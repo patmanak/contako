@@ -53,6 +53,21 @@ object ContactSearch {
 
     fun matchesGroupName(name: String, query: String): Boolean = prepare(query).matchesGroupName(name)
 
+    /**
+     * Immutable, snapshot-scoped search input. Values remain separate: joining them would create
+     * matches across occurrence boundaries. This deliberately excludes notes, media and envelopes.
+     */
+    fun prepareContact(contact: CanonicalContact): PreparedContact = PreparedContact(buildList {
+        add(normalize(contact.firstName))
+        add(normalize(contact.lastName))
+        add(normalize(contact.displayName))
+        contact.values.forEach { if (it.kind in SEARCHED_FAMILIES) add(normalize(it.value)) }
+    })
+
+    class PreparedContact internal constructor(internal val fields: List<String>) {
+        override fun toString(): String = "PreparedContact(REDACTED)"
+    }
+
     class PreparedQuery internal constructor(private val needle: String) {
         fun matches(contact: CanonicalContact): Boolean {
             if (needle.isEmpty()) return true
@@ -67,11 +82,17 @@ object ContactSearch {
             return searchableValues.any { normalize(it).contains(needle) }
         }
 
+        fun matches(contact: PreparedContact): Boolean =
+            needle.isEmpty() || contact.fields.any { it.contains(needle) }
+
         fun matchesGroupName(name: String): Boolean = normalize(name).contains(needle)
     }
 
     internal fun normalize(value: String): String =
-        Normalizer.normalize(value, Normalizer.Form.NFD)
+        // ASCII is already in NFD and contains no combining marks or dotless i. Most email,
+        // phone and organization values therefore need neither normalization nor a regex scan.
+        if (value.all { it.code < 128 }) value.lowercase(Locale.ROOT).trim()
+        else Normalizer.normalize(value, Normalizer.Form.NFD)
             .replace(COMBINING_MARKS, "")
             .lowercase(Locale.ROOT)
             .replace('ı', 'i')

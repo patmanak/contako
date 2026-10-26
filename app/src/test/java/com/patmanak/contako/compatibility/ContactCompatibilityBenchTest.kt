@@ -136,6 +136,28 @@ class ContactCompatibilityBenchTest {
         }
     }
 
+    @Test fun differentSeedsChangeCausalOrderAndInterleaveIndependentContacts() {
+        val plans = (1L..40L).map { CompatibilityGenerator.generate(it, 100) }
+        assertEquals(3, CompatibilityGenerator.VERSION)
+        // Discard payloads and even targets: this must vary time ordering itself.
+        assertTrue(plans.map { plan -> plan.steps.map { it.action } }.distinct().size > 20)
+        assertTrue(plans.all { it.steps == CompatibilityGenerator.generate(it.seed, 100).steps })
+        assertTrue(plans.all { it.steps.take(30) == CompatibilityGenerator.generate(it.seed, 30).steps })
+        val reopenBeforeIndependentEdit = mutableSetOf<Boolean>()
+        plans.forEach { plan ->
+            val lost = plan.steps.indexOfFirst { it.action == Action.LOST_ACK }
+            val reopen = plan.steps.indexOfFirst { it.action == Action.RESTART }
+            val independentEdit = plan.steps.withIndex().first { (index, step) ->
+                index > lost && step.action in setOf(Action.NATIVE_PHONE, Action.LOCAL_NOTE)
+            }
+            assertTrue(independentEdit.value.slot != plan.steps[lost].slot)
+            reopenBeforeIndependentEdit += reopen < independentEdit.index
+            assertTrue(reopen > lost)
+            assertTrue(plan.steps.indexOfFirst { it.action == Action.NO_CHANGE } > reopen)
+        }
+        assertEquals(setOf(false, true), reopenBeforeIndependentEdit)
+    }
+
     @Test fun finalStepAndPassPublicationCannotHideAnExhaustedBudget() {
         var time = 0L
         val evidence = CompatibilityEvidence("BUDGET_GUARD", budgetMillis = 1, nanoTime = { time })

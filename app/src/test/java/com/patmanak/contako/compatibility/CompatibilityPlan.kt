@@ -6,7 +6,7 @@ import java.util.Random
 
 /** Test-only, versioned protocol. Changing generation or scheduling requires a version bump. */
 internal object CompatibilityGenerator {
-    const val VERSION = 2
+    const val VERSION = 3
     const val MAX_CONTACTS = 12
 
     enum class Action { IMPORT, NATIVE_PHONE, LOCAL_NOTE, LOST_ACK, RESTART, SETTLE, DELETE, NO_CHANGE }
@@ -27,24 +27,107 @@ internal object CompatibilityGenerator {
     fun generate(seed: Long, steps: Int): Plan {
         require(steps in 1..100)
         val random = Random(seed)
-        return Plan(seed, List(steps) { index ->
-            // Fixed ten-command causal spine, bounded contact slots and randomized payload
-            // variants. Verify the settled live directory before deleting its contact.
-            // Each unit contains save -> lost ack -> restart -> reconciliation.
-            val action = when (index % 10) {
-                0 -> Action.IMPORT
-                1 -> Action.NATIVE_PHONE
-                2 -> Action.LOCAL_NOTE
-                3 -> Action.LOST_ACK
-                4 -> Action.RESTART
-                5 -> Action.SETTLE
-                6 -> Action.LOCAL_NOTE
-                7 -> Action.SETTLE
-                8 -> Action.NO_CHANGE
-                else -> Action.DELETE
+        val result = mutableListOf<Step>()
+        val imported = mutableSetOf<Int>()
+        val live = linkedSetOf<Int>()
+        // Linked ordering matches the transaction-shaped store's durable command queue.
+        val pending = linkedSetOf<Int>()
+        var inFlight: Int? = null
+        var restartRequired = false
+        var interruptionCommands = 0
+        fun emit(action: Action, slot: Int) {
+            when (action) {
+                Action.IMPORT -> {
+                    check(imported.add(slot))
+                    live += slot
+                    pending += slot
+                }
+                Action.NATIVE_PHONE, Action.LOCAL_NOTE -> {
+                    check(slot in live && slot != inFlight)
+                    pending += slot
+                }
+                Action.LOST_ACK -> {
+                    check(inFlight == null && pending.isNotEmpty())
+                    inFlight = pending.first()
+                    check(slot == inFlight)
+                    restartRequired = true
+                    interruptionCommands = 0
+                }
+                Action.RESTART -> restartRequired = false
+                Action.SETTLE -> {
+                    check(!restartRequired)
+                    pending.clear()
+                    inFlight = null
+                }
+                Action.NO_CHANGE -> check(live.isNotEmpty() && pending.isEmpty())
+                Action.DELETE -> {
+                    // DELETE performs the real live-field oracle before its immediate settle.
+                    check(slot in live && pending.isEmpty())
+                    live -= slot
+                }
             }
-            Step(action, (index / 10) % MAX_CONTACTS, random.nextInt(6))
-        })
+            if (restartRequired && action != Action.LOST_ACK) interruptionCommands++
+            result += Step(action, slot, random.nextInt(6))
+        }
+        fun edit() = if (random.nextBoolean()) Action.NATIVE_PHONE else Action.LOCAL_NOTE
+        fun choose(slots: Collection<Int>) = slots.elementAt(random.nextInt(slots.size))
+
+        // Guarantee a sensitive CREATE/lost-ack/reopen case and two live no-change passes
+        // even in the quick profile. Independent imports/edits and reopen are interleaved,
+        // rather than repeating one ten-action spine for every contact.
+        val first = random.nextInt(MAX_CONTACTS)
+        val second = choose((0 until MAX_CONTACTS).filter { it != first })
+        emit(Action.IMPORT, first)
+        if (random.nextBoolean()) {
+            emit(Action.IMPORT, second)
+            emit(edit(), first)
+        } else {
+            emit(edit(), first)
+            emit(Action.IMPORT, second)
+        }
+        emit(edit(), choose(live))
+        emit(Action.LOST_ACK, pending.first())
+        val independent = live.single { it != inFlight }
+        if (random.nextBoolean()) {
+            emit(Action.RESTART, first)
+            emit(edit(), independent)
+        } else {
+            emit(edit(), independent)
+            emit(Action.RESTART, first)
+        }
+        emit(Action.SETTLE, first)
+        emit(Action.NO_CHANGE, first)
+
+        // Online bounded scheduler: only actions admitted by the durable causal state
+        // compete. Seeds change their order, target contacts and payloads. SETTLE is an
+        // account-wide barrier; no edit overwrites a claimed mutation, and deletion never
+        // bypasses convergence or makes the mandatory no-change oracle vacuous.
+        while (result.size < steps) {
+            val unused = (0 until MAX_CONTACTS).filter { it !in imported }
+            val editable = live.filter { it != inFlight }
+            val choices = mutableListOf<Pair<Action, List<Int>>>()
+            if (unused.isNotEmpty()) choices += Action.IMPORT to unused
+            if (editable.isNotEmpty()) {
+                choices += Action.NATIVE_PHONE to editable
+                choices += Action.LOCAL_NOTE to editable
+            }
+            if (inFlight == null && pending.isNotEmpty()) {
+                choices += Action.LOST_ACK to listOf(pending.first())
+            }
+            choices += Action.RESTART to listOf(live.firstOrNull() ?: 0)
+            if (!restartRequired) choices += Action.SETTLE to listOf(live.firstOrNull() ?: 0)
+            if (live.isNotEmpty() && pending.isEmpty()) {
+                choices += Action.NO_CHANGE to live.toList()
+                if (live.size > 1 || unused.isNotEmpty()) choices += Action.DELETE to live.toList()
+            }
+            // A crash can leave many independent writes admissible. Bound the interruption
+            // interval so the generated prefix always reaches recovery, not just more edits.
+            val selected = if (restartRequired && interruptionCommands >= 2) {
+                Action.RESTART to listOf(inFlight!!)
+            } else choices[random.nextInt(choices.size)]
+            emit(selected.first, choose(selected.second))
+        }
+        return Plan(seed, result.take(steps))
     }
 
     /** Values are authored independently of every production codec and mapper. */

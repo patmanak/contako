@@ -79,9 +79,15 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
 - Local directory benchmarks include Compose test synchronization overhead and
   broad benchmark-only R8 keep rules. They do not establish every release latency
   target, large-photo decoding, cold-process startup, native memory peaks or
-  unplugged battery performance. Instrumented rendered search can exceed 100 ms;
-  reopening a ViewModel over 5,000 contacts can exceed 500 ms. Those targets are
-  not yet qualified; see the [measurement protocol](QA.md#performance-measurements).
+  unplugged battery performance. The legacy rendered-search oracle includes
+  repeated test synchronization; its timings MUST NOT be compared directly with
+  the single displayed-layout observation in protocols v4/v5. V5 verifies every
+  identity against model lists captured before the clock stops. Scoped reference
+  runs meet the warmed-search target with these protocols, but reopening a ViewModel over 5,000
+  contacts still exceeds 500 ms. The first nonblank query prepares a lazy index
+  and may exceed 100 ms; warmed searches do not qualify that preparation cost or
+  a query following snapshot replacement. See the
+  [measurement protocol](QA.md#performance-measurements).
 - The artwork has raster masters and provenance, but no fully editable layered
   or vector master. See [licensing](LICENSING.md).
 

@@ -56,13 +56,15 @@ internal fun FieldCompatibilityDialog(target: FieldCompatibilityTarget, state: C
             )
         }
     }
-    var description by remember(target, contact) { mutableStateOf<FieldCompatibilityDescription?>(null) }
-    LaunchedEffect(target, contact) {
+    val original = if (target.editing) state.contactEditor?.original else null
+    var description by remember(target, contact, original) { mutableStateOf<FieldCompatibilityDescription?>(null) }
+    LaunchedEffect(target, contact, original) {
         description = withContext(Dispatchers.Default) {
             when {
                 target.valueId == null -> ContactFieldCompatibility.describeFamily(target.kind)
                 contact == null -> FieldCompatibilityDescription(target.kind, ProtonFieldSupport.UNKNOWN,
                     AndroidFieldScope.UNKNOWN, represented = null, localLabelOnly = false)
+                target.editing -> ContactFieldCompatibility.describeDraft(contact, original, target.valueId).copy(kind = target.kind)
                 else -> ContactFieldCompatibility.describe(contact, target.valueId).copy(kind = target.kind)
             }
         }

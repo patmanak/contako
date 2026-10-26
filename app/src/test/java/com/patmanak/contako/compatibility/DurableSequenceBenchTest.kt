@@ -36,6 +36,9 @@ class DurableSequenceBenchTest {
                     session.assertConverged()
                     assertTrue(session.livePeerChecks > 0)
                     assertTrue(session.liveNoChangePasses >= 2)
+                    assertTrue("Exercise an independent edit while another mutation awaits recovery",
+                        session.editsWhileAnotherContactInFlight > 0)
+                    assertTrue("Reopen must retain an actual in-flight claim", session.reopenedWithInFlight > 0)
                     evidence.checkBudget()
                 } catch (failure: SequenceInvariantFailure) {
                     // Replays construct new controlled stores and re-run production transitions.
@@ -171,6 +174,8 @@ class DurableSequenceBenchTest {
         var androidWrites = 0
         var livePeerChecks = 0
         var liveNoChangePasses = 0
+        var editsWhileAnotherContactInFlight = 0
+        var reopenedWithInFlight = 0
         var rewriteUnchangedAndroidCopies = false
         var deniedId: String? = null
         private var crashAfterEffect = false
@@ -216,6 +221,7 @@ class DurableSequenceBenchTest {
                     expected[id] = Ref(f.phone, f.note, f.opaque, 1, false)
                 }
                 Action.NATIVE_PHONE, Action.LOCAL_NOTE -> {
+                    if (store.inFlight.any { it != id }) editsWhileAnotherContactInFlight++
                     val local = store.contacts.getValue(id)
                     val e = expected.getValue(id)
                     val value = if (step.action == Action.NATIVE_PHONE) "+1202555020${step.variant}" else "Edited note ${step.variant}"
@@ -235,6 +241,7 @@ class DurableSequenceBenchTest {
                 Action.RESTART -> {
                     // Persisted state is copied, including IN_FLIGHT. No test pre-seeds the
                     // reconciliation marker: recoverInterrupted must derive it from the claim.
+                    if (store.inFlight.isNotEmpty()) reopenedWithInFlight++
                     store = store.reopen(dropRecoveryProof)
                     runner = runner()
                 }

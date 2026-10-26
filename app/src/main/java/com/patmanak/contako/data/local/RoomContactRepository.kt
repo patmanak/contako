@@ -76,7 +76,8 @@ internal class RoomContactRepository(
     private val checkpointHook: LocalMutationCheckpointHook = LocalMutationCheckpointHook.NONE,
 ) : ContactRepository {
     override fun observeDirectory(accountId: String): Flow<ContactDirectorySnapshot> =
-        database.contactContentChangesDao().observeDirectory(accountId).map { rows ->
+        database.invalidationTracker.createFlow("contacts", "contact_values", "contact_content_changes").map {
+            val rows = database.contactContentChangesDao().readDirectory(accountId)
             val collator = Collator.getInstance(Locale.getDefault())
             ContactDirectorySnapshot(
                 contacts = rows.map { ContactWithValues(it.contact, it.values).toDomain() }

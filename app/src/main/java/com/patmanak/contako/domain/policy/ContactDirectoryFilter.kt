@@ -2,6 +2,7 @@ package com.patmanak.contako.domain.policy
 
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactValueKind
+import java.util.TreeMap
 
 data class DirectoryFilter(
     val withoutPhone: Boolean = false,
@@ -23,15 +24,20 @@ data class OrganizationFacet(val key: String, val label: String) {
 
 /** Local, read-only criteria. Callers supply one observation clock for the complete result. */
 object ContactDirectoryPolicy {
-    fun organizationFacets(contacts: List<CanonicalContact>): List<OrganizationFacet> =
-        contacts.asSequence()
-            .filterNot(CanonicalContact::isDeleted)
-            .flatMap { it.values.asSequence() }
-            .filter { it.kind == ContactValueKind.ORGANIZATION && it.value.isNotBlank() }
-            .map { it.value.trim() }
-            .groupBy(ContactSearch::normalize)
-            .toSortedMap()
-            .map { (key, labels) -> OrganizationFacet(key, labels.minOrNull()!!) }
+    fun organizationFacets(contacts: List<CanonicalContact>): List<OrganizationFacet> {
+        val labelsByKey = TreeMap<String, String>()
+        for (contact in contacts) {
+            if (contact.isDeleted) continue
+            for (value in contact.values) {
+                if (value.kind != ContactValueKind.ORGANIZATION || value.value.isBlank()) continue
+                val label = value.value.trim()
+                val key = ContactSearch.normalize(label)
+                val previous = labelsByKey[key]
+                if (previous == null || label < previous) labelsByKey[key] = label
+            }
+        }
+        return labelsByKey.map { (key, label) -> OrganizationFacet(key, label) }
+    }
 
     fun matches(
         contact: CanonicalContact,

@@ -60,6 +60,62 @@ internal interface ContactContentChangesDao {
         ORDER BY contacts.sort_name COLLATE NOCASE, contacts.id
     """)
     fun observeDirectory(accountId: String): Flow<List<DirectoryContactRow>>
+
+    /**
+     * Bound wide value cursors by owned contacts instead of sorting the entire account's values.
+     * Headers and every value batch stay in one SQLite transaction, including observation dates.
+     * No field, media reference or imported metadata is projected away or truncated.
+     */
+    @Transaction
+    suspend fun readDirectory(accountId: String): List<DirectoryContactRow> {
+        val contacts = readDirectoryHeaders(accountId)
+        if (contacts.isEmpty()) return emptyList()
+        val headersByOwner = contacts.associateBy { it.contact.ownerKey }
+        val valuesByOwner = contacts.chunked(DIRECTORY_OWNER_BATCH_SIZE).flatMap { batch ->
+            readDirectoryValues(accountId, batch.map { it.contact.ownerKey })
+        }.filter { value ->
+            // The owner-key FK alone does not prove account/contact identity. Validate against
+            // the immutable scoped headers in this same transaction before exposing any value.
+            val header = headersByOwner[value.ownerKey]?.contact
+            header != null && value.accountId == accountId && value.accountId == header.accountId &&
+                value.contactId == header.id && value.ownerKey == header.ownerKey
+        }.groupBy(ContactValueEntity::ownerKey)
+        return contacts.map { header ->
+            DirectoryContactRow(header.contact, valuesByOwner[header.contact.ownerKey].orEmpty(), header.contentObservedAt)
+        }
+    }
+
+    @Query("""
+        SELECT contacts.*, changes.observed_at AS content_observed_at FROM contacts
+        LEFT JOIN contact_content_changes AS changes
+            ON contacts.account_id=changes.account_id AND contacts.id=changes.contact_id
+        WHERE contacts.account_id=:accountId AND contacts.is_deleted=0
+        ORDER BY contacts.sort_name COLLATE NOCASE, contacts.id
+    """)
+    suspend fun readDirectoryHeaders(accountId: String): List<DirectoryContactHeader>
+
+    @Query("""
+        SELECT v.* FROM contact_values AS v INDEXED BY index_contact_values_owner_key
+        WHERE v.account_id=:accountId AND v.owner_key IN (:ownerKeys)
+        ORDER BY v.owner_key, v.rowid
+    """)
+    suspend fun readDirectoryValues(accountId: String, ownerKeys: List<String>): List<ContactValueEntity>
+
+    companion object {
+        // Leave ample room below SQLite's bind limit and avoid a single account-wide value cursor.
+        // INDEXED BY is intentional: the measured account-id plan sorted large DTOs in a temp
+        // B-tree. Headers scope every batch; row identities are checked against those headers in
+        // memory in the same transaction, avoiding a contact lookup for every value. The owner-key
+        // index supplies the explicit owner/rowid ordering.
+        const val DIRECTORY_OWNER_BATCH_SIZE = 250
+    }
+}
+
+internal data class DirectoryContactHeader(
+    @Embedded val contact: ContactEntity,
+    @ColumnInfo(name = "content_observed_at") val contentObservedAt: Long?,
+) {
+    override fun toString(): String = "DirectoryContactHeader(REDACTED)"
 }
 
 internal data class DirectoryContactRow(

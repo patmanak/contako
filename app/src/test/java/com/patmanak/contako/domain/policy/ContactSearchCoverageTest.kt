@@ -10,6 +10,34 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ContactSearchCoverageTest {
+    @Test fun preparedContactRetainsOccurrenceBoundariesAndUnicodeWithoutIndexingPrivateFields() {
+        val original = CanonicalContact("synthetic-account", "same-id", firstName = "Zoë", lastName = "Işık",
+            values = listOf(value(ContactValueKind.EMAIL, "first@example.test"),
+                value(ContactValueKind.EMAIL, "second@example.test").copy(id = "secondary", order = 1),
+                value(ContactValueKind.ORGANIZATION, "E\u0301quipe Weiß"),
+                value(ContactValueKind.NOTE, "private-canary"),
+                value(ContactValueKind.PHOTO, "photo-canary")))
+        val prepared = ContactSearch.prepareContact(original)
+        val expected = mapOf("zoe" to true, "ISIK" to true, "équipe weiß" to true,
+            "equipe weiss" to false, "second@" to true, "test second" to false,
+            "private-canary" to false, "photo-canary" to false, "  " to true)
+        expected.forEach { (query, match) ->
+            assertEquals(match, ContactSearch.prepare(query).matches(prepared))
+            assertEquals(ContactSearch.matches(original, query), ContactSearch.prepare(query).matches(prepared))
+        }
+        // A fresh snapshot with the same identity must not reuse stale normalized fields.
+        val edited = original.copy(firstName = "Chloë", values = original.values.filterNot {
+            it.id == "secondary"
+        })
+        val refreshed = ContactSearch.prepareContact(edited)
+        assertTrue(ContactSearch.prepare("chloe").matches(refreshed))
+        assertFalse(ContactSearch.prepare("zoe").matches(refreshed))
+        assertFalse(ContactSearch.prepare("second@").matches(refreshed))
+        assertTrue(ContactSearch.prepare("second@").matches(prepared))
+        assertEquals(original.values.size, 5)
+        assertEquals("PreparedContact(REDACTED)", prepared.toString())
+    }
+
     @Test
     fun preparedQueriesRetainUnicodeFamilyAndEmptyQuerySemanticsAcrossContactsAndGroups() {
         val first = CanonicalContact(

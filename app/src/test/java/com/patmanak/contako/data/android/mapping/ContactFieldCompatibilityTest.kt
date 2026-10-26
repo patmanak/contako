@@ -1,6 +1,9 @@
 package com.patmanak.contako.data.android.mapping
 
 import com.patmanak.contako.data.local.retainLocalContactComplements
+import com.patmanak.contako.data.local.markEditedLocalContactLabels
+import com.patmanak.contako.data.proton.ProtonContactVCardCodec
+import com.patmanak.contako.data.proton.ProtonPlainContactCard
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactGroup
 import com.patmanak.contako.domain.model.ContactValue
@@ -13,9 +16,69 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import me.proton.core.contact.domain.entity.Contact
+import me.proton.core.contact.domain.entity.ContactCardType
+import me.proton.core.contact.domain.entity.ContactId
+import me.proton.core.domain.entity.UserId
 
 class ContactFieldCompatibilityTest {
     private val mapper = CanonicalAndroidContactMapper()
+
+    @Test fun importedLabelsExplainUnsavedIntentAndRevertWithoutMutatingProvenance() {
+        listOf(
+            ContactValueKind.URL to "URL;TYPE=HOME:https://example.test/profile",
+            ContactValueKind.RELATIONSHIP to "RELATED;TYPE=friend:Synthetic relation",
+            ContactValueKind.POSTAL_ADDRESS to "ADR;TYPE=HOME:;;12 Synthetic Lane;Example;;;",
+        ).forEach { (kind, property) ->
+            val original = imported(property)
+            val value = original.valuesOf(kind).single()
+            assertTrue(value.preservationKey != null)
+            assertFalse(ContactFieldCompatibility.describeDraft(original, original, value.id).localLabelOnly)
+            val draft = original.copy(values = original.values.map {
+                if (it.id == value.id) it.copy(label = "Personal label") else it
+            })
+            val before = draft.copy(values = draft.values.map { it.copy(metadata = it.metadata.toMap()) })
+            repeat(2) {
+                val facts = ContactFieldCompatibility.describeDraft(draft, original, value.id)
+                assertTrue(kind.name, facts.localLabelOnly)
+                assertEquals(ProtonFieldSupport.GENERATED, facts.proton)
+                assertEquals(ContactFieldCompatibility.describe(draft, value.id).represented, facts.represented)
+            }
+            assertEquals(before, draft)
+            assertEquals(value, original.valuesOf(kind).single())
+            assertFalse(draft.valuesOf(kind).single().metadata.containsKey("contakoLocalOnlyLabel"))
+            assertTrue(ContactFieldCompatibility.describe(markEditedLocalContactLabels(original, draft), value.id).localLabelOnly)
+            assertFalse(ContactFieldCompatibility.describeDraft(original, original, value.id).localLabelOnly)
+            assertFalse(ContactFieldCompatibility.describe(draft, value.id).localLabelOnly)
+        }
+    }
+
+    @Test fun supportedPostalLabelsNewValuesAndAlreadyLocalLabelsKeepTheirOwnScope() {
+        val original = imported("ADR;TYPE=HOME:;;12 Synthetic Lane;Example;;;")
+        val address = original.valuesOf(ContactValueKind.POSTAL_ADDRESS).single()
+        val draft = original.copy(values = original.values.map {
+            if (it.id == address.id) it.copy(label = "WORK") else it
+        })
+        assertFalse(ContactFieldCompatibility.describeDraft(draft, original, address.id).localLabelOnly)
+        val newUrl = occurrence(ContactValueKind.URL, 0).copy(label = "Profile")
+        val created = contact(listOf(newUrl))
+        assertTrue(ContactFieldCompatibility.describeDraft(created, null, newUrl.id).localLabelOnly)
+        val added = original.copy(values = original.values + newUrl)
+        assertTrue(ContactFieldCompatibility.describeDraft(added, original, newUrl.id).localLabelOnly)
+        val local = created.copy(values = listOf(newUrl.copy(preservationKey = "imported-property",
+            metadata = mapOf("contakoLocalOnlyLabel" to "true"))))
+        assertTrue(ContactFieldCompatibility.describeDraft(local, local, newUrl.id).localLabelOnly)
+        assertEquals(ProtonFieldSupport.UNKNOWN,
+            ContactFieldCompatibility.describeDraft(draft, original.copy(accountId = "other"), address.id).proton)
+        assertEquals(ProtonFieldSupport.UNKNOWN,
+            ContactFieldCompatibility.describeDraft(draft, original.copy(values = listOf(address, address)), address.id).proton)
+    }
+
+    private fun imported(property: String): CanonicalContact = ProtonContactVCardCodec().decode(
+        "synthetic-owner", Contact(UserId("synthetic-user"), ContactId("synthetic-remote"), "Synthetic fixture", emptyList()),
+        listOf(ProtonPlainContactCard(ContactCardType.EncryptedAndSigned,
+            "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:synthetic-uid\r\nFN:Synthetic fixture\r\n$property\r\nEND:VCARD\r\n")),
+    )
 
     @Test fun everyFamilyAndOccurrenceAgreeWithProductionProjectionWithoutProviderFacts() {
         ContactValueKind.entries.forEach { kind ->

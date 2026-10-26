@@ -23,12 +23,17 @@ the generated application version is recorded separately.
 | quick (default) | 20 | 30 | 12 | 2 minutes per layer |
 | deep (explicit) | 100 | 100 | 12 | 15 minutes per layer |
 
-The version-2 generator uses a fixed causal command spine and a seeded Java RNG
-for synthetic variants. The same version, seed and profile produce the same
-commands and fault boundaries. Scheduling uses explicit commands, never sleeps.
-Changing seeds varies data, not arbitrary operation orders. Targeted Room/provider
-composition tests cover their named interrupted sequences separately; more seeds
-MUST NOT be reported as new epoch, photo-receipt or remote-deletion interleavings.
+The version-3 generator uses a seeded Java RNG to choose admissible actions,
+contact slots and synthetic variants. A bounded opening sequence guarantees a
+lost acknowledgement, an independent contact edit, restart and live no-change
+verification; their relative order and targets vary. Subsequent commands are
+selected from the current live/pending/in-flight state, including multi-contact
+interleavings. The same version, seed and profile reproduce the same commands
+and fault boundaries. Scheduling uses explicit commands, never sleeps. Claimed
+mutations are not overwritten; deletion requires convergence, and interrupted
+claims retain a bounded path to restart. Targeted Room/provider composition tests
+cover epoch, photo-receipt and remote-deletion sequences separately; generated
+mutation interleavings MUST NOT be reported as physical coverage of those cases.
 The budget is a safety cutoff, not a performance assertion. Exhaustion fails
 the test and records `NOT RUN`, rather than reporting incomplete exploration
 as a pass. Reduction is limited to 200 replays or 60 seconds and retains the
@@ -54,11 +59,12 @@ initial case if no same-cause reduction can be established.
   A reference state checks local values, revisions, pending intent and baselines
   after each command; simulated remote records and mapper projections are
   checked after convergence. A foreign-owner canary shares a logical contact
-  ID and MUST remain unchanged. Before deletion, two unchanged drains MUST keep
-  a nonempty live directory, identities, revisions, pending intent and writes
+  ID and MUST remain unchanged. The guaranteed live no-change command performs
+  two unchanged drains that MUST keep a nonempty directory, identities, revisions, pending intent and writes
   stable. A synthetic redundant Android write MUST fail this check even when
   the resulting values match. Separate final drains check non-resurrection
-  after deletion.
+  after deletion. Every deletion first checks convergence while its contact is
+  still live, even when no unchanged command immediately precedes it.
 - A deliberately faulty recovery double drops the reconciliation marker. The
   production orchestrator then exposes a duplicate CREATE, proving sensitivity
   of the oracle. The reducer replays the real orchestrator and accepts removal

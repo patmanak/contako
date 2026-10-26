@@ -737,7 +737,17 @@ class LocalFoundationJourneyTest {
                     ),
                 useUnmergedTree = true,
             ).performClick()
-            compose.onNodeWithText("Unnamed contact")
+            compose.onNodeWithText("Unnamed contact").assertIsDisplayed()
+            compose.onNode(
+                androidx.compose.ui.test.hasText(string(R.string.sync_issue_review)) and
+                    androidx.compose.ui.test.hasClickAction(),
+            ).performScrollTo().assertIsDisplayed().assertIsEnabled().assertHasClickAction().performClick()
+            compose.waitUntil(timeoutMillis = 5_000) {
+                viewModel.uiState.value.navigation.destination == RootDestination.CONTACTS &&
+                    viewModel.uiState.value.selectedContact?.id == "secondary-action-contact" &&
+                    viewModel.uiState.value.contactEditor == null
+            }
+            compose.onNodeWithContentDescription(string(R.string.contact_edit_action))
                 .assertIsDisplayed().assertHasClickAction().performClick()
             compose.onNodeWithText(string(R.string.contacts_edit)).assertIsDisplayed()
             compose.onNodeWithTag("contact_editor_fields").performScrollToNode(
@@ -752,6 +762,8 @@ class LocalFoundationJourneyTest {
                 compose.onNodeWithText(string(R.string.dialog_discard_changes)).performClick()
             }
             compose.waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.contactEditor == null }
+            compose.onNode(hasScrollAction()).performScrollToNode(
+                androidx.compose.ui.test.hasText(string(R.string.actions_missing_name_body)))
             compose.onNodeWithText(string(R.string.actions_missing_name_body)).performScrollTo().assertIsDisplayed()
             compose.onNodeWithContentDescription(string(R.string.action_back)).performClick()
             compose.onNodeWithContentDescription(string(R.string.account_menu)).performClick()

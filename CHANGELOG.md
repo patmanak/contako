@@ -10,6 +10,12 @@ Features and improvements by version.
   local values from local-only labels, preferred email groups and media limits.
 - Show cached email-assignment capability as unknown, available or refused without
   probing the account; keep help separate from validation and delivery evidence.
+- Explain local-only custom labels on imported fields as soon as they are edited,
+  including before saving and after reverting the draft.
+- Prepare searchable text once per directory snapshot when first needed, preserving
+  Unicode matching without delaying the initial list for speculative search work.
+- Read local contact values in bounded owner-scoped batches within one transaction,
+  retaining all fields, metadata and occurrence identities.
 
 ## 0.19.0
 

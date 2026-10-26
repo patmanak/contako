@@ -487,6 +487,13 @@ untouched values independently on each peer:
   refusal and session invalidation MUST update only the corresponding help fact.
   Denied Contacts permission suspends copying without changing format support.
   Distinguish editor visibility and actual peer confirmation from these rules.
+- For an imported URL, relation and address occurrence, leave the imported label
+  unchanged, then edit it to a custom label without Save. Help MUST identify the
+  local-only label immediately while keeping the value's Proton support separate.
+  Revert to the original label before Save: the draft-only warning MUST disappear.
+  Standard address type changes MUST remain transferable. New and already-local
+  labels remain controls. Opening/closing help MUST preserve imported provenance,
+  the original, draft, revisions and pending work without peer I/O.
 - Compare differences first, then reveal matching fields; close without changes.
   Use repeated emails with distinct group assignments and reordered positional
   keys: unproved matches MUST remain separate. Check labels, preference, components

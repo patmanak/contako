@@ -43,6 +43,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Job
 import com.patmanak.contako.domain.sync.DeletionRecoverySummary
 import com.patmanak.contako.domain.sync.DeletionRecoveryChoice
@@ -190,6 +193,7 @@ class ContactsViewModel(
     private val directoryClock: () -> Long = System::currentTimeMillis,
     groupAssignmentAvailability: Flow<com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability> =
         flowOf(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN),
+    private val directoryDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
     private val accountGeneration = mutationAdmission.access.value.generation
     private fun acceptsMutation() = mutationAdmission.accepts(accountGeneration)
@@ -437,7 +441,13 @@ class ContactsViewModel(
         val facets: List<OrganizationFacet> = emptyList(),
         val loading: Boolean = false,
         val failed: Boolean = false,
-    )
+    ) {
+        // Empty-query rendering never normalizes fields speculatively. The first nonblank query
+        // prepares this immutable snapshot once; replacing the snapshot replaces its lazy index.
+        val searchInputs: List<ContactSearch.PreparedContact> by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+            snapshot.contacts.map(ContactSearch::prepareContact)
+        }
+    }
     private val directory = directoryRefresh.flatMapLatest {
         repository.observeDirectory(accountId).map { snapshot ->
             val scoped = snapshot.contacts.filter { it.accountId == accountId && !it.isDeleted }
@@ -446,7 +456,8 @@ class ContactsViewModel(
             if (error is CancellationException) throw error
             emit(PreparedDirectory(failed = true))
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, PreparedDirectory(loading = true))
+    }.flowOn(directoryDispatcher)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, PreparedDirectory(loading = true))
     private val filterClock = directoryFilter.flatMapLatest { criteria ->
         flow {
             emit(directoryClock())
@@ -534,8 +545,11 @@ class ContactsViewModel(
         val actionContacts = contacts.filter { it.actionRequiredReasons.isNotEmpty() || it.conflictState != null ||
             it.id in failedAndroidContactIds || it.id in dashboard.blockedMutationContactIds }
         val criteria = if (acceptsMutation()) values[19] as DirectoryFilter else DirectoryFilter()
-        val searchedContacts = contacts.filter {
-            search.matches(it) || it.id in contactsInMatchingGroups
+        val searchedContacts = if (activeQuery.isBlank() || contacts.isEmpty()) contacts else {
+            val searchInputs = prepared.searchInputs
+            contacts.filterIndexed { index, contact ->
+                search.matches(searchInputs[index]) || contact.id in contactsInMatchingGroups
+            }
         }
         // Every new snapshot must use a fresh reference time: a just-committed change must
         // not be mistaken for a future date relative to the previous periodic clock tick.
@@ -1397,6 +1411,7 @@ class ContactsViewModel(
             navigationState: SavedStateHandle? = null,
             groupAssignmentAvailability: Flow<com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability> =
                 flowOf(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN),
+            directoryDispatcher: CoroutineDispatcher = Dispatchers.Default,
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
@@ -1411,6 +1426,7 @@ class ContactsViewModel(
                         accountId = accountId,
                         mutationAdmission = mutationAdmission,
                         groupAssignmentAvailability = groupAssignmentAvailability,
+                        directoryDispatcher = directoryDispatcher,
                     ) as T
             }
     }

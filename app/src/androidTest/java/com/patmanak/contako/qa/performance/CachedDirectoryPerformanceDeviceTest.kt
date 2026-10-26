@@ -6,10 +6,24 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.layout.LayoutInfo
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -21,6 +35,7 @@ import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.espresso.matcher.ViewMatchers
 import com.patmanak.contako.BuildConfig
 import com.patmanak.contako.android.account.SignOutResult
 import com.patmanak.contako.data.local.AggregateType
@@ -42,6 +57,7 @@ import com.patmanak.contako.domain.policy.ContactDirectoryPolicy
 import com.patmanak.contako.domain.policy.ContactSearch
 import com.patmanak.contako.ui.ContakoApp
 import com.patmanak.contako.ui.ContactsViewModel
+import com.patmanak.contako.ui.ContactsUiState
 import com.patmanak.contako.ui.DirectorySectionIndex
 import com.patmanak.contako.ui.theme.ContakoTheme
 import java.io.ByteArrayOutputStream
@@ -59,10 +75,13 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Account-free Room -> repository -> ViewModel -> production Compose qualification.
@@ -85,6 +104,14 @@ class CachedDirectoryPerformanceDeviceTest {
     private var databaseName: String? = null
     private val committedAt = AtomicLong()
     private val budgetViolations = mutableListOf<String>()
+    private val renderOracle by lazy {
+        when (InstrumentationRegistry.getArguments().getString("renderOracle") ?: "legacy-v3") {
+            "legacy-v3" -> RenderOracle.LEGACY_V3
+            "atomic-v4" -> RenderOracle.ATOMIC_V4
+            "atomic-v5" -> RenderOracle.ATOMIC_V5
+            else -> error("Unknown renderOracle; use legacy-v3, atomic-v4 or atomic-v5")
+        }
+    }
 
     @After fun close() {
         disposeViewModel()
@@ -92,6 +119,78 @@ class CachedDirectoryPerformanceDeviceTest {
         database = null
         databaseName?.let(context::deleteDatabase)
         databaseName = null
+    }
+
+    @Test fun atomicOracleRejectsStaleDuplicateAndNonvisibleWitnesses() {
+        val first = RenderNode(1, setOf("Synthetic first"), displayed = true)
+        val second = RenderNode(2, setOf("Synthetic second"), displayed = true)
+        val third = RenderNode(3, setOf("Synthetic third"), displayed = true)
+        val wanted = listOf("Synthetic first", "Synthetic second")
+        val absent = listOf("Synthetic third")
+        assertTrue(RenderSnapshot(listOf(first, second), 0).matches(wanted, absent))
+        assertFalse(RenderSnapshot(listOf(first, second, third), 0).matches(wanted, absent))
+        assertFalse(RenderSnapshot(listOf(first, second.copy(displayed = false)), 0).matches(wanted, absent))
+        assertFalse(RenderSnapshot(listOf(first, second.copy(id = first.id)), 0).matches(wanted, absent))
+        assertFalse(RenderSnapshot(listOf(first, first.copy(id = 4), second), 0).matches(wanted, absent))
+        assertFalse(RenderSnapshot(listOf(first), 0).matches(wanted, absent))
+        val window = android.graphics.Rect(20, 30, 120, 130)
+        val offset = intArrayOf(20, 30)
+        assertTrue(overlapsVisibleWindow(androidx.compose.ui.geometry.Rect(0f, 0f, 30f, 20f), offset, window))
+        assertTrue(overlapsVisibleWindow(androidx.compose.ui.geometry.Rect(-10f, 0f, 10f, 20f), offset, window))
+        assertFalse(overlapsVisibleWindow(androidx.compose.ui.geometry.Rect(100f, 0f, 110f, 20f), offset, window))
+        assertFalse(overlapsVisibleWindow(androidx.compose.ui.geometry.Rect(-30f, 0f, -10f, 20f), offset, window))
+        assertFalse(overlapsVisibleWindow(androidx.compose.ui.geometry.Rect(0f, 0f, 0f, 20f), offset, window))
+    }
+
+    @Test fun atomicNodeVisibilityAgreesWithPublicAssertionsForClippingAndHiddenHost() {
+        val visibleText = "Visible witness"
+        val clippedText = "Clipped witness"
+        compose.setContent {
+            ContakoTheme {
+                Box(Modifier.size(120.dp).clipToBounds()) {
+                    Text(visibleText, Modifier.size(100.dp, 32.dp))
+                    Text(clippedText, Modifier.offset(x = 10_000.dp))
+                }
+            }
+        }
+        val nodes = compose.onAllNodes(hasText(visibleText) or hasText(clippedText)).fetchSemanticsNodes()
+        val visibleNode = compose.runOnUiThread {
+            fun named(text: String) = nodes.single { node ->
+                node.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == text }
+            }
+            val visible = named(visibleText)
+            assertTrue(nodeIsPartiallyDisplayed(visible))
+            assertFalse(nodeIsPartiallyDisplayed(named(clippedText)))
+            visible
+        }
+        compose.onNodeWithText(visibleText).assertIsDisplayed()
+        compose.onNodeWithText(clippedText).assertIsNotDisplayed()
+        val host = compose.runOnUiThread { requireNotNull(visibleNode.root as? ViewRootForTest).view }
+        val previousVisibility = compose.runOnUiThread { host.visibility }
+        try {
+            compose.runOnUiThread {
+                host.visibility = android.view.View.INVISIBLE
+                // Use the already captured node; do not synchronize/fetch through a hidden root.
+                assertFalse(nodeIsPartiallyDisplayed(visibleNode))
+            }
+        } finally {
+            compose.runOnUiThread { host.visibility = previousVisibility }
+        }
+        compose.onNodeWithText(visibleText).assertIsDisplayed()
+        compose.onNodeWithText(clippedText).assertIsNotDisplayed()
+    }
+
+    @Test fun capturedIdentityProofCannotBeHealedByLaterModelReplacement() {
+        val wrong = CanonicalContact(ACCOUNT, "synthetic-wrong")
+        val correct = CanonicalContact(ACCOUNT, "synthetic-correct")
+        val live = mutableListOf(wrong)
+        val atClock = CapturedModelIdentity.capture(live, live)
+        live.clear()
+        live += correct
+        assertFalse(atClock.matches(setOf(correct.id)))
+        assertTrue(atClock.matches(setOf(wrong.id)))
+        assertTrue(CapturedModelIdentity.capture(live, live).matches(setOf(correct.id)))
+        assertFalse(CapturedModelIdentity.capture(listOf(correct, correct), listOf(correct)).matches(setOf(correct.id)))
     }
 
     @Test fun cachedDirectoryRichProfiles() {
@@ -139,6 +238,7 @@ class CachedDirectoryPerformanceDeviceTest {
         verifyFixture(db, repository, fixture)
         // One immutable DTO capture and production oracle, outside every timed interval.
         val diagnosticRows = runBlocking { db.contactContentChangesDao().observeDirectory(ACCOUNT).first() }
+        writeDirectoryQueryPlans(db, profile)
         val directoryOracle = runBlocking { repository.observeDirectory(ACCOUNT).first() }
         val materializedUtf8Bytes = materializedUtf8Bytes(diagnosticRows)
         context.writePerformanceArtifact("cached-directory-${profile.name}-scope.json", """
@@ -154,7 +254,11 @@ class CachedDirectoryPerformanceDeviceTest {
             "volumeMethod":"aggregate-outside-timing-not-cursor-native-or-peak-memory",
             "daoAcquisition":"Room-observation-transaction-relations-and-materialization-not-pure-SQL",
             "mappingSortComponents":"replicated-diagnostic-components-not-production-total-do-not-sum-P95",
-            "timingProtocol":"accepted-action-v3","protocolBreak":"REPOSITORY-FIRST-now-observeDirectory-not-observeContacts-v2-not-directly-comparable",
+            "timingProtocol":"${if (renderOracle == RenderOracle.LEGACY_V3) "accepted-action-v3" else "mixed-${renderOracle.argument}-and-other-v3"}",
+            "renderOracle":"${renderOracle.argument}","renderedTimingProtocol":"${timingProtocol("SEARCH-RENDER")}",
+            "otherTimingProtocol":"accepted-action-v3",
+            "modelIdentityVerification":"${if (renderOracle == RenderOracle.ATOMIC_V5) "immutable-model-captured-at-stop-verified-after" else "inside-render-clock"}",
+            "protocolBreak":"REPOSITORY-FIRST-vs-v2-and-rendered-v3-v4-v5-are-not-directly-comparable",
             "admissionWait":"recorded-separately-not-subtracted-from-total",
             "composeTestOverhead":"synchronization-and-semantics-included","photoPixels":"72x72-not-heavy-decode",
             "searchVmPublication":"Compose-detached-active-first-collector-includes-state-predicate-observation-overhead",
@@ -169,12 +273,24 @@ class CachedDirectoryPerformanceDeviceTest {
             assertEquals(fixture.ids, snapshot.contacts.map { it.id }.toSet())
         }
         measureDiagnosticComponents(profile, db, diagnosticRows, directoryOracle.contacts, fixture)
+        // This opt-in is a component diagnostic, never a pass for the UI latency contracts.
+        if (InstrumentationRegistry.getArguments().getString("performanceDiagnosticsOnly") == "true") {
+            val vm = compose.runOnIdle { createViewModel(repository).also { shownViewModel = it } }
+            waitForDirectory(vm, fixture)
+            compose.runOnIdle { vm.updateQuery(SEARCH) }
+            compose.waitUntil(TIMEOUT) {
+                vm.uiState.value.query == SEARCH && vm.uiState.value.contacts.size == 2 &&
+                    (0..1).all { visible(fixture.contact(it).resolvedDisplayName) }
+            }
+            measureSteadySearchSemantics(profile, vm, fixture)
+            return
+        }
         measure(profile, "REOPENED-VM", 500, prepare = { disposeViewModel() }) { phase ->
             val vm = compose.runOnIdle {
                 phase.actionAcceptedAt = SystemClock.elapsedRealtimeNanos()
                 createViewModel(repository).also { shownViewModel = it }
             }
-            waitForDirectory(vm, fixture)
+            waitForFirstRender(vm, fixture, phase)
             proveFirstUseful(fixture.contact(0), vm, phase)
         }
         // The last reopened VM is the only live VM. Its full Room flow remains subscribed.
@@ -221,28 +337,39 @@ class CachedDirectoryPerformanceDeviceTest {
                 phase.actionAcceptedAt = SystemClock.elapsedRealtimeNanos()
                 shownViewModel = vm
             }
-            waitForDirectory(vm, fixture)
+            waitForFirstRender(vm, fixture, phase)
             proveFirstUseful(fixture.contact(0), vm, phase)
         }
         measure(profile, "SEARCH-RENDER", 100, prepare = {
             compose.runOnIdle { vm.updateQuery("") }
             waitForDirectory(vm, fixture)
-            compose.waitUntil(TIMEOUT) { visible(fixture.contact(2).resolvedDisplayName) }
+            if (renderOracle != RenderOracle.LEGACY_V3) {
+                val before = awaitAtomicRender(vm, fixture, "", fixture.ids,
+                    wantedNames = (0..2).map { fixture.contact(it).resolvedDisplayName })
+                assertFalse("Unfiltered semantics must not satisfy the filtered render oracle",
+                    before.matches((0..1).map { fixture.contact(it).resolvedDisplayName },
+                        listOf(fixture.contact(2).resolvedDisplayName)))
+            } else compose.waitUntil(TIMEOUT) { visible(fixture.contact(2).resolvedDisplayName) }
         }) { phase ->
             compose.runOnIdle {
                 phase.actionAcceptedAt = SystemClock.elapsedRealtimeNanos()
                 vm.updateQuery(SEARCH)
             }
             val expected = setOf(fixture.contact(0).id, fixture.contact(1).id)
-            compose.waitUntil(TIMEOUT) {
+            if (renderOracle != RenderOracle.LEGACY_V3) {
+                awaitAtomicRender(vm, fixture, SEARCH, expected,
+                    wantedNames = (0..1).map { fixture.contact(it).resolvedDisplayName },
+                    absentNames = listOf(fixture.contact(2).resolvedDisplayName), phase = phase)
+            } else compose.waitUntil(TIMEOUT) {
                 vm.uiState.value.query == SEARCH && vm.uiState.value.contacts.map { it.id }.toSet() == expected &&
                     (0..1).all { visible(fixture.contact(it).resolvedDisplayName) } &&
                     compose.onAllNodesWithText(fixture.contact(2).resolvedDisplayName).fetchSemanticsNodes().isEmpty()
             }
             (0..1).forEach { compose.onNodeWithText(fixture.contact(it).resolvedDisplayName).assertIsDisplayed() }
             assertEquals(expected, vm.uiState.value.contacts.map { it.id }.toSet())
-            phase.contractFinishedAt = SystemClock.elapsedRealtimeNanos()
+            if (renderOracle == RenderOracle.LEGACY_V3) phase.contractFinishedAt = SystemClock.elapsedRealtimeNanos()
         }
+        measureSteadySearchSemantics(profile, vm, fixture)
 
         var before: CanonicalContact? = null
         var witnessBefore: CanonicalContact? = null
@@ -304,9 +431,144 @@ class CachedDirectoryPerformanceDeviceTest {
             it.boundsInRoot.width > 0 && it.boundsInRoot.height > 0
         }
 
+    private fun waitForFirstRender(vm: ContactsViewModel, fixture: Fixture, phase: Phase) {
+        if (renderOracle == RenderOracle.LEGACY_V3) waitForDirectory(vm, fixture)
+        else {
+            compose.waitUntil(TIMEOUT) { modelMatches(vm.uiState.value, fixture, "", fixture.ids,
+                verifyIds = renderOracle != RenderOracle.ATOMIC_V5) }
+            awaitAtomicRender(vm, fixture, "", fixture.ids,
+                wantedNames = listOf(fixture.contact(0).resolvedDisplayName), phase = phase)
+        }
+    }
+
+    /** One synchronized semantics acquisition per attempt; all proof values are captured on Main. */
+    private fun awaitAtomicRender(
+        vm: ContactsViewModel,
+        fixture: Fixture,
+        query: String,
+        expectedIds: Set<String>,
+        wantedNames: List<String>,
+        absentNames: List<String> = emptyList(),
+        phase: Phase? = null,
+    ): RenderSnapshot {
+        require(wantedNames.isNotEmpty() && wantedNames.distinct().size == wantedNames.size)
+        val matcher = (wantedNames + absentNames).distinct().map { hasText(it) }.reduce { left, right -> left or right }
+        var proof: RenderSnapshot? = null
+        val verifyIdsInClock = renderOracle != RenderOracle.ATOMIC_V5
+        compose.waitUntil(TIMEOUT) {
+            if (!modelMatches(vm.uiState.value, fixture, query, expectedIds, verifyIdsInClock)) false else {
+                val nodes = compose.onAllNodes(matcher).fetchSemanticsNodes()
+                compose.runOnUiThread {
+                    val model = vm.uiState.value
+                    if (modelMatches(model, fixture, query, expectedIds, verifyIdsInClock)) {
+                        val captured = nodes.map { node ->
+                            RenderNode(node.id, node.config.getOrNull(SemanticsProperties.Text).orEmpty()
+                                .map { it.text }.toSet(), nodeIsPartiallyDisplayed(node))
+                        }
+                        val identity = if (renderOracle == RenderOracle.ATOMIC_V5)
+                            CapturedModelIdentity.capture(model.contacts, model.directoryContacts) else null
+                        val snapshot = RenderSnapshot(captured, SystemClock.elapsedRealtimeNanos(), identity)
+                        if (snapshot.matches(wantedNames, absentNames) && vm.uiState.value === model &&
+                            modelMatches(model, fixture, query, expectedIds, verifyIdsInClock)) {
+                            proof = snapshot
+                            phase?.contractFinishedAt = SystemClock.elapsedRealtimeNanos()
+                        }
+                    }
+                }
+                proof != null
+            }
+        }
+        return requireNotNull(proof).also { captured ->
+            // Verify the lists captured AT the stop, never a later healed/current state. A failure
+            // still invalidates the whole sample; its CPU cost is not application display latency.
+            if (renderOracle == RenderOracle.ATOMIC_V5) {
+                assertTrue("Captured model identities differ", requireNotNull(captured.identity).matches(expectedIds))
+            }
+        }
+    }
+
+    private fun modelMatches(state: ContactsUiState, fixture: Fixture, query: String, ids: Set<String>,
+        verifyIds: Boolean = true): Boolean {
+        return state.query == query && !state.directoryLoading && !state.directoryReadFailed &&
+            state.totalContactCount == fixture.profile.contacts && state.totalGroupCount == fixture.profile.groups &&
+            state.navigation.destination == com.patmanak.contako.ui.RootDestination.CONTACTS &&
+            state.navigation.secondary == null && state.navigation.current.selectedId == null && state.contactEditor == null &&
+            state.contacts.size == ids.size && state.directoryContacts.size == ids.size &&
+            (!verifyIds || (state.contacts.map { it.id }.toSet() == ids && state.directoryContacts.map { it.id }.toSet() == ids))
+    }
+
+    /**
+     * Visibility conditions verified against pinned ui-test 1.10.4 AndroidAssertions.android.kt
+     * (including its compiled implementation), using public layout/View APIs and no reflection.
+     * https://github.com/androidx/androidx/blob/androidx-main/compose/ui/ui-test/src/androidMain/kotlin/androidx/compose/ui/test/AndroidAssertions.android.kt
+     * This is attached, placed, partially visible layout evidence, not GPU presentation timing.
+     */
+    private fun nodeIsPartiallyDisplayed(node: SemanticsNode): Boolean {
+        var layout: LayoutInfo? = node.layoutInfo
+        while (layout != null) {
+            if (!layout.isAttached || !layout.isPlaced) return false
+            layout = layout.parentInfo
+        }
+        val view = (node.root as? ViewRootForTest)?.view ?: return false
+        if (!ViewMatchers.isDisplayed().matches(view)) return false
+        val visibleWindow = android.graphics.Rect()
+        if (!view.getGlobalVisibleRect(visibleWindow)) return false
+        val localBounds = node.boundsInRoot
+        val windowBounds = node.boundsInWindow
+        if (localBounds.width <= 0 || localBounds.height <= 0 || windowBounds.width <= 0 || windowBounds.height <= 0) return false
+        val location = IntArray(2)
+        view.getLocationInWindow(location)
+        return overlapsVisibleWindow(localBounds, location, visibleWindow)
+    }
+
+    private fun overlapsVisibleWindow(bounds: androidx.compose.ui.geometry.Rect, location: IntArray,
+        window: android.graphics.Rect): Boolean = bounds.width > 0 && bounds.height > 0 &&
+        bounds.left + location[0] < window.right && bounds.right + location[0] > window.left &&
+        bounds.top + location[1] < window.bottom && bounds.bottom + location[1] > window.top
+
+    private data class RenderNode(val id: Int, val texts: Set<String>, val displayed: Boolean)
+    private data class RenderSnapshot(val nodes: List<RenderNode>, val capturedAtNanos: Long,
+        val identity: CapturedModelIdentity? = null) {
+        fun matches(wanted: List<String>, absent: List<String>): Boolean {
+            if (nodes.any { node -> absent.any { it in node.texts } }) return false
+            val found = wanted.map { name -> nodes.filter { name in it.texts }.singleOrNull() ?: return false }
+            return found.all(RenderNode::displayed) && found.map { it.id }.distinct().size == wanted.size
+        }
+    }
+
+    private class CapturedModelIdentity private constructor(
+        private val contacts: List<CanonicalContact>, private val directory: List<CanonicalContact>,
+    ) {
+        fun matches(ids: Set<String>): Boolean = contacts.size == ids.size && directory.size == ids.size &&
+            contacts.map { it.id }.toSet() == ids && directory.map { it.id }.toSet() == ids
+
+        companion object {
+            fun capture(contacts: List<CanonicalContact>, directory: List<CanonicalContact>): CapturedModelIdentity {
+                // Copy list containers before stopping. CanonicalContact IDs are immutable vals.
+                val frozenContacts = contacts.toList()
+                return CapturedModelIdentity(frozenContacts,
+                    if (directory === contacts) frozenContacts else directory.toList())
+            }
+        }
+    }
+
+    private enum class RenderOracle(val argument: String) {
+        LEGACY_V3("legacy-v3"), ATOMIC_V4("atomic-v4"), ATOMIC_V5("atomic-v5"),
+    }
+
+    private fun isAtomicRenderedOperation(operation: String): Boolean = renderOracle != RenderOracle.LEGACY_V3 &&
+        operation in setOf("REOPENED-VM", "CACHED-RENDER", "SEARCH-RENDER", "DIAGNOSTIC-STEADY-SEARCH-SEMANTICS")
+
+    private fun timingProtocol(operation: String): String = when {
+        !isAtomicRenderedOperation(operation) -> "accepted-action-v3"
+        renderOracle == RenderOracle.ATOMIC_V4 -> "accepted-action-atomic-render-v4"
+        else -> "accepted-action-atomic-render-v5"
+    }
+
     private fun proveFirstUseful(contact: CanonicalContact, vm: ContactsViewModel, phase: Phase) {
+        if (renderOracle != RenderOracle.LEGACY_V3) check(phase.contractFinishedAt != null)
         compose.onNodeWithText(contact.resolvedDisplayName).assertIsDisplayed()
-        phase.contractFinishedAt = SystemClock.elapsedRealtimeNanos()
+        if (renderOracle == RenderOracle.LEGACY_V3) phase.contractFinishedAt = SystemClock.elapsedRealtimeNanos()
         // Interaction is a postcondition, outside the first-render duration.
         compose.onNodeWithText(contact.resolvedDisplayName).performClick()
         compose.waitUntil(TIMEOUT) { vm.uiState.value.navigation.current.selectedId == contact.id }
@@ -382,7 +644,7 @@ class CachedDirectoryPerformanceDeviceTest {
             context.writePerformanceArtifact("${environment.runId}.json", PerformanceMetricCollector.toJson(partial))
             context.writePerformanceArtifact("${environment.runId}.csv", PerformanceMetricCollector.toCsv(partial))
             context.writePerformanceArtifact("${environment.runId}-phases.json",
-                "{\"schemaVersion\":3,\"timingProtocol\":\"accepted-action-v3\",\"samples\":[${phases.joinToString(",")}]}")
+                "{\"schemaVersion\":3,\"timingProtocol\":\"${timingProtocol(operation)}\",\"renderOracle\":\"${renderOracle.argument}\",\"samples\":[${phases.joinToString(",")}]}")
             if (outcome != PerformanceSampleOutcome.SUCCESS) {
                 throw AssertionError("${environment.runId}: $outcome; see local evidence", failure)
             }
@@ -425,6 +687,9 @@ class CachedDirectoryPerformanceDeviceTest {
         component("DAO-DIRECTORY-MATERIALIZATION", {
             runBlocking { db.contactContentChangesDao().observeDirectory(ACCOUNT).first() }
         }) { actual -> assertTrue("Materialized DTOs differ", rows == actual) }
+        component("DAO-SCOPED-DIRECTORY-MATERIALIZATION", {
+            runBlocking { db.contactContentChangesDao().readDirectory(ACCOUNT) }
+        }) { actual -> assertTrue("Scoped materialized DTOs differ", rows == actual) }
         component("CANONICAL-CONVERSION", { dtos.map(ContactWithValues::toDomain) }) { actual ->
             assertTrue("Converted canonical fields differ", mapped == actual)
         }
@@ -446,9 +711,89 @@ class CachedDirectoryPerformanceDeviceTest {
             assertTrue("Unexpected matching groups", groups.isEmpty())
             assertTrue("Search changed canonical fields", contacts.all { it == oracleById[it.id] })
         }
+        val preparedInputs = oracle.map(ContactSearch::prepareContact)
+        val query = ContactSearch.prepare(SEARCH)
+        component("SEARCH-INPUT-PREPARATION", { oracle.map(ContactSearch::prepareContact) }) { actual ->
+            assertEquals(oracle.size, actual.size)
+            assertEquals(setOf(fixture.contact(0).id, fixture.contact(1).id),
+                oracle.filterIndexed { index, _ -> query.matches(actual[index]) }.map { it.id }.toSet())
+        }
+        component("PREPARED-SEARCH-AND-GROUP-NAMES", {
+            val search = ContactSearch.prepare(SEARCH)
+            val matchingGroups = fixture.groups.filter { search.matchesGroupName(it.name) }
+            val memberIds = matchingGroups.flatMap(ContactGroup::memberships).map(GroupMembership::contactId).toSet()
+            val contacts = oracle.filterIndexed { index, contact ->
+                search.matches(preparedInputs[index]) || contact.id in memberIds
+            }
+            contacts to matchingGroups
+        }) { (contacts, groups) ->
+            assertEquals(setOf(fixture.contact(0).id, fixture.contact(1).id), contacts.map { it.id }.toSet())
+            assertTrue("Unexpected prepared-search matching groups", groups.isEmpty())
+            assertTrue("Prepared search changed canonical fields", contacts.all { it == oracleById[it.id] })
+        }
         component("DIRECTORY-SECTION-INDEX", {
             DirectorySectionIndex.create(oracle, locale, CanonicalContact::resolvedDisplayName)
         }) { actual -> assertTrue("Section order, offsets or contents differ", sections == actual) }
+    }
+
+    /**
+     * Calibration only: the searched UI is already stable. Repeat the v3 semantics oracle without
+     * changing query, model or contents. Its P95 MUST NOT be subtracted from another P95 or used to
+     * turn a failed render contract into a pass.
+     */
+    private fun measureSteadySearchSemantics(profile: Profile, vm: ContactsViewModel, fixture: Fixture) {
+        val expected = setOf(fixture.contact(0).id, fixture.contact(1).id)
+        measure(profile, "DIAGNOSTIC-STEADY-SEARCH-SEMANTICS", Long.MAX_VALUE) { phase ->
+            compose.runOnIdle { phase.actionAcceptedAt = SystemClock.elapsedRealtimeNanos() }
+            if (renderOracle != RenderOracle.LEGACY_V3) {
+                awaitAtomicRender(vm, fixture, SEARCH, expected,
+                    wantedNames = (0..1).map { fixture.contact(it).resolvedDisplayName },
+                    absentNames = listOf(fixture.contact(2).resolvedDisplayName), phase = phase)
+            } else compose.waitUntil(TIMEOUT) {
+                vm.uiState.value.query == SEARCH && vm.uiState.value.contacts.map { it.id }.toSet() == expected &&
+                    (0..1).all { visible(fixture.contact(it).resolvedDisplayName) } &&
+                    compose.onAllNodesWithText(fixture.contact(2).resolvedDisplayName).fetchSemanticsNodes().isEmpty()
+            }
+            (0..1).forEach { compose.onNodeWithText(fixture.contact(it).resolvedDisplayName).assertIsDisplayed() }
+            assertEquals(expected, vm.uiState.value.contacts.map { it.id }.toSet())
+            if (renderOracle == RenderOracle.LEGACY_V3) phase.contractFinishedAt = SystemClock.elapsedRealtimeNanos()
+        }
+    }
+
+    /** Planner text describes only fixed SQL identifiers, never bound values or contact data. */
+    private fun writeDirectoryQueryPlans(db: ContakoDatabase, profile: Profile) {
+        fun plan(sql: String, vararg arguments: String): JSONArray = db.openHelper.readableDatabase
+            .query("EXPLAIN QUERY PLAN $sql", arguments).use { cursor ->
+                val detail = cursor.getColumnIndexOrThrow("detail")
+                JSONArray().also { result -> while (cursor.moveToNext()) result.put(cursor.getString(detail)) }
+            }
+        val headers = plan("""
+            SELECT contacts.*, changes.observed_at AS content_observed_at FROM contacts
+            LEFT JOIN contact_content_changes AS changes
+                ON contacts.account_id=changes.account_id AND contacts.id=changes.contact_id
+            WHERE contacts.account_id=? AND contacts.is_deleted=0
+            ORDER BY contacts.sort_name COLLATE NOCASE, contacts.id
+        """.trimIndent(), ACCOUNT)
+        val legacyFlatValues = plan("""
+            SELECT v.* FROM contact_values AS v
+            INNER JOIN contacts AS c ON c.owner_key=v.owner_key
+                AND c.account_id=v.account_id AND c.id=v.contact_id
+            WHERE c.account_id=? AND v.account_id=? AND c.is_deleted=0
+            ORDER BY v.owner_key, v.rowid
+        """.trimIndent(), ACCOUNT, ACCOUNT)
+        val ownerKeys = runBlocking { db.contactContentChangesDao().readDirectoryHeaders(ACCOUNT) }
+            .take(com.patmanak.contako.data.local.ContactContentChangesDao.DIRECTORY_OWNER_BATCH_SIZE)
+            .map { it.contact.ownerKey }
+        val boundedValues = plan("""
+            SELECT v.* FROM contact_values AS v INDEXED BY index_contact_values_owner_key
+            WHERE v.account_id=? AND v.owner_key IN (${ownerKeys.joinToString(",") { "?" }})
+            ORDER BY v.owner_key, v.rowid
+        """.trimIndent(), ACCOUNT, *ownerKeys.toTypedArray())
+        context.writePerformanceArtifact("cached-directory-${profile.name}-query-plan.json", JSONObject()
+            .put("scope", "fixed-sql-planner-identifiers-only-no-bind-values")
+            .put("ownershipGuard", "account-contact-owner-checked-against-transactional-headers")
+            .put("headers", headers).put("legacyUnboundedFlatValues", legacyFlatValues)
+            .put("currentBoundedOwnerValues", boundedValues).put("ownerBatchLimit", ownerKeys.size).toString(2))
     }
 
     /** String-column UTF-8 aggregate only: never serialize a payload into evidence. */
@@ -468,8 +813,8 @@ class CachedDirectoryPerformanceDeviceTest {
     }
 
     private fun environment(profile: Profile, operation: String) = PerformanceEnvironment(
-        runId = "09-${profile.name}-$operation-api${Build.VERSION.SDK_INT}",
-        caseId = "07-$operation", fixtureId = "FX-P-RICH-${profile.contacts}", fixtureSeed = 9L,
+        runId = "09-${profile.name}-$operation${if (isAtomicRenderedOperation(operation)) "-${renderOracle.argument}" else ""}-api${Build.VERSION.SDK_INT}",
+        caseId = "07-$operation${if (isAtomicRenderedOperation(operation)) "-${renderOracle.argument.uppercase(Locale.ROOT)}" else ""}", fixtureId = "FX-P-RICH-${profile.contacts}", fixtureSeed = 9L,
         buildType = PerformanceBuildType.BENCHMARK, deviceClass = "physical-reference",
         apiLevel = Build.VERSION.SDK_INT, thermalState = evidence.thermalState,
         batteryPercent = evidence.batteryPercent, networkProfile = "none", cacheState = "warm",

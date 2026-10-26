@@ -114,7 +114,7 @@ class ContactSyncDetailViewModelTest {
     private fun model(recovery: SyncRecoveryDataSource,
         admission: ContactMutationAdmission = UnrestrictedContactMutationAdmission) =
         ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery, accountId = "synthetic-owner",
-            mutationAdmission = admission, navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
+            mutationAdmission = admission, navigationState = SavedStateHandle(), directoryDispatcher = dispatcher))[ContactsViewModel::class.java]
 
     private class ReadOnlyDetails(initial: ContactSyncDetail?) : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
         val detail = MutableStateFlow(initial)

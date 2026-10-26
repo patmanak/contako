@@ -75,6 +75,21 @@ internal object ContactFieldCompatibility {
         )
     }
 
+    /** Unsaved label intent is explanatory only; durable provenance is established at Save. */
+    fun describeDraft(draft: CanonicalContact, original: CanonicalContact?, valueId: String): FieldCompatibilityDescription {
+        val facts = describe(draft, valueId)
+        if (facts.proton == ProtonFieldSupport.UNKNOWN) return facts
+        if (original != null && (original.accountId != draft.accountId || original.id != draft.id)) {
+            return unknown(facts.kind)
+        }
+        val value = draft.values.single { it.id == valueId }
+        val previous = original?.values.orEmpty().filter { it.id == valueId }
+        if (previous.size > 1) return unknown(facts.kind)
+        val labelEdited = previous.singleOrNull()?.let { it.label != value.label } ?: true
+        return facts.copy(localLabelOnly = facts.localLabelOnly ||
+            (labelEdited && ContactValueSupport.hasUnsupportedGeneratedLabel(value)))
+    }
+
     fun needsExplanation(kind: ContactValueKind): Boolean =
         protonSupport(kind) != ProtonFieldSupport.GENERATED ||
             androidScopes.getValue(kind) != AndroidFieldScope.ALL_OCCURRENCES ||

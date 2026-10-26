@@ -19,7 +19,8 @@ import java.lang.reflect.Proxy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertNull
@@ -42,7 +43,9 @@ class ProductionSharedSyncRuntimeDeviceTest {
     }
 
     @After fun tearDown() {
-        scope.cancel()
+        // The composition owns long-lived Room collectors in the supplied scope.
+        // Join their cancellation before closing the database they still observe.
+        runBlocking { scope.coroutineContext.job.cancelAndJoin() }
         database.close()
         context.deleteDatabase(DATABASE_NAME)
     }

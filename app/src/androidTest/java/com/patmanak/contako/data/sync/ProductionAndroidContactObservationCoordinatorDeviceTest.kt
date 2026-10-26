@@ -122,7 +122,11 @@ class ProductionAndroidContactObservationCoordinatorDeviceTest {
 
         database.close()
         database = ContakoDatabase.create(context, DB)
-        assertEquals(AndroidBoundedPageResult.Applied, coordinator(ack).ingest(scope, observedPage))
+        // The fake acknowledges without clearing DIRTY or writing the canonical claim.
+        // Replaying that pre-acknowledgement page after another contact advanced the
+        // account revision must replan, rather than reuse the first contact's stale receipt.
+        assertEquals(AndroidBoundedPageResult.ReplanRequired, coordinator(ack).ingest(scope, observedPage))
+        assertEquals(listOf(10L, 11L), acknowledged)
         assertEquals(stored, requireNotNull(database.contactDao().get(account.value, contactId)).toDomain())
         assertEquals(intents, database.outboxDao().getAll(account.value))
         assertEquals(contactId, requireNotNull(database.androidProjectionLedgerDao()

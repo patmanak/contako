@@ -7,6 +7,10 @@ every family, linked name/phonetic/organization IDs, primary/secondary notes and
 photos, and preferred versus secondary emails. Family help MUST NOT imply delivery
 of a particular occurrence. Test URL/relationship/address labels independently
 from value generation and preserve imported provenance/unknown data unchanged.
+For imported URL/relation/address occurrences, compare unchanged, custom-label
+edit and revert before Save against the original. Draft help MUST explain a
+new local-only label immediately without writing its durable provenance marker;
+standard address labels and already-local/new occurrences are separate controls.
 
 Cached ASSIGN_EMAILS evidence MUST stay unknown after a successful LIST, become
 available or refused only from that operation, and reset on context invalidation.
@@ -68,6 +72,24 @@ including accents, non-Latin names, duplicate names, successive locales and
 concurrent contact/group observers. A sort operation MUST NOT share a mutable
 Collator across observers. No list optimization may substitute incomplete
 canonical values into the editor or weaken revision/owner guards.
+Compare the scoped transactional directory read against the relation-based
+oracle beyond SQLite bind-batch boundaries, including empty-value contacts,
+repeated occurrences and foreign owners sharing a contact ID. Value-only and
+observation-date writes MUST invalidate one coherent snapshot without requiring
+a revision bump. Reopen storage and verify fresh contents and preserved payloads.
+Rows whose account, contact and owner identities disagree MUST NOT enter the
+directory; verify the malformed rows and legitimate payloads remain stored.
+Organization facets MUST retain the reference normalization, minimum-label and
+ordering rules across repeated Unicode labels, deleted contacts and input order.
+Prepared search inputs MUST belong to their immutable directory snapshot, retain
+Unicode matching and occurrence boundaries, and exclude private nonsearchable
+fields. The same contact ID after a field edit MUST use refreshed search inputs.
+An empty query MUST NOT prepare search inputs. The first nonblank query prepares
+one index for its immutable snapshot; later queries MUST reuse it. Compare the
+prepared result with ordinary matching. Replace contacts with the same IDs and
+invalidate the owner: an older index MUST NOT restore old fields or visibility.
+Preparing or consulting the index MUST NOT create pending work or require a
+remote/provider read. Attribute the first-query cost separately from warm search.
 
 With controlled remote gateways and real Room, assert no-change passes fetch no
 full cards or provider writes; verify exact changed and unchanged fields for ten
@@ -167,6 +189,18 @@ full-card reads. Interruption before the global checkpoint MAY replay already
 committed cards: record that cost separately and retain identities/values without
 claiming it is no-change work. Controlled remote outcomes do not qualify HTTP,
 cryptographic verification or real rate-limit timing.
+
+`HeterogeneousWireImportRecoveryDeviceTest` extends that composition through the
+production public gateway and vCard decoder, with plaintext supplied at the
+crypto seam. It MUST combine a parser-rejected card with an unavailable group
+catalog, then restore the catalog and retry the rejected card alone. A structured
+HTTP 429 at the controlled transport boundary after a durable batch MUST retain
+that batch, withhold the global checkpoint and expose Retry-After. Reopening and
+replaying MUST preserve identities and exact values without duplicates. Catalog
+outages MUST preserve known groups and per-email references, including repeated
+addresses with distinct groups; restoration and two unchanged passes MUST avoid
+unnecessary full-card reads. These cases do not qualify real HTTP, encryption or
+provider behavior.
 
 JVM integration classes use `-PcontakoTestBuildType=debug :testDebugUnitTest`
 with explicit `--tests` selectors.

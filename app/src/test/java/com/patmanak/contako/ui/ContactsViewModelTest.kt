@@ -51,7 +51,7 @@ class ContactsViewModelTest {
         val repository = FakeRepository(listOf(original))
         val recovery = FakeSyncRecoveryDataSource()
         var committed = 0
-        val model = ContactsViewModel(repository, recovery, onMutationCommitted = { committed++ })
+        val model = ContactsViewModel(repository, recovery, onMutationCommitted = { committed++ }, directoryDispatcher = dispatcher)
         val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         runCurrent()
         model.editContact(original)
@@ -85,7 +85,7 @@ class ContactsViewModelTest {
         val repository = FakeRepository(listOf(original))
         val recovery = FakeSyncRecoveryDataSource()
         val availability = MutableStateFlow(EmailGroupAssignmentAvailability.UNKNOWN)
-        val model = ContactsViewModel(repository, recovery, groupAssignmentAvailability = availability)
+        val model = ContactsViewModel(repository, recovery, groupAssignmentAvailability = availability, directoryDispatcher = dispatcher)
         val ui = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         val capability = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.groupAssignmentAvailability.collect {} }
         runCurrent()
@@ -114,7 +114,7 @@ class ContactsViewModelTest {
         val repository = FakeRepository(listOf(original))
         val availability = MutableStateFlow(EmailGroupAssignmentAvailability.AVAILABLE)
         val gate = AccountLifecycleAdmission()
-        val model = ContactsViewModel(repository, mutationAdmission = gate, groupAssignmentAvailability = availability)
+        val model = ContactsViewModel(repository, mutationAdmission = gate, groupAssignmentAvailability = availability, directoryDispatcher = dispatcher)
         val ui = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         val capability = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.groupAssignmentAvailability.collect {} }
         runCurrent()
@@ -140,7 +140,7 @@ class ContactsViewModelTest {
         val local = contact("compared", "Synthetic", "email", "fixture@example.test").copy(revision = 7)
         val repository = FakeRepository(listOf(local))
         val recovery = ConflictDetails(conflictDetail(local))
-        val model = ContactsViewModel(repository, recovery)
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         model.openConflict(local.id)
         runCurrent()
         val before = recovery.loads
@@ -175,7 +175,7 @@ class ContactsViewModelTest {
         val entered = CompletableDeferred<Unit>()
         val resume = CompletableDeferred<Unit>()
         recovery.beforeChoice = { entered.complete(Unit); resume.await() }
-        val model = ContactsViewModel(repository, recovery)
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         model.openConflict(local.id)
         runCurrent()
         model.chooseConflict(ContactConflictChoice.LOCAL)
@@ -210,7 +210,7 @@ class ContactsViewModelTest {
             it.copy(proton = it.proton.copy(accountId = "another-synthetic-owner"))
         })
         val repository = FakeRepository(listOf(local))
-        val model = ContactsViewModel(repository, recovery)
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         model.openConflict(local.id)
         runCurrent()
         assertNull(model.conflictPanel.value.detail)
@@ -231,7 +231,7 @@ class ContactsViewModelTest {
         ), actionRequiredReasons = setOf("INVALID_EMAIL"), pendingMutationRevision = 2)
         val repository = FakeRepository(listOf(a, b))
         val recovery = FakeSyncRecoveryDataSource()
-        val model = ContactsViewModel(repository, recovery)
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         runCurrent()
         assertEquals(1, model.uiState.value.organizationFacets.size)
@@ -269,7 +269,7 @@ class ContactsViewModelTest {
         val group = ContactGroup(LOCAL_ACCOUNT_ID, "g", "Amis",
             memberships = listOf(GroupMembership("a", "secondary")))
         val repository = FakeRepository(listOf(a), listOf(group))
-        val model = ContactsViewModel(repository)
+        val model = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         runCurrent()
         model.updateQuery("amis")
@@ -293,7 +293,7 @@ class ContactsViewModelTest {
     @Test fun recentFilterUsesFreshSnapshotTimeAndDoesNotSurviveANewModel() = runTest(dispatcher) {
         var now = 1_000_000_000L
         val repository = FakeRepository(listOf(contact("a", "Ana", "email", "a@example.invalid")))
-        val model = ContactsViewModel(repository, directoryClock = { now })
+        val model = ContactsViewModel(repository, directoryClock = { now }, directoryDispatcher = dispatcher)
         val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         runCurrent()
         model.setDirectoryFilter(DirectoryFilter(recentChanges = true))
@@ -309,7 +309,7 @@ class ContactsViewModelTest {
         assertTrue(model.uiState.value.directoryContacts.isEmpty())
         model.clearDirectoryFilters()
         runCurrent()
-        val next = ContactsViewModel(repository)
+        val next = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val other = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { next.uiState.collect {} }
         runCurrent()
         assertFalse(next.uiState.value.directoryFilter.isActive)
@@ -324,7 +324,7 @@ class ContactsViewModelTest {
                 if (fail) kotlinx.coroutines.flow.flow { error("synthetic-local-read-failure") }
                 else repository.observeDirectory(accountId)
         }
-        val model = ContactsViewModel(boundary)
+        val model = ContactsViewModel(boundary, directoryDispatcher = dispatcher)
         val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         runCurrent()
         assertTrue(model.uiState.value.directoryReadFailed)
@@ -347,7 +347,7 @@ class ContactsViewModelTest {
         val stores = AccountContactsViewModelStore()
         val scopeA = stores.forGeneration(gate.access.value.generation)
         val model = ViewModelProvider(scopeA, ContactsViewModel.factory(repository,
-            mutationAdmission = gate, navigationState = scopeA.navigationState))[ContactsViewModel::class.java]
+            mutationAdmission = gate, navigationState = scopeA.navigationState, directoryDispatcher = dispatcher))[ContactsViewModel::class.java]
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         runCurrent()
         model.editContact(original)
@@ -388,7 +388,7 @@ class ContactsViewModelTest {
         val scopeB = stores.forGeneration(gate.access.value.generation)
         assertFalse(scopeA === scopeB)
         val next = ViewModelProvider(scopeB, ContactsViewModel.factory(repository,
-            mutationAdmission = gate, navigationState = scopeB.navigationState))[ContactsViewModel::class.java]
+            mutationAdmission = gate, navigationState = scopeB.navigationState, directoryDispatcher = dispatcher))[ContactsViewModel::class.java]
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { next.uiState.collect {} }
         runCurrent()
         assertTrue(next.uiState.value.contacts.isEmpty())
@@ -414,7 +414,7 @@ class ContactsViewModelTest {
         repository.contactSave = { entered.complete(Unit); resume.await(); SaveResult.Saved(it) }
         val gate = AccountLifecycleAdmission()
         var wakeUps = 0
-        val model = ContactsViewModel(repository, mutationAdmission = gate, onMutationCommitted = { wakeUps++ })
+        val model = ContactsViewModel(repository, mutationAdmission = gate, onMutationCommitted = { wakeUps++ }, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.editContact()
         runCurrent()
@@ -442,7 +442,7 @@ class ContactsViewModelTest {
             val group = ContactGroup(accountId = LOCAL_ACCOUNT_ID, id = "synthetic-group", name = "Synthetic group")
             val repository = FakeRepository(listOf(original), listOf(group))
             val gate = AccountLifecycleAdmission()
-            val model = ContactsViewModel(repository, mutationAdmission = gate)
+            val model = ContactsViewModel(repository, mutationAdmission = gate, directoryDispatcher = dispatcher)
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
             val entered = CompletableDeferred<Unit>()
             val resume = CompletableDeferred<Unit>()
@@ -488,7 +488,7 @@ class ContactsViewModelTest {
             }
         }
         val gate = AccountLifecycleAdmission()
-        val model = ContactsViewModel(FakeRepository(listOf(local)), syncRecoveryDataSource = recovery, mutationAdmission = gate)
+        val model = ContactsViewModel(FakeRepository(listOf(local)), syncRecoveryDataSource = recovery, mutationAdmission = gate, directoryDispatcher = dispatcher)
         model.openConflict(local.id)
         runCurrent()
         assertEquals(detail, model.conflictPanel.value.detail)
@@ -522,7 +522,7 @@ class ContactsViewModelTest {
             try { neverResume.await(); SaveResult.Saved(it) } finally { order += "save-released" }
         }
         val model = ViewModelProvider(scope, ContactsViewModel.factory(repository,
-            mutationAdmission = gate, navigationState = scope.navigationState))[ContactsViewModel::class.java]
+            mutationAdmission = gate, navigationState = scope.navigationState, directoryDispatcher = dispatcher))[ContactsViewModel::class.java]
         model.editContact()
         model.saveContact()
         entered.await()
@@ -540,7 +540,7 @@ class ContactsViewModelTest {
     @Test fun unreadableAdmissionPreservesEditableDraftInsteadOfCrashingOrLeavingSavingForever() = runTest(dispatcher) {
         val gate = AccountLifecycleAdmission(isAuthenticated = { throw java.io.IOException("Synthetic failure") })
         val repository = FakeRepository(emptyList())
-        val model = ContactsViewModel(repository, mutationAdmission = gate)
+        val model = ContactsViewModel(repository, mutationAdmission = gate, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.editContact()
         runCurrent()
@@ -557,7 +557,7 @@ class ContactsViewModelTest {
         val original = contact("capability", "Original", "email", "fixture@example.test")
         val repository = FakeRepository(listOf(original))
         val denied = MutableStateFlow(setOf(com.patmanak.contako.domain.model.GroupOperation.CREATE))
-        val model = ContactsViewModel(repository, deniedGroupOperations = denied)
+        val model = ContactsViewModel(repository, deniedGroupOperations = denied, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         advanceUntilIdle()
         model.editGroup()
@@ -579,7 +579,7 @@ class ContactsViewModelTest {
         val repository = FakeRepository(listOf(original))
         val result = CompletableDeferred<SaveResult<CanonicalContact>>()
         repository.contactSave = { result.await() }
-        val model = ContactsViewModel(repository)
+        val model = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.editContact(original)
         advanceUntilIdle()
@@ -612,7 +612,7 @@ class ContactsViewModelTest {
                 val original = CanonicalContact(accountId = LOCAL_ACCOUNT_ID, id = "contact",
                     firstName = "Previous", displayName = "Old display name").takeIf { editing }
                 val repository = FakeRepository(listOfNotNull(original))
-                val model = ContactsViewModel(repository)
+                val model = ContactsViewModel(repository, directoryDispatcher = dispatcher)
                 backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
                 model.editContact(original)
                 advanceUntilIdle()
@@ -643,7 +643,7 @@ class ContactsViewModelTest {
         val original = CanonicalContact(accountId = LOCAL_ACCOUNT_ID, id = "contact",
             displayName = "Display only", values = listOf(name))
         val repository = FakeRepository(listOf(original))
-        val model = ContactsViewModel(repository)
+        val model = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.editContact(original)
         advanceUntilIdle()
@@ -672,7 +672,7 @@ class ContactsViewModelTest {
             val repository = FakeRepository(emptyList())
             repository.deleteAction = { throw java.io.IOException("synthetic private failure") }
             var committed = 0
-            val model = ContactsViewModel(repository, onMutationCommitted = { committed++ })
+            val model = ContactsViewModel(repository, onMutationCommitted = { committed++ }, directoryDispatcher = dispatcher)
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
             val contact = CanonicalContact(accountId = LOCAL_ACCOUNT_ID, id = "target", firstName = "Target")
             val group = ContactGroup(LOCAL_ACCOUNT_ID, "target", "Target")
@@ -714,7 +714,7 @@ class ContactsViewModelTest {
         for (isGroup in listOf(false, true)) {
             val repository = FakeRepository(emptyList())
             repository.deleteAction = { throw kotlinx.coroutines.CancellationException("cancelled") }
-            val model = ContactsViewModel(repository)
+            val model = ContactsViewModel(repository, directoryDispatcher = dispatcher)
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
             if (isGroup) model.requestGroupDeletion(ContactGroup(LOCAL_ACCOUNT_ID, "target", "Target"))
             else model.requestContactDeletion(CanonicalContact(accountId = LOCAL_ACCOUNT_ID, id = "target", firstName = "Target"))
@@ -734,7 +734,7 @@ class ContactsViewModelTest {
     fun dispatchFailureAfterDurableDeletionDoesNotPresentFalseDeleteFailure() = runTest(dispatcher) {
         for (isGroup in listOf(false, true)) {
             val repository = FakeRepository(emptyList())
-            val model = ContactsViewModel(repository, onMutationCommitted = { throw java.io.IOException("scheduler") })
+            val model = ContactsViewModel(repository, onMutationCommitted = { throw java.io.IOException("scheduler") }, directoryDispatcher = dispatcher)
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
             if (isGroup) model.requestGroupDeletion(ContactGroup(LOCAL_ACCOUNT_ID, "target", "Target"))
             else model.requestContactDeletion(CanonicalContact(accountId = LOCAL_ACCOUNT_ID, id = "target", firstName = "Target"))
@@ -754,7 +754,7 @@ class ContactsViewModelTest {
         val completion = CompletableDeferred<SaveResult<ContactGroup>>()
         repository.groupSave = { completion.await() }
         var committed = 0
-        val model = ContactsViewModel(repository, onMutationCommitted = { committed++ })
+        val model = ContactsViewModel(repository, onMutationCommitted = { committed++ }, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.editGroup()
         advanceUntilIdle()
@@ -785,7 +785,7 @@ class ContactsViewModelTest {
     fun groupSaveFailurePreservesDraftAndAllowsRetry() = runTest(dispatcher) {
         val repository = FakeRepository(emptyList())
         repository.groupSave = { throw java.io.IOException("synthetic storage failure") }
-        val model = ContactsViewModel(repository)
+        val model = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.editGroup(ContactGroup(LOCAL_ACCOUNT_ID, "group", "Draft"))
         model.saveGroup()
@@ -805,7 +805,7 @@ class ContactsViewModelTest {
         val repository = FakeRepository(emptyList())
         val completion = CompletableDeferred<SaveResult<ContactGroup>>()
         repository.groupSave = { completion.await() }
-        val model = ContactsViewModel(repository)
+        val model = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.editGroup(ContactGroup(LOCAL_ACCOUNT_ID, "first", "First"))
         model.saveGroup()
@@ -828,7 +828,7 @@ class ContactsViewModelTest {
                     preservationKey = "proton-card-1-0"),
             ))
         val repository = FakeRepository(listOf(imported))
-        val model = ContactsViewModel(repository)
+        val model = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         advanceUntilIdle()
         model.editContact(imported)
@@ -856,7 +856,7 @@ class ContactsViewModelTest {
         val recovery = FakeSyncRecoveryDataSource()
         recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.ANDROID_PARTIAL,
             androidPendingContactIds = setOf(android.id))
-        val model = ContactsViewModel(repository, recovery)
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         advanceUntilIdle()
         assertEquals(listOf(pending), model.uiState.value.pendingContacts)
@@ -880,7 +880,7 @@ class ContactsViewModelTest {
             actionRequiredCount = 1,
             problem = com.patmanak.contako.domain.sync.SyncProblem.ANDROID_INTEROPERABILITY_DEGRADED,
         )
-        val model = ContactsViewModel(repository, recovery)
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         advanceUntilIdle()
         assertEquals(listOf(conflict), model.uiState.value.actionContacts)
@@ -900,7 +900,7 @@ class ContactsViewModelTest {
         val recovery = FakeSyncRecoveryDataSource()
         recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.BLOCKED,
             actionRequiredCount = 1, blockedMutationContactIds = setOf(blocked.id))
-        val model = ContactsViewModel(repository, recovery)
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.updateQuery("no-match")
         advanceUntilIdle()
@@ -917,7 +917,7 @@ class ContactsViewModelTest {
         val affected = contact("ingest-fixture", "Affected", "affected-email", "affected@example.test")
         val untouched = contact("untouched-fixture", "Untouched", "untouched-email", "untouched@example.test")
         val recovery = FakeSyncRecoveryDataSource()
-        val model = ContactsViewModel(FakeRepository(listOf(affected, untouched)), recovery)
+        val model = ContactsViewModel(FakeRepository(listOf(affected, untouched)), recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
 
         for (globalState in listOf(SyncDashboardState.ANDROID_DEGRADED, SyncDashboardState.BLOCKED,
@@ -943,7 +943,7 @@ class ContactsViewModelTest {
             actionRequiredCount = 1,
             problem = com.patmanak.contako.domain.sync.SyncProblem.GROUP_CAPABILITY_REQUIRED,
             androidContactIssues = listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_PROJECTION)))
-        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery)
+        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         advanceUntilIdle()
 
@@ -961,7 +961,7 @@ class ContactsViewModelTest {
         recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.ANDROID_PARTIAL,
             androidPendingContactIds = setOf(affected.id, waiting.id),
             androidContactIssues = listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_PROJECTION)))
-        val model = ContactsViewModel(FakeRepository(listOf(affected, waiting)), recovery)
+        val model = ContactsViewModel(FakeRepository(listOf(affected, waiting)), recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         advanceUntilIdle()
 
@@ -980,7 +980,7 @@ class ContactsViewModelTest {
                 SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_PROJECTION),
                 SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_INGEST),
             ))
-        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery)
+        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         advanceUntilIdle()
 
@@ -997,7 +997,7 @@ class ContactsViewModelTest {
         recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.ANDROID_DEGRADED,
             actionRequiredCount = 1,
             androidContactIssues = listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_INGEST)))
-        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery)
+        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         advanceUntilIdle()
         assertEquals(listOf(affected), model.uiState.value.actionContacts)
@@ -1016,7 +1016,7 @@ class ContactsViewModelTest {
         val recovery = FakeSyncRecoveryDataSource()
         recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.ANDROID_DEGRADED,
             androidContactIssues = listOf(SyncAndroidContactIssue(affected.id, SyncAndroidContactIssueKind.ANDROID_INGEST)))
-        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery)
+        val model = ContactsViewModel(FakeRepository(listOf(affected)), recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.updateQuery("no-matching-directory-entry")
         advanceUntilIdle()
@@ -1039,7 +1039,7 @@ class ContactsViewModelTest {
             androidPendingContactIds = setOf(first.id, second.id),
             blockedMutationContactIds = setOf(first.id),
         )
-        val model = ContactsViewModel(repository, recovery)
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.updateQuery("no-matching-contact")
         advanceUntilIdle()
@@ -1061,7 +1061,7 @@ class ContactsViewModelTest {
         val pending = SyncDashboardSnapshot(SyncDashboardState.PENDING,
             androidPendingContactIds = setOf(first.id, second.id))
         recovery.status.value = pending
-        val model = ContactsViewModel(repository, recovery)
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
 
         for (activity in listOf(SyncActivity.SCHEDULED, SyncActivity.RUNNING, SyncActivity.IDLE)) {
@@ -1096,7 +1096,7 @@ class ContactsViewModelTest {
         recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.PENDING,
             androidPendingContactIds = setOf(waiting.id, blocked.id),
             blockedMutationContactIds = setOf(blocked.id))
-        val model = ContactsViewModel(repository, recovery)
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         advanceUntilIdle()
 
@@ -1120,7 +1120,7 @@ class ContactsViewModelTest {
         val repository = FakeRepository(emptyList())
         val recovery = FakeSyncRecoveryDataSource()
         recovery.status.value = SyncDashboardSnapshot(SyncDashboardState.CURRENT)
-        val viewModel = ContactsViewModel(repository, recovery)
+        val viewModel = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
         advanceUntilIdle()
         repository.pending.value = 1
@@ -1143,7 +1143,7 @@ class ContactsViewModelTest {
         val selected = contact("selected", "Selected", "email", "selected@example.test")
         val group = ContactGroup(LOCAL_ACCOUNT_ID, "group", "Selected group")
         val repository = FakeRepository(listOf(selected), listOf(group))
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
         advanceUntilIdle()
         viewModel.updateQuery("Selected")
@@ -1170,7 +1170,7 @@ class ContactsViewModelTest {
         }
         val restored = ContactsViewModel(delayedRepository, savedStateHandle = SavedStateHandle(mapOf(
             "navigation.CONTACTS.selection" to selected.id,
-        )))
+        )), directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { restored.uiState.collect {} }
         advanceUntilIdle()
         assertEquals(selected.id, restored.uiState.value.navigation.current.selectedId)
@@ -1188,7 +1188,7 @@ class ContactsViewModelTest {
         val group = ContactGroup(LOCAL_ACCOUNT_ID, "group", "Friends",
             memberships = listOf(GroupMembership(alice.id, "email")))
         val repository = FakeRepository(listOf(alice), listOf(group))
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
         advanceUntilIdle()
         viewModel.updateQuery("Alice")
@@ -1228,7 +1228,7 @@ class ContactsViewModelTest {
             color = "#5252CC",
             memberships = listOf(GroupMembership(member.id, "member-email")),
         )
-        val viewModel = ContactsViewModel(FakeRepository(listOf(member), listOf(group)))
+        val viewModel = ContactsViewModel(FakeRepository(listOf(member), listOf(group)), directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
         advanceUntilIdle()
 
@@ -1270,7 +1270,7 @@ class ContactsViewModelTest {
                 contact("bob", "Bob", "bob-email", "bob@example.test"),
             ),
         )
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1310,7 +1310,7 @@ class ContactsViewModelTest {
         val repository = FakeRepository(
             listOf(multiEmail, CanonicalContact(LOCAL_ACCOUNT_ID, "no-email", displayName = "No email")),
         )
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1336,7 +1336,7 @@ class ContactsViewModelTest {
             color = "#8080FF",
         )
         val repository = FakeRepository(contacts = listOf(member), groups = listOf(original))
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1379,7 +1379,7 @@ class ContactsViewModelTest {
                 ContactGroup(LOCAL_ACCOUNT_ID, "work", "Work"),
             ),
         )
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1425,7 +1425,7 @@ class ContactsViewModelTest {
         val logo = ContactValue("logo", ContactValueKind.LOGO, "https://img.example.test/logo.png", order = 0)
         val repository = FakeRepository(listOf(contact("image", "Image", "email", "image@example.test")
             .copy(values = listOf(photoA, photoB, logo))))
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1464,7 +1464,7 @@ class ContactsViewModelTest {
             ),
         )
         val repository = FakeRepository(listOf(original))
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1500,7 +1500,7 @@ class ContactsViewModelTest {
             ),
         )
         val repository = FakeRepository(listOf(contact))
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
         advanceUntilIdle()
 
@@ -1525,7 +1525,7 @@ class ContactsViewModelTest {
             ),
         )
         val repository = FakeRepository(listOf(original))
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1559,7 +1559,7 @@ class ContactsViewModelTest {
             ),
         )
         val repository = FakeRepository(listOf(contact))
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1594,7 +1594,7 @@ class ContactsViewModelTest {
         val original = contact("address-contact", "Address", "email", "address@example.test")
             .copy(values = listOf(address))
         val repository = FakeRepository(listOf(original))
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1617,7 +1617,7 @@ class ContactsViewModelTest {
     @Test
     fun advancedEditorRejectsPrivateKeyWithoutSavingOrDiscardingDraft() = runTest(dispatcher) {
         val repository = FakeRepository(emptyList())
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1642,7 +1642,7 @@ class ContactsViewModelTest {
     fun privateKeyDraftIsNotPersistedInSavedStateOrProcessRecreation() = runTest(dispatcher) {
         val savedState = SavedStateHandle()
         val repository = FakeRepository(emptyList())
-        val viewModel = ContactsViewModel(repository, savedStateHandle = savedState)
+        val viewModel = ContactsViewModel(repository, savedStateHandle = savedState, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1658,7 +1658,7 @@ class ContactsViewModelTest {
 
         assertNull(repository.savedContact)
         assertFalse(savedState.keys().any { key -> savedState.get<Any?>(key).toString().contains("PRIVATE KEY") })
-        val recreated = ContactsViewModel(repository, savedStateHandle = savedState)
+        val recreated = ContactsViewModel(repository, savedStateHandle = savedState, directoryDispatcher = dispatcher)
         val recreatedCollection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             recreated.uiState.collect {}
         }
@@ -1683,7 +1683,7 @@ class ContactsViewModelTest {
 
         cases.forEach { case ->
             val repository = FakeRepository(emptyList())
-            val viewModel = ContactsViewModel(repository)
+            val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
             val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
                 viewModel.uiState.collect {}
             }
@@ -1731,7 +1731,7 @@ class ContactsViewModelTest {
 
     @Test
     fun delayedImageResultCannotMutateANewerContactDraft() = runTest(dispatcher) {
-        val viewModel = ContactsViewModel(FakeRepository(emptyList()))
+        val viewModel = ContactsViewModel(FakeRepository(emptyList()), directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1769,7 +1769,7 @@ class ContactsViewModelTest {
     fun delayedReplacementCannotMutateAnotherImageAfterItsTargetWasDeleted() = runTest(dispatcher) {
         val removed = ContactValue("photo-a", ContactValueKind.PHOTO, "data:image/png;base64,AA==", order = 0)
         val retained = ContactValue("photo-b", ContactValueKind.PHOTO, "data:image/png;base64,BB==", order = 1)
-        val viewModel = ContactsViewModel(FakeRepository(emptyList()))
+        val viewModel = ContactsViewModel(FakeRepository(emptyList()), directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1805,7 +1805,7 @@ class ContactsViewModelTest {
     @Test
     fun newCustomDateIsMarkedLocalOnlyBeforeAndAfterSave() = runTest(dispatcher) {
         val repository = FakeRepository(emptyList())
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1824,7 +1824,7 @@ class ContactsViewModelTest {
 
     @Test
     fun dirtyEditorBackRequiresConfirmationAndPreservesDraft() = runTest(dispatcher) {
-        val viewModel = ContactsViewModel(FakeRepository(emptyList()))
+        val viewModel = ContactsViewModel(FakeRepository(emptyList()), directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1852,7 +1852,7 @@ class ContactsViewModelTest {
     @Test
     fun syncRecoveryBoundaryPublishesDashboardAndControlsRepair() = runTest(dispatcher) {
         val recovery = FakeSyncRecoveryDataSource()
-        val viewModel = ContactsViewModel(FakeRepository(emptyList()), recovery)
+        val viewModel = ContactsViewModel(FakeRepository(emptyList()), recovery, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1886,7 +1886,7 @@ class ContactsViewModelTest {
         val viewModel = ContactsViewModel(
             repository = FakeRepository(emptyList()),
             syncRecoveryDataSource = recovery,
-            accountId = "engine-scope",
+            accountId = "engine-scope", directoryDispatcher = dispatcher
         )
 
         viewModel.syncNow()
@@ -1901,7 +1901,7 @@ class ContactsViewModelTest {
     @Test
     fun openingAContactFromAGroupSwitchesToContactsAndSelectsIt() = runTest(dispatcher) {
         val contact = contact("contact-1", "Ada", "email-1", "ada@example.test")
-        val viewModel = ContactsViewModel(repository = FakeRepository(listOf(contact)))
+        val viewModel = ContactsViewModel(repository = FakeRepository(listOf(contact)), directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -1924,7 +1924,7 @@ class ContactsViewModelTest {
         val recovery = FakeSyncRecoveryDataSource()
         val viewModel = ContactsViewModel(
             repository = FakeRepository(emptyList()),
-            syncRecoveryDataSource = recovery,
+            syncRecoveryDataSource = recovery, directoryDispatcher = dispatcher
         )
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
@@ -1949,7 +1949,7 @@ class ContactsViewModelTest {
         val recovery = FakeSyncRecoveryDataSource()
         val viewModel = ContactsViewModel(
             repository = FakeRepository(emptyList()),
-            syncRecoveryDataSource = recovery,
+            syncRecoveryDataSource = recovery, directoryDispatcher = dispatcher
         )
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
@@ -1973,7 +1973,7 @@ class ContactsViewModelTest {
         val permission = FakeContactsPermissionBoundary(false)
         val viewModel = ContactsViewModel(
             repository = FakeRepository(emptyList()),
-            contactsPermissionBoundary = permission,
+            contactsPermissionBoundary = permission, directoryDispatcher = dispatcher
         )
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
@@ -1995,7 +1995,7 @@ class ContactsViewModelTest {
     @Test
     fun sectionNavigationPreservesLocalQueryAndDoesNotTouchRepository() = runTest(dispatcher) {
         val repository = FakeRepository(listOf(contact("alice", "Alice", "email", "alice@example.test")))
-        val viewModel = ContactsViewModel(repository)
+        val viewModel = ContactsViewModel(repository, directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -2019,7 +2019,7 @@ class ContactsViewModelTest {
             id = "selected-group",
             name = "Selected group",
         )
-        val viewModel = ContactsViewModel(FakeRepository(listOf(contact), listOf(group)))
+        val viewModel = ContactsViewModel(FakeRepository(listOf(contact), listOf(group)), directoryDispatcher = dispatcher)
         val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -2061,7 +2061,7 @@ class ContactsViewModelTest {
             blockedItems = listOf(com.patmanak.contako.domain.sync.SyncBlockedItem(group.id,
                 com.patmanak.contako.domain.sync.SyncBlockedItemType.GROUP, group.name, false,
                 com.patmanak.contako.domain.sync.SyncProblem.VALIDATION_REJECTED)))
-        val model = ContactsViewModel(FakeRepository(emptyList(), listOf(group)), recovery)
+        val model = ContactsViewModel(FakeRepository(emptyList(), listOf(group)), recovery, directoryDispatcher = dispatcher)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
         model.selectDestination(RootDestination.GROUPS)
         model.updateQuery("nonmatching")
@@ -2094,7 +2094,7 @@ class ContactsViewModelTest {
             }
             override suspend fun requestSync(accountId: String) = error("Preview must not start ordinary synchronization")
         }
-        val model = ContactsViewModel(FakeRepository(emptyList()), recovery)
+        val model = ContactsViewModel(FakeRepository(emptyList()), recovery, directoryDispatcher = dispatcher)
         model.openTargetedRecovery(kind, "target")
         runCurrent()
         assertEquals(0, queued)
@@ -2123,7 +2123,7 @@ class ContactsViewModelTest {
                 expected: com.patmanak.contako.domain.sync.TargetedRecoveryPreview): com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult =
                 error("Old owner must not queue recovery")
         }
-        val model = ContactsViewModel(FakeRepository(emptyList()), recovery, mutationAdmission = gate)
+        val model = ContactsViewModel(FakeRepository(emptyList()), recovery, mutationAdmission = gate, directoryDispatcher = dispatcher)
         model.openTargetedRecovery(kind, "old-owner")
         runCurrent()
         gate.cleanup { }
@@ -2145,7 +2145,7 @@ class ContactsViewModelTest {
                 expected: com.patmanak.contako.domain.sync.TargetedRecoveryPreview): com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult =
                 error("Unmet prerequisite cannot queue work")
         }
-        val model = ContactsViewModel(FakeRepository(emptyList()), recovery)
+        val model = ContactsViewModel(FakeRepository(emptyList()), recovery, directoryDispatcher = dispatcher)
         model.openTargetedRecovery(kind, "target")
         runCurrent()
         assertFalse(requireNotNull(model.targetedRecoveryPanel.value.preview).canQueue)
@@ -2164,7 +2164,7 @@ class ContactsViewModelTest {
                 expected: com.patmanak.contako.domain.sync.TargetedRecoveryPreview): com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult =
                 error("A different target must never be queued")
         }
-        val model = ContactsViewModel(FakeRepository(emptyList()), recovery)
+        val model = ContactsViewModel(FakeRepository(emptyList()), recovery, directoryDispatcher = dispatcher)
         model.openTargetedRecovery(kind, "selected-target")
         runCurrent()
         assertNull(model.targetedRecoveryPanel.value.preview)

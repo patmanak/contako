@@ -37,6 +37,40 @@ class ContactDirectoryPolicyTest {
         assertEquals("societe demo", other.values.first().value)
     }
 
+    @Test fun accumulatedFacetsMatchGroupingReferenceForUnicodeDuplicatesAndLongDirectories() {
+        val labels = listOf(" Société Démo ", "societe demo", "SOCIÉTÉ DÉMO", "E\u0301quipe", "Équipe",
+            "İpek", "Ipek", "Işık", "ışık", "Straße", "STRASSE", "東京", "Δelta", "\u0301", "\u0300\u0301",
+            "", " \t\n", "\u00a0\u202f", "Ångström", "A\u030angström", " ANGSTROM ")
+        val contacts = (0 until 5_000).map { index ->
+            val repeated = labels[index % labels.size]
+            CanonicalContact("facet-reference-owner", "facet-$index", isDeleted = index % 23 == 0,
+                values = listOf(
+                    value(ContactValueKind.ORGANIZATION, repeated),
+                    value(ContactValueKind.ORGANIZATION, labels[(index + 3) % labels.size], order = 1),
+                    value(ContactValueKind.ORGANIZATION, repeated, order = 2),
+                    value(ContactValueKind.ORGANIZATION, "Synthetic company ${index.toString().padStart(5, '0')}", order = 3),
+                    value(ContactValueKind.NOTE, "Must never become a company facet"),
+                ))
+        }
+        // Independent grouping/sorting reference keeps the previous observable rules: empty
+        // normalized keys are valid, labels use natural minimum, and source multiplicity survives.
+        fun reference(input: List<CanonicalContact>) = input.asSequence()
+            .filterNot(CanonicalContact::isDeleted)
+            .flatMap { it.values.asSequence() }
+            .filter { it.kind == ContactValueKind.ORGANIZATION && it.value.isNotBlank() }
+            .map { it.value.trim() }
+            .groupBy(ContactSearch::normalize)
+            .toSortedMap()
+            .map { (key, group) -> OrganizationFacet(key, group.minOrNull()!!) }
+        val expected = reference(contacts)
+        val originals = contacts.map { it.copy(values = it.values.map { value -> value.copy() }) }
+        assertEquals(expected, ContactDirectoryPolicy.organizationFacets(contacts))
+        assertEquals(expected, ContactDirectoryPolicy.organizationFacets(contacts.reversed()))
+        assertEquals(expected, ContactDirectoryPolicy.organizationFacets(contacts.shuffled(kotlin.random.Random(47))))
+        assertTrue(expected.any { it.key.isEmpty() })
+        assertEquals(originals, contacts)
+    }
+
     @Test fun withoutEmailAndPhoneExamineEveryOccurrenceIncludingInvalidNonblankValues() {
         for ((kind, filter) in listOf(ContactValueKind.EMAIL to DirectoryFilter(withoutEmail = true),
                 ContactValueKind.PHONE to DirectoryFilter(withoutPhone = true))) {

@@ -56,6 +56,12 @@ include repeated email occurrences, per-occurrence groups, Unicode, dates and
 opaque properties. Mutation interruptions MUST pass through save, claim and the
 external-effect boundary before simulated restart. Verify retained intent,
 foreign partitions and identities after each step, then two no-change drains.
+Seeds MUST vary temporal action order and contact targets, including an
+independent contact edit while another command awaits acknowledgement recovery.
+Reproducibility alone MUST NOT pass as temporal diversity. Generated actions
+MUST respect durable preconditions; every deletion first verifies live field
+equality and convergence. Keep a guaranteed nonempty no-change oracle and a
+mutation-replay mutant alongside the variable schedules.
 A budget interruption MUST be reported as NOT RUN, never PASS. A reduced failure
 MUST preserve its causal signature; a deliberately injected defect MUST be
 detected and reduced to demonstrate the bench's sensitivity.

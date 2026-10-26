@@ -18,12 +18,15 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.Density
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.patmanak.contako.R
 import com.patmanak.contako.data.android.mapping.ContactFieldCompatibility
+import com.patmanak.contako.data.proton.ProtonContactVCardCodec
+import com.patmanak.contako.data.proton.ProtonPlainContactCard
 import com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactGroup
@@ -37,10 +40,60 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
+import me.proton.core.contact.domain.entity.Contact
+import me.proton.core.contact.domain.entity.ContactCardType
+import me.proton.core.contact.domain.entity.ContactId
+import me.proton.core.domain.entity.UserId
 
 /** Local help and draft/navigation evidence only; no account, provider, image fetch or remote peer. */
 class FieldCompatibilityDeviceTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun importedUrlLabelHelpFollowsUnsavedEditAndRevertWithoutSavingTheDraft() {
+        val original = ProtonContactVCardCodec().decode("synthetic-help-owner",
+            Contact(UserId("synthetic-user"), ContactId("synthetic-remote"), "Synthetic fixture", emptyList()),
+            listOf(ProtonPlainContactCard(ContactCardType.EncryptedAndSigned,
+                "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:synthetic-uid\r\nFN:Synthetic fixture\r\n" +
+                    "URL;TYPE=HOME:https://example.test/profile\r\nEND:VCARD\r\n")))
+        val url = original.valuesOf(ContactValueKind.URL).single()
+        val repository = NoWrites(original)
+        val owner = ViewModelStore()
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(repository, accountId = original.accountId,
+            navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
+        try {
+            compose.setContent { ContakoTheme { ContakoApp(model) } }
+            compose.runOnIdle { model.editContact(original) }
+            compose.waitUntil(10_000) { model.uiState.value.contactEditor != null }
+            fun help(localLabel: Boolean) {
+                compose.onNodeWithTag("contact_editor_fields").performScrollToNode(hasTestTag("field-help-URL"))
+                compose.onNodeWithTag("field-help-URL").performClick()
+                awaitHelp()
+                show(R.string.compatibility_proton_generated)
+                if (localLabel) show(R.string.compatibility_local_label)
+                else compose.onNodeWithText(text(R.string.compatibility_local_label)).assertDoesNotExist()
+                compose.onNodeWithTag("field-help-close").performScrollTo().performClick()
+            }
+            help(false)
+            compose.onNodeWithTag("contact_editor_fields").performScrollToNode(hasTestTag("contact_value_options_${url.id}"))
+            compose.onNodeWithTag("contact_value_options_${url.id}").performClick()
+            compose.onNodeWithText(text(R.string.field_custom_label)).performScrollTo().performTextReplacement("Personal profile")
+            val draft = model.uiState.value.contactEditor
+            help(true)
+            compose.runOnIdle {
+                assertEquals(draft, model.uiState.value.contactEditor)
+                assertEquals(original, model.uiState.value.contactEditor?.original)
+                assertEquals(0, repository.writes)
+                assertEquals(false, model.uiState.value.contactEditor?.values?.single { it.id == url.id }
+                    ?.metadata?.containsKey("contakoLocalOnlyLabel"))
+            }
+            compose.onNodeWithText(text(R.string.field_custom_label)).performScrollTo().performTextReplacement(url.label.orEmpty())
+            help(false)
+            compose.runOnIdle {
+                assertEquals(url, model.uiState.value.contactEditor?.values?.single { it.id == url.id })
+                assertEquals(0, repository.writes)
+            }
+        } finally { compose.runOnIdle { owner.clear() } }
+    }
 
     @Test fun transferableUrlAndLocalLabelKeepFourScopesAndMissingPermissionSeparate() {
         val contact = contact(listOf(ContactValue("url", ContactValueKind.URL, "https://example.test/profile", order = 0,

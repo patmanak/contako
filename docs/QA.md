@@ -110,6 +110,41 @@ summed or subtracted. Report aggregate DTO rows and UTF-8 string volume outside
 timing; these are not SQLite cursor bytes or native peak memory. The separate
 ViewModel-publication series uses an active collector with Compose detached;
 its duration MUST NOT be called rendered user latency.
+Rendered cases also support `renderOracle=atomic-v4` (instrumentation argument),
+tagged `accepted-action-atomic-render-v4`. The default `legacy-v3` retains the
+historical serial semantics/assertion barriers for replay. V4 captures the model
+and all required text witnesses on Main after one semantics acquisition, requiring
+attached/placed ancestors, visible host, clipped positive bounds and intersection
+with the visible window. Search requires two distinct visible witnesses and the
+third absent; its unfiltered precondition MUST reject the same oracle. Public
+display assertions and row interaction remain mandatory postconditions: a failure
+invalidates the sample even after its clock stopped. Geometry and hidden-host
+controls MUST agree with the public display assertions on the pinned test library.
+This proves useful displayed layout/semantics, not GPU presentation or photo
+completion. V4 rendered durations MUST NOT be compared directly with V3 values
+as a causal application improvement. Preserve historical failures and protocol
+metadata; repository, component and ViewModel-publication timing stay V3.
+The `renderOracle=atomic-v5` variant uses the same visibility requirements,
+but copies the model lists on Main before stopping the clock and checks every
+captured contact identity afterward. A later model replacement MUST NOT heal
+that captured proof, and a failed identity check MUST invalidate the sample.
+This excludes exhaustive test identity comparison from application display
+latency while retaining it as a mandatory correctness oracle. V5 uses
+`accepted-action-atomic-render-v5`; its rendered durations MUST NOT be compared
+directly with V3 or V4. The capture-isolation regression is mandatory alongside
+the visibility controls. First-query index preparation remains a separate cost.
+Additional diagnostics compare the scoped directory reader with the retained
+relation-based oracle, preparation of immutable search inputs and matching over
+those prepared inputs. A steady-search semantics calibration repeats the same
+render assertions on an already stable screen; it MUST NOT be subtracted from a
+P95 or used to declare a failed rendered-latency target passed. Fixed SQL query
+plans contain planner identifiers only, never bind values or contact data.
+The opt-in instrumentation argument `performanceDiagnosticsOnly=true` runs
+component measurements and that calibration without qualifying the UI latency
+contracts; ordinary runs retain the existing contract measurements and ceilings.
+Search keys are lazy per immutable snapshot. Retain and report the first-query
+warmup duration separately: warm samples with an existing index do not qualify
+cold preparation or a query immediately following a directory replacement.
 Search diagnostics MUST include query preparation inside each timed evaluation;
 preparing the query once MUST preserve the same contact identities, searchable
 families, Unicode normalization and group-member results as individual matching.
