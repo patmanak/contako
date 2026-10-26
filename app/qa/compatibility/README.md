@@ -26,6 +26,9 @@ the generated application version is recorded separately.
 The version-2 generator uses a fixed causal command spine and a seeded Java RNG
 for synthetic variants. The same version, seed and profile produce the same
 commands and fault boundaries. Scheduling uses explicit commands, never sleeps.
+Changing seeds varies data, not arbitrary operation orders. Targeted Room/provider
+composition tests cover their named interrupted sequences separately; more seeds
+MUST NOT be reported as new epoch, photo-receipt or remote-deletion interleavings.
 The budget is a safety cutoff, not a performance assertion. Exhaustion fails
 the test and records `NOT RUN`, rather than reporting incomplete exploration
 as a pass. Reduction is limited to 200 replays or 60 seconds and retains the

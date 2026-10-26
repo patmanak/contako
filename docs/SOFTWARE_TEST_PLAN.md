@@ -42,6 +42,17 @@ when the nominal time ceiling is met.
 
 ## Durable remote-deletion recovery
 
+`DeletedContactRecoveryCompositionDeviceTest` MUST exercise the production
+cleanup, observation stage, Room recovery transactions and recreation guard
+together with controlled peers. Interrupt after provider DELETE but before Room
+completion, reopen storage and require the same prepared obligation/destination
+without a second DELETE. Keep native DIRTY/version changes, epoch changes, opaque
+rows, pending photo publication and unexpected group edges unresolved. A returning
+old remote identity MUST suspend creation before the preparation delegate runs.
+Foreign sources MUST remain intact. This composition does not qualify a system
+provider, actual process death, positive OEM photo receipts or the whole upload
+drain; those boundaries need their own evidence.
+
 Use Room transactions and reopened storage for candidate discovery, verified
 absence, each explicit choice, draft editing and cleanup. Check double taps,
 revision/generation mismatch, failure rollback, exact group mappings, account
@@ -110,6 +121,16 @@ UI. External faults MAY be controlled. These tests do not count as real Web
 acceptance. Some need a physical Android runtime even without a Proton account.
 
 ## Execution
+
+`HeterogeneousImportRecoveryDeviceTest` MUST combine real Room, inventory planning,
+hydration obligations and import commits across a batch boundary. Place an
+individually rejected card immediately before/on/after that boundary; healthy
+cards after it MUST remain available with complete fields. Reopen storage, retry
+only the outstanding card, correct it and require two no-change passes with zero
+full-card reads. Interruption before the global checkpoint MAY replay already
+committed cards: record that cost separately and retain identities/values without
+claiming it is no-change work. Controlled remote outcomes do not qualify HTTP,
+cryptographic verification or real rate-limit timing.
 
 JVM integration classes use `-PcontakoTestBuildType=debug :testDebugUnitTest`
 with explicit `--tests` selectors.
