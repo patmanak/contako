@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import com.patmanak.contako.R
@@ -38,7 +39,8 @@ class InitialImportOverviewDeviceTest {
             override suspend fun requestSync(accountId: String) { requests++ }
         }
         val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
-        val model = ViewModelProvider(owner, ContactsViewModel.factory(ReadOnlyRepository, recovery))[ContactsViewModel::class.java]
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(ReadOnlyRepository, recovery,
+            navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
         compose.setContent { ContakoTheme { ContakoApp(model) } }
         compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_context)).assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_pending, 1)).assertDoesNotExist()
@@ -71,7 +73,8 @@ class InitialImportOverviewDeviceTest {
             override suspend fun requestSync(accountId: String) { requests++ }
         }
         val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
-        val model = ViewModelProvider(owner, ContactsViewModel.factory(ReadOnlyRepository, recovery))[ContactsViewModel::class.java]
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(ReadOnlyRepository, recovery,
+            navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
         val restore = StateRestorationTester(compose)
         val address = mutableStateOf<String?>(null)
         restore.setContent { ContakoTheme { ContakoApp(model, accountAddress = address.value) } }

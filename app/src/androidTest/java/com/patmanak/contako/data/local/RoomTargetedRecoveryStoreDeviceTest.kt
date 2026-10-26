@@ -121,6 +121,10 @@ class RoomTargetedRecoveryStoreDeviceTest {
         assertTrue(store.validate(claim) is TargetedRecoveryWorkResult.Stale)
         assertTrue(store.completeVerified(claim, card(), 1_000) { false } is TargetedRecoveryWorkResult.Stale)
         assertEquals("Newer local intent", database.contactDao().getEntity(ACCOUNT.value, "existing")?.displayName)
+        // Match the serialized executor: persist the first command's terminal result
+        // before starting the separate provider-epoch scenario.
+        store.finish(claim, TargetedRecoveryWorkResult.Stale(), 1_000) { false }
+        assertEquals("STALE", database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().state)
         val next = store.preview(ACCOUNT, TargetedRecoveryKind.PROTON_CARD, TARGET)
         store.queue(ACCOUNT, next, 2_000)
         val nextClaim = requireNotNull(store.claim(database.targetedRecoveryRequestDao().all(ACCOUNT.value).single(), 2_000))

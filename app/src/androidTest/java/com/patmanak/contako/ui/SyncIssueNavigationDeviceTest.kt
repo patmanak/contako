@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import com.patmanak.contako.R
@@ -31,7 +32,8 @@ class SyncIssueNavigationDeviceTest {
             pendingMutationRevision = 1)
         val state = ContactsUiState(actionContacts = listOf(contact))
         val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
-        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites))[ContactsViewModel::class.java]
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites,
+            navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
         val issue = currentSyncIssues(state, emptyList()).single()
         compose.setContent { ContakoTheme { SyncIssueCard(issue, state, model) { error("No sign-in from local validation") } } }
         compose.onNodeWithText(compose.activity.getString(R.string.actions_missing_name_body)).assertIsDisplayed()
@@ -53,7 +55,8 @@ class SyncIssueNavigationDeviceTest {
             override suspend fun requestSync(accountId: String) = error("No global retry from a targeted failure")
         }
         val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
-        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery))[ContactsViewModel::class.java]
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery,
+            navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
         val issue = currentSyncIssues(state, emptyList()).single()
         compose.setContent { ContakoTheme { SyncIssueCard(issue, state, model) { signIns++ } } }
         compose.onNodeWithText(compose.activity.getString(R.string.sync_issue_unknown)).assertIsDisplayed()
@@ -89,7 +92,8 @@ class SyncIssueNavigationDeviceTest {
                 com.patmanak.contako.domain.sync.TargetedRecoveryQueueResult = error("No queue before confirmation")
         }
         val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
-        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery))[ContactsViewModel::class.java]
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery,
+            navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
         val issue = currentSyncIssues(state, emptyList()).single()
         compose.setContent { ContakoTheme { SyncIssueCard(issue, state, model) { error("No sign-in from cryptography") } } }
         compose.onNodeWithText(compose.activity.getString(R.string.targeted_last_failure,
@@ -128,7 +132,8 @@ class SyncIssueNavigationDeviceTest {
             override suspend fun requestSync(accountId: String) = error("No ordinary pass from a preview")
         }
         val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
-        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery))[ContactsViewModel::class.java]
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery,
+            navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
         model.selectDestination(RootDestination.SYNC)
         compose.setContent { ContakoTheme { ContakoApp(model) } }
         compose.onNodeWithText(compose.activity.getString(R.string.targeted_proton_title)).performScrollTo().performClick()
@@ -156,7 +161,8 @@ class SyncIssueNavigationDeviceTest {
             override suspend fun requestSync(accountId: String) { requests++ }
         }
         val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
-        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery))[ContactsViewModel::class.java]
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(NoWrites, recovery,
+            navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
         model.selectDestination(RootDestination.SYNC)
         compose.setContent { ContakoTheme { ContakoApp(model) } }
         compose.onNodeWithText(compose.activity.getString(R.string.sync_issue_diagnostics)).performScrollTo().performClick()
