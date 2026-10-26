@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_differences">Diferenças entre as versões guardadas</string>
+    <string name="conflict_show_same">Mostrar campos correspondentes</string>
+    <string name="conflict_same">Mesmo valor guardado</string>
+    <string name="conflict_local_only">Apenas no Contako</string>
+    <string name="conflict_proton_only">Apenas no Proton</string>
+    <string name="conflict_different">Diferente</string>
+    <string name="conflict_unavailable">Comparação exata indisponível</string>
+    <string name="conflict_ambiguous">Não é possível associar estas ocorrências de forma fiável. São apresentadas separadamente.</string>
+    <string name="conflict_not_present">Não presente</string>
+    <string name="conflict_occurrence">%1$s · ocorrência %2$d</string>
+    <string name="conflict_label">Etiqueta: %1$s</string>
+    <string name="conflict_position">Posição: %1$d</string>
+    <string name="conflict_groups">Grupos: %1$s</string>
+    <string name="conflict_groups_unknown">Grupos: comparação exata indisponível</string>
+    <string name="conflict_none">Nenhum</string>
+    <string name="conflict_attributes">Outros atributos guardados diferem ou estão indisponíveis. As ligações internas não são apresentadas.</string>
+    <string name="conflict_media_inline">Representação da imagem guardada; a miniatura é apenas uma ilustração.</string>
+    <string name="conflict_media_reference">Referência multimédia guardada; o seu conteúdo não é transferido nem comparado.</string>
+    <string name="conflict_preservation_scope">As fichas de origem permanecem guardadas internamente. Os campos só de leitura aparecem individualmente acima. Durante a sincronização, as regras de compatibilidade existentes verificam os efeitos exatos nas propriedades de origem não representadas.</string>
+    <string name="conflict_choice_preview">Com esta escolha…</string>
+    <string name="conflict_local_effect">Manter toda a versão do Contako e enviar as suas alterações após a verificação. As propriedades desconhecidas compatíveis permanecem preservadas.</string>
+    <string name="conflict_local_delete_effect">Manter a eliminação indicada no Contako. Após a verificação, a sincronização eliminará este contacto do Proton e removerá a sua cópia Android pertencente ao Contako.</string>
+    <string name="conflict_proton_effect">Usar toda a versão do Proton. As datas personalizadas locais, os nomes fonéticos e as etiquetas locais elegíveis permanecem preservados. As alterações de grupos independentes são verificadas separadamente.</string>
+    <string name="conflict_android_effect">O Android é atualizado através da sincronização normal. Guardar esta escolha não significa que algum dos destinos a tenha confirmado.</string>
+    <string name="conflict_confirm_choice">Confirmar esta versão</string>
+    <string name="conflict_after_choice">Campos do contacto resultante antes da sincronização</string>
+    <string name="conflict_open_status">Ver estado da sincronização</string>
+    <string name="conflict_review_groups">Rever alterações de grupos pendentes</string>
+    <string name="conflict_contact_kept">Contacto mantido</string>
+    <string name="conflict_group_context">Os grupos do Contako são as atribuições locais atuais; os grupos do Proton provêm da versão remota guardada.</string>
+    <string name="conflict_no_comparison">Esta comparação já não está disponível. Consulte o estado da sincronização para ver as confirmações atuais.</string>
+    <string name="conflict_group_dependency">As atribuições de grupos pendentes não podem ser mantidas em segurança com esta versão. Reveja primeiro essas alterações.</string>
+    <string name="conflict_additional_names">Nomes adicionais</string>
+    <string name="conflict_name_prefix">Prefixo do nome</string>
+    <string name="conflict_name_suffix">Sufixo do nome</string>
+    <string name="conflict_component">Outro componente %1$d</string>
+    <string name="conflict_preference">Ordem de preferência: %1$s</string>
+    <string name="conflict_types">Tipos: %1$s</string>
+</resources>

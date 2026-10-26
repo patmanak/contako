@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_differences">Differences between saved versions</string>
+    <string name="conflict_show_same">Show matching fields</string>
+    <string name="conflict_same">Same stored value</string>
+    <string name="conflict_local_only">Only in Contako</string>
+    <string name="conflict_proton_only">Only in Proton</string>
+    <string name="conflict_different">Different</string>
+    <string name="conflict_unavailable">Exact comparison unavailable</string>
+    <string name="conflict_ambiguous">These occurrences cannot be matched reliably. They are shown separately.</string>
+    <string name="conflict_not_present">Not present</string>
+    <string name="conflict_occurrence">%1$s · occurrence %2$d</string>
+    <string name="conflict_label">Label: %1$s</string>
+    <string name="conflict_position">Position: %1$d</string>
+    <string name="conflict_groups">Groups: %1$s</string>
+    <string name="conflict_groups_unknown">Groups: exact comparison unavailable</string>
+    <string name="conflict_none">None</string>
+    <string name="conflict_attributes">Additional stored attributes differ or are unavailable. Internal bindings are not displayed.</string>
+    <string name="conflict_media_inline">Stored image representation; the thumbnail is only an illustration.</string>
+    <string name="conflict_media_reference">Stored media reference; its contents are not downloaded or compared.</string>
+    <string name="conflict_preservation_scope">Source cards stay preserved internally. Read-only fields appear individually above. Exact effects on unrepresented source properties are checked by the existing compatibility rules during synchronization.</string>
+    <string name="conflict_choice_preview">With this choice…</string>
+    <string name="conflict_local_effect">Keep the whole Contako version and send its changes after verification. Compatible unknown properties remain preserved.</string>
+    <string name="conflict_local_delete_effect">Keep the Contako deletion. After verification, synchronization will delete this contact on Proton and remove its owned Android copy.</string>
+    <string name="conflict_proton_effect">Use the whole Proton version. Local custom dates, phonetic names and eligible local labels remain preserved. Independent group changes are checked separately.</string>
+    <string name="conflict_android_effect">Android is updated through normal synchronization. Saving this choice does not mean either destination has confirmed it.</string>
+    <string name="conflict_confirm_choice">Confirm this version</string>
+    <string name="conflict_after_choice">Resulting contact fields before synchronization</string>
+    <string name="conflict_open_status">View synchronization status</string>
+    <string name="conflict_review_groups">Review pending group changes</string>
+    <string name="conflict_contact_kept">Contact kept</string>
+    <string name="conflict_group_context">Contako groups are the current local assignments; Proton groups come from the saved remote version.</string>
+    <string name="conflict_no_comparison">This comparison is no longer available. View synchronization status for current confirmations.</string>
+    <string name="conflict_group_dependency">Pending group assignments cannot safely follow this version. Review those group changes before using it.</string>
+    <string name="conflict_additional_names">Additional names</string>
+    <string name="conflict_name_prefix">Name prefix</string>
+    <string name="conflict_name_suffix">Name suffix</string>
+    <string name="conflict_component">Other component %1$d</string>
+    <string name="conflict_preference">Preference rank: %1$s</string>
+    <string name="conflict_types">Types: %1$s</string>
+</resources>

@@ -478,6 +478,16 @@ untouched values independently on each peer:
   progress; network failure retains intent; a newer local/remote edit requires review.
   Open comparison with structured names and preserved read-only fields; every
   canonical field type MUST have a readable label without crashing.
+- Compare differences first, then reveal matching fields; close without changes.
+  Use repeated emails with distinct group assignments and reordered positional
+  keys: unproved matches MUST remain separate. Check labels, preference, components
+  and order, photo versus logo, long text and 200% scaling. Referenced media MUST
+  NOT be downloaded. Review both whole-contact consequence previews before final
+  confirmation. Verify retained local dates/phonetics/eligible labels against the
+  resulting canonical contact, and keep raw source cards out of the field list.
+  While the preview is open, change a revision or group dependency; the old choice
+  MUST NOT authorize stale application. A queued choice stays explicitly pending;
+  inspect actual peer confirmation in the contact synchronization panel.
 - Remove an email on Proton while its group assignments are pending locally.
   Proton adoption is disabled with an explanation; assignments are never discarded.
   Choose the local version to restore that email. Dependent assignments MUST wait

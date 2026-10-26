@@ -202,10 +202,21 @@ or open Android notification settings. Notifications contain no contact or accou
 details; denied permission does not prevent synchronization.
 
 When local and Proton changes conflict, Sync offers **Compare versions**. Both
-versions are kept. Choose **Keep Contako version** or **Use Proton version**; the
-choice waits for synchronization and is checked again against Proton. A newer
-edit requires another review. Pending group assignments can prevent adopting a
-Proton version that removes their email; remote deletion requires separate recovery.
+versions are kept. Differences appear first; **Show matching fields** also reveals
+matching values. Structured components, labels, preference and order are included.
+Repeated occurrences without a reliable match stay separate. Group names describe
+current local assignments and the saved Proton version; missing information stays
+unknown. Thumbnails illustrate stored media and never prove original equality.
+
+Choose **Keep Contako version** or **Use Proton version**, inspect **With this
+choice…**, then confirm the whole version. The Proton preview keeps eligible local
+dates, phonetics and labels according to the normal preservation rules. A local
+deletion choice is explicitly described as a deletion. The choice waits for
+synchronization and is checked again against Proton. **View synchronization
+status** shows the actual confirmations; saving a choice is not confirmation.
+A newer edit requires another review. Pending group assignments can prevent
+adopting a Proton version; review the pending group changes from the comparison.
+Remote deletion links to the separate draft-recovery choices.
 Avoid editing the same contact simultaneously: Proton does not provide an atomic
 version check for the final write.
 

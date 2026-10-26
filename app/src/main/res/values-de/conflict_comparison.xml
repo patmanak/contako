@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_differences">Unterschiede zwischen gespeicherten Versionen</string>
+    <string name="conflict_show_same">Übereinstimmende Felder anzeigen</string>
+    <string name="conflict_same">Gleicher gespeicherter Wert</string>
+    <string name="conflict_local_only">Nur in Contako</string>
+    <string name="conflict_proton_only">Nur in Proton</string>
+    <string name="conflict_different">Unterschiedlich</string>
+    <string name="conflict_unavailable">Exakter Vergleich nicht verfügbar</string>
+    <string name="conflict_ambiguous">Diese Vorkommen lassen sich nicht zuverlässig zuordnen. Sie werden getrennt angezeigt.</string>
+    <string name="conflict_not_present">Nicht vorhanden</string>
+    <string name="conflict_occurrence">%1$s · Vorkommen %2$d</string>
+    <string name="conflict_label">Bezeichnung: %1$s</string>
+    <string name="conflict_position">Position: %1$d</string>
+    <string name="conflict_groups">Gruppen: %1$s</string>
+    <string name="conflict_groups_unknown">Gruppen: exakter Vergleich nicht verfügbar</string>
+    <string name="conflict_none">Keine</string>
+    <string name="conflict_attributes">Zusätzliche gespeicherte Attribute unterscheiden sich oder sind nicht verfügbar. Interne Verknüpfungen werden nicht angezeigt.</string>
+    <string name="conflict_media_inline">Gespeicherte Bilddarstellung; das Vorschaubild dient nur zur Veranschaulichung.</string>
+    <string name="conflict_media_reference">Gespeicherter Medienverweis; sein Inhalt wird weder heruntergeladen noch verglichen.</string>
+    <string name="conflict_preservation_scope">Die Quellkarten bleiben intern erhalten. Schreibgeschützte Felder erscheinen oben einzeln. Die genauen Auswirkungen auf nicht dargestellte Quelleigenschaften werden bei der Synchronisierung anhand der bestehenden Kompatibilitätsregeln geprüft.</string>
+    <string name="conflict_choice_preview">Mit dieser Auswahl…</string>
+    <string name="conflict_local_effect">Die gesamte Contako-Version beibehalten und ihre Änderungen nach der Prüfung senden. Kompatible unbekannte Eigenschaften bleiben erhalten.</string>
+    <string name="conflict_local_delete_effect">Die in Contako vorgesehene Löschung beibehalten. Nach der Prüfung löscht die Synchronisierung diesen Kontakt in Proton und entfernt seine zu Contako gehörende Android-Kopie.</string>
+    <string name="conflict_proton_effect">Die gesamte Proton-Version verwenden. Lokale benutzerdefinierte Datumsangaben, phonetische Namen und geeignete lokale Bezeichnungen bleiben erhalten. Unabhängige Gruppenänderungen werden getrennt geprüft.</string>
+    <string name="conflict_android_effect">Android wird durch die normale Synchronisierung aktualisiert. Das Speichern dieser Auswahl bedeutet nicht, dass eines der Ziele sie bestätigt hat.</string>
+    <string name="conflict_confirm_choice">Diese Version bestätigen</string>
+    <string name="conflict_after_choice">Resultierende Kontaktfelder vor der Synchronisierung</string>
+    <string name="conflict_open_status">Synchronisierungsstatus anzeigen</string>
+    <string name="conflict_review_groups">Ausstehende Gruppenänderungen prüfen</string>
+    <string name="conflict_contact_kept">Kontakt beibehalten</string>
+    <string name="conflict_group_context">Contako-Gruppen sind die aktuellen lokalen Zuordnungen; Proton-Gruppen stammen aus der gespeicherten Remote-Version.</string>
+    <string name="conflict_no_comparison">Dieser Vergleich ist nicht mehr verfügbar. Aktuelle Bestätigungen finden Sie im Synchronisierungsstatus.</string>
+    <string name="conflict_group_dependency">Ausstehende Gruppenzuordnungen können mit dieser Version nicht sicher erhalten bleiben. Prüfen Sie zuerst diese Gruppenänderungen.</string>
+    <string name="conflict_additional_names">Weitere Vornamen</string>
+    <string name="conflict_name_prefix">Namenspräfix</string>
+    <string name="conflict_name_suffix">Namenssuffix</string>
+    <string name="conflict_component">Weitere Komponente %1$d</string>
+    <string name="conflict_preference">Bevorzugungsrang: %1$s</string>
+    <string name="conflict_types">Typen: %1$s</string>
+</resources>

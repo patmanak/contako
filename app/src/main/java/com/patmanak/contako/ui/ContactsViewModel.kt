@@ -39,8 +39,11 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import com.patmanak.contako.domain.sync.DeletionRecoverySummary
 import com.patmanak.contako.domain.sync.DeletionRecoveryChoice
 import com.patmanak.contako.domain.sync.DeletionRecoveryState
@@ -129,6 +132,7 @@ data class ConflictPanelState(
     val detail: com.patmanak.contako.domain.sync.ContactConflictDetail? = null,
     val busy: Boolean = false,
     val failed: Boolean = false,
+    val unavailable: Boolean = false,
 ) {
     override fun toString() = "ConflictPanelState(REDACTED)"
 }
@@ -254,6 +258,8 @@ class ContactsViewModel(
     private val mutableConflictPanel = MutableStateFlow(ConflictPanelState())
     val conflictPanel: StateFlow<ConflictPanelState> = mutableConflictPanel
     private var conflictPanelGeneration = 0L
+    private var conflictObservationJob: Job? = null
+    private var conflictChoicePendingGeneration: Long? = null
     private val mutableTargetedRecoveryPanel = MutableStateFlow(TargetedRecoveryPanelState())
     val targetedRecoveryPanel: StateFlow<TargetedRecoveryPanelState> = mutableTargetedRecoveryPanel
     private var targetedRecoveryPanelGeneration = 0L
@@ -337,34 +343,60 @@ class ContactsViewModel(
     fun dismissConflict() {
         if (mutableConflictPanel.value.busy) return
         conflictPanelGeneration++
+        conflictObservationJob?.cancel()
+        conflictChoicePendingGeneration = null
         mutableConflictPanel.value = ConflictPanelState()
     }
 
     fun openConflict(contactId: String) {
         if (!acceptsMutation()) return
         val generation = ++conflictPanelGeneration
+        conflictObservationJob?.cancel()
+        conflictChoicePendingGeneration = null
         mutableConflictPanel.value = ConflictPanelState(contactId = contactId, busy = true)
-        viewModelScope.launch {
-            val detail = try { syncRecoveryDataSource.loadConflict(accountId, contactId) }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { null }
-            if (acceptsMutation() && generation == conflictPanelGeneration) {
-                mutableConflictPanel.value = ConflictPanelState(contactId, detail, failed = detail == null)
+        conflictObservationJob = viewModelScope.launch {
+            // These are invalidation signals, not independent snapshots to display together.
+            // Every emission reloads one coherent, read-only Room transaction.
+            combine(syncRecoveryDataSource.observeConflicts(accountId), directory, allGroups) { rows, local, groups ->
+                Triple(rows.firstOrNull { it.contactId == contactId },
+                    local.snapshot.contacts.firstOrNull { it.id == contactId }?.revision, groups)
+            }.distinctUntilChanged().collectLatest {
+                var readFailed = false
+                val detail = try { syncRecoveryDataSource.loadConflict(accountId, contactId)?.takeIf {
+                    it.local.accountId == accountId && it.proton.accountId == accountId && it.summary.contactId == contactId
+                } }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { readFailed = true; null }
+                if (acceptsMutation() && generation == conflictPanelGeneration) {
+                    mutableConflictPanel.value = ConflictPanelState(contactId, detail,
+                        busy = conflictChoicePendingGeneration == generation,
+                        failed = readFailed || (detail != null && !detail.isCurrent),
+                        unavailable = detail == null && !readFailed)
+                }
             }
         }
     }
 
     fun chooseConflict(choice: com.patmanak.contako.domain.sync.ContactConflictChoice) {
         if (!acceptsMutation()) return
-        val panel = mutableConflictPanel.value.takeUnless { it.busy } ?: return
+        val panel = mutableConflictPanel.value.takeUnless { it.busy || conflictChoicePendingGeneration != null } ?: return
         val detail = panel.detail ?: return
+        if (!detail.isCurrent || detail.summary.remoteDeleted || detail.summary.choice != null ||
+            (choice == com.patmanak.contako.domain.sync.ContactConflictChoice.PROTON && !detail.protonChoiceAvailable)) return
+        val generation = conflictPanelGeneration
+        conflictChoicePendingGeneration = generation
         mutableConflictPanel.value = panel.copy(busy = true, failed = false)
-        launchMutation(onRejected = { mutableConflictPanel.value = panel.copy(failed = true) }) {
+        launchMutation(onRejected = {
+            if (conflictChoicePendingGeneration == generation) conflictChoicePendingGeneration = null
+            if (acceptsMutation() && generation == conflictPanelGeneration) mutableConflictPanel.value = panel.copy(failed = true)
+        }) {
             val queued = try { syncRecoveryDataSource.chooseConflict(accountId, detail.summary, choice) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { false }
-            if (acceptsMutation()) {
-                mutableConflictPanel.value = if (queued) ConflictPanelState() else panel.copy(failed = true)
+            finally { if (conflictChoicePendingGeneration == generation) conflictChoicePendingGeneration = null }
+            if (acceptsMutation() && generation == conflictPanelGeneration) {
+                if (queued) openConflict(detail.summary.contactId)
+                else mutableConflictPanel.value = panel.copy(failed = true)
             }
         }
     }
@@ -577,6 +609,8 @@ class ContactsViewModel(
         contactDeletionStatus.value = DeletionStatus()
         groupDeletionStatus.value = DeletionStatus()
         conflictPanelGeneration++
+        conflictObservationJob?.cancel()
+        conflictChoicePendingGeneration = null
         mutableConflictPanel.value = ConflictPanelState()
         targetedRecoveryPanelGeneration++
         mutableTargetedRecoveryPanel.value = TargetedRecoveryPanelState()

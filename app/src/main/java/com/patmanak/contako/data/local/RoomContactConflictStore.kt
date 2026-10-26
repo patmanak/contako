@@ -24,8 +24,34 @@ internal class RoomContactConflictStore(private val database: ContakoDatabase) {
             return ContactConflictSnapshotCodec.decode(output.toByteArray())
         }
         val remote = decode(dao.chunks(row.ownerKey, "PROTON")).copy(isDeleted = row.remoteDeleted)
-        ContactConflictDetail(row.summary(), decode(dao.chunks(row.ownerKey, "LOCAL")), remote,
-            RoomRemoteCanonicalReconciliationStore(database).canAdoptRemote(remote.copy(accountId = account, id = id)))
+        val local = decode(dao.chunks(row.ownerKey, "LOCAL"))
+        require(local.accountId == account && local.id == id && remote.accountId == account)
+        val current = database.contactDao().getEntity(account, id)
+        val intent = database.outboxDao().get(account, AggregateType.CONTACT.name, id)
+        val isCurrent = !row.remoteDeleted && current != null && intent != null && current.revision == row.localRevision &&
+            current.remoteContactId == row.remoteId && current.pendingMutationRevision == row.localRevision &&
+            intent.revision == row.localRevision && intent.state in setOf(
+                DurableMutationState.PENDING.name, DurableMutationState.IN_FLIGHT.name, DurableMutationState.ACTION_REQUIRED.name,
+            ) &&
+            (row.choice != null || intent.state == DurableMutationState.ACTION_REQUIRED.name)
+        val localPreview = if (isCurrent) local.copy(
+            preservationEnvelope = mergePendingProtonPreservation(local.preservationEnvelope, remote.preservationEnvelope),
+        ) else null
+        val protonPreview = if (isCurrent) try {
+            retainLocalContactComplements(local, remote).copy(accountId = account, id = id)
+        } catch (_: IllegalArgumentException) {
+            // A preview must not substitute an arbitrary result for a guarded adoption failure.
+            null
+        } else null
+        ContactConflictDetail(
+            summary = row.summary(), local = local, proton = remote,
+            protonChoiceAvailable = protonPreview != null &&
+                RoomRemoteCanonicalReconciliationStore(database).canAdoptRemote(remote.copy(accountId = account, id = id)),
+            localPreview = localPreview, protonPreview = protonPreview,
+            groups = database.contactGroupDao().getAll(account).map { it.toDomain() }
+                .filter { it.accountId == account && !it.isDeleted },
+            isCurrent = isCurrent,
+        )
     }
 
     suspend fun choose(account: String, expected: ContactConflictSummary, choice: ContactConflictChoice): Boolean = database.withTransaction {

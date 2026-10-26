@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_differences">Verschillen tussen opgeslagen versies</string>
+    <string name="conflict_show_same">Overeenkomende velden tonen</string>
+    <string name="conflict_same">Dezelfde opgeslagen waarde</string>
+    <string name="conflict_local_only">Alleen in Contako</string>
+    <string name="conflict_proton_only">Alleen in Proton</string>
+    <string name="conflict_different">Verschillend</string>
+    <string name="conflict_unavailable">Exacte vergelijking niet beschikbaar</string>
+    <string name="conflict_ambiguous">Deze voorkomens kunnen niet betrouwbaar worden gekoppeld. Ze worden afzonderlijk weergegeven.</string>
+    <string name="conflict_not_present">Niet aanwezig</string>
+    <string name="conflict_occurrence">%1$s · voorkomen %2$d</string>
+    <string name="conflict_label">Label: %1$s</string>
+    <string name="conflict_position">Positie: %1$d</string>
+    <string name="conflict_groups">Groepen: %1$s</string>
+    <string name="conflict_groups_unknown">Groepen: exacte vergelijking niet beschikbaar</string>
+    <string name="conflict_none">Geen</string>
+    <string name="conflict_attributes">Aanvullende opgeslagen kenmerken verschillen of zijn niet beschikbaar. Interne koppelingen worden niet weergegeven.</string>
+    <string name="conflict_media_inline">Opgeslagen afbeeldingsrepresentatie; de miniatuur is alleen ter illustratie.</string>
+    <string name="conflict_media_reference">Opgeslagen mediaverwijzing; de inhoud wordt niet gedownload of vergeleken.</string>
+    <string name="conflict_preservation_scope">Bronkaarten blijven intern bewaard. Alleen-lezenvelden worden hierboven afzonderlijk getoond. Tijdens de synchronisatie controleren de bestaande compatibiliteitsregels de exacte gevolgen voor niet-weergegeven broneigenschappen.</string>
+    <string name="conflict_choice_preview">Met deze keuze…</string>
+    <string name="conflict_local_effect">De volledige Contako-versie behouden en de wijzigingen na controle verzenden. Compatibele onbekende eigenschappen blijven behouden.</string>
+    <string name="conflict_local_delete_effect">De verwijdering in Contako behouden. Na controle verwijdert de synchronisatie dit contact uit Proton en de bijbehorende Android-kopie die bij Contako hoort.</string>
+    <string name="conflict_proton_effect">De volledige Proton-versie gebruiken. Lokale aangepaste datums, fonetische namen en geschikte lokale labels blijven behouden. Onafhankelijke groepswijzigingen worden afzonderlijk gecontroleerd.</string>
+    <string name="conflict_android_effect">Android wordt via de normale synchronisatie bijgewerkt. Het opslaan van deze keuze betekent niet dat een van de bestemmingen deze heeft bevestigd.</string>
+    <string name="conflict_confirm_choice">Deze versie bevestigen</string>
+    <string name="conflict_after_choice">Resulterende contactvelden vóór synchronisatie</string>
+    <string name="conflict_open_status">Synchronisatiestatus bekijken</string>
+    <string name="conflict_review_groups">Wachtende groepswijzigingen bekijken</string>
+    <string name="conflict_contact_kept">Contact behouden</string>
+    <string name="conflict_group_context">Contako-groepen zijn de huidige lokale toewijzingen; Proton-groepen komen uit de opgeslagen externe versie.</string>
+    <string name="conflict_no_comparison">Deze vergelijking is niet meer beschikbaar. Bekijk de synchronisatiestatus voor de huidige bevestigingen.</string>
+    <string name="conflict_group_dependency">Openstaande groepstoewijzingen kunnen bij deze versie niet veilig behouden blijven. Controleer eerst deze groepswijzigingen.</string>
+    <string name="conflict_additional_names">Aanvullende voornamen</string>
+    <string name="conflict_name_prefix">Naamvoorvoegsel</string>
+    <string name="conflict_name_suffix">Naamachtervoegsel</string>
+    <string name="conflict_component">Ander onderdeel %1$d</string>
+    <string name="conflict_preference">Voorkeursrang: %1$s</string>
+    <string name="conflict_types">Typen: %1$s</string>
+</resources>

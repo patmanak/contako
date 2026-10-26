@@ -16,6 +16,9 @@ import com.patmanak.contako.domain.repository.ContactRepository
 import com.patmanak.contako.domain.repository.SaveResult
 import com.patmanak.contako.domain.sync.SyncAndroidContactIssue
 import com.patmanak.contako.domain.sync.SyncAndroidContactIssueKind
+import com.patmanak.contako.domain.sync.ContactConflictChoice
+import com.patmanak.contako.domain.sync.ContactConflictDetail
+import com.patmanak.contako.domain.sync.ContactConflictSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -41,6 +44,90 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ContactsViewModelTest {
+    @Test fun conflictInspectionReloadsTheWholeDetailForNewSnapshotGroupAndLocalRevision() = runTest(dispatcher) {
+        val local = contact("compared", "Synthetic", "email", "fixture@example.test").copy(revision = 7)
+        val repository = FakeRepository(listOf(local))
+        val recovery = ConflictDetails(conflictDetail(local))
+        val model = ContactsViewModel(repository, recovery)
+        model.openConflict(local.id)
+        runCurrent()
+        val before = recovery.loads
+        val newer = requireNotNull(recovery.current).copy(summary = requireNotNull(recovery.current).summary.copy(
+            generation = "new-generation", remoteVersion = "new-version"), proton = local.copy(firstName = "Remote changed"))
+        recovery.current = newer
+        recovery.rows.value = listOf(newer.summary)
+        runCurrent()
+        assertEquals(newer, model.conflictPanel.value.detail)
+        assertTrue(recovery.loads > before)
+        val group = ContactGroup(LOCAL_ACCOUNT_ID, "group", "Synthetic current group")
+        recovery.current = newer.copy(groups = listOf(group))
+        repository.groups.value = listOf(group)
+        runCurrent()
+        assertEquals(listOf(group), model.conflictPanel.value.detail?.groups)
+        recovery.current = requireNotNull(recovery.current).copy(isCurrent = false, localPreview = null, protonPreview = null)
+        repository.contacts.value = listOf(local.copy(revision = 8))
+        runCurrent()
+        assertTrue(model.conflictPanel.value.failed)
+        model.chooseConflict(ContactConflictChoice.LOCAL)
+        runCurrent()
+        assertEquals(0, recovery.choices)
+        assertNull(repository.savedContact)
+        assertEquals(0, repository.deleteCount)
+        model.dismissConflict()
+    }
+
+    @Test fun suspendedConflictChoiceCannotBeSubmittedTwiceAndDisappearanceIsNotConfirmation() = runTest(dispatcher) {
+        val local = contact("compared", "Synthetic", "email", "fixture@example.test").copy(revision = 7)
+        val repository = FakeRepository(listOf(local))
+        val recovery = ConflictDetails(conflictDetail(local))
+        val entered = CompletableDeferred<Unit>()
+        val resume = CompletableDeferred<Unit>()
+        recovery.beforeChoice = { entered.complete(Unit); resume.await() }
+        val model = ContactsViewModel(repository, recovery)
+        model.openConflict(local.id)
+        runCurrent()
+        model.chooseConflict(ContactConflictChoice.LOCAL)
+        entered.await()
+        repository.groups.value = listOf(ContactGroup(LOCAL_ACCOUNT_ID, "other-group", "Unrelated synthetic group"))
+        runCurrent()
+        assertTrue(model.conflictPanel.value.busy)
+        model.chooseConflict(ContactConflictChoice.PROTON)
+        runCurrent()
+        assertEquals(1, recovery.choices)
+        resume.complete(Unit)
+        runCurrent()
+        assertEquals(ContactConflictChoice.LOCAL, model.conflictPanel.value.detail?.summary?.choice)
+        assertEquals(local.id, model.conflictPanel.value.contactId)
+        model.chooseConflict(ContactConflictChoice.PROTON)
+        runCurrent()
+        assertEquals(1, recovery.choices)
+        recovery.current = null
+        recovery.rows.value = emptyList()
+        runCurrent()
+        assertNull(model.conflictPanel.value.detail)
+        assertTrue(model.conflictPanel.value.unavailable)
+        assertFalse(model.conflictPanel.value.failed)
+        assertNull(repository.savedContact)
+        assertEquals(0, repository.deleteCount)
+        model.dismissConflict()
+    }
+
+    @Test fun conflictSnapshotOfAnotherOwnerIsNeverPublishedOrChosen() = runTest(dispatcher) {
+        val local = contact("compared", "Synthetic", "email", "fixture@example.test")
+        val recovery = ConflictDetails(conflictDetail(local).let {
+            it.copy(proton = it.proton.copy(accountId = "another-synthetic-owner"))
+        })
+        val repository = FakeRepository(listOf(local))
+        val model = ContactsViewModel(repository, recovery)
+        model.openConflict(local.id)
+        runCurrent()
+        assertNull(model.conflictPanel.value.detail)
+        model.chooseConflict(ContactConflictChoice.PROTON)
+        runCurrent()
+        assertEquals(0, recovery.choices)
+        model.dismissConflict()
+    }
+
     @Test fun directoryFiltersApplyOnceKeepSearchAndNeverHideSyncWork() = runTest(dispatcher) {
         val a = contact("a", "Ana", "email", "a@example.invalid").copy(values = listOf(
             ContactValue("org", ContactValueKind.ORGANIZATION, "École", order = 0),
@@ -1993,6 +2080,35 @@ class ContactsViewModelTest {
         model.confirmTargetedRecovery()
         runCurrent()
         assertFalse(model.targetedRecoveryPanel.value.submitting)
+    }
+
+    private fun conflictDetail(local: CanonicalContact) = ContactConflictDetail(
+        ContactConflictSummary(local.id, "synthetic-generation", local.revision, "synthetic-remote-version", null),
+        local, local.copy(firstName = "Proton synthetic"), localPreview = local,
+        protonPreview = local.copy(firstName = "Proton synthetic"),
+    )
+
+    private class ConflictDetails(initial: ContactConflictDetail) : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
+        var current: ContactConflictDetail? = initial
+        val rows = MutableStateFlow(listOf(initial.summary))
+        var loads = 0
+        var choices = 0
+        var beforeChoice: suspend () -> Unit = {}
+        override fun observeConflicts(accountId: String) = rows
+        override suspend fun loadConflict(accountId: String, contactId: String): ContactConflictDetail? {
+            loads++
+            return current
+        }
+        override suspend fun chooseConflict(accountId: String, expected: ContactConflictSummary,
+            choice: ContactConflictChoice): Boolean {
+            choices++
+            beforeChoice()
+            val actual = current ?: return false
+            if (actual.summary != expected) return false
+            current = actual.copy(summary = actual.summary.copy(choice = choice))
+            rows.value = listOf(requireNotNull(current).summary)
+            return true
+        }
     }
 
     private class FakeRepository(

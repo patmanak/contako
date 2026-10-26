@@ -2,6 +2,15 @@
 
 Features and improvements by version.
 
+## 0.19.0
+
+- Compare saved conflict versions by field, with differences first and optional
+  matching fields, structured values, distinct media and per-email group context.
+- Preview the consequences of either whole-contact choice before confirmation,
+  reusing synchronization preservation rules for local complements.
+- Refresh stale comparisons from local storage and distinguish a saved choice
+  awaiting verification from confirmation in the contact synchronization panel.
+
 ## 0.18.0
 
 - Add offline directory filters for missing phone/email, organizations, locally

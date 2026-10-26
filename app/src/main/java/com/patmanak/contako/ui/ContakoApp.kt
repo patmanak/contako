@@ -1856,7 +1856,7 @@ private fun contactKeyboardOptions(kind: ContactValueKind): KeyboardOptions = Ke
 )
 
 @StringRes
-private fun postalAddressComponentLabel(component: String): Int = when (component) {
+internal fun postalAddressComponentLabel(component: String): Int = when (component) {
     PostalAddressPolicy.PO_BOX -> R.string.field_address_po_box
     PostalAddressPolicy.EXTENDED -> R.string.field_address_extended
     PostalAddressPolicy.STREET -> R.string.field_address_street

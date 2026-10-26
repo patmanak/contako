@@ -1,5 +1,24 @@
 # Software integration test plan
 
+## Conflict comparison and consequence previews
+
+Comparison MUST remain read-only and reuse one owned snapshot pair from a local
+transaction. Exercise note-only changes, Unicode, components, labels, preference,
+order, unknown properties and photo/logo separation. Repeated addresses with
+distinct unique service identities MUST retain their own group edges; positional
+keys, shared service identities and unresolved catalogs MUST NOT fabricate matches.
+No source card or private identity may become a displayed property or diagnostic.
+
+Compare each consequence preview with the actual engine preservation result using
+Room, including local dates/phonetics/labels, opaque envelopes, pending groups and
+collisions that make adoption unsafe. Local deletion is a deletion consequence.
+Opening, toggling matching fields, previewing and closing MUST leave all intents,
+snapshots and peers untouched. Only the final confirmation may record a choice.
+Invalidate old previews after local/remote/context changes. Keep double taps,
+blocked admission and owner cleanup safe. A disappeared conflict row MUST NOT be
+presented as confirmed application. Test long text, scrolling and 200% font scale;
+TalkBack and real peer convergence require separately attributed evidence.
+
 ## Directory filters and observation dates
 
 Use isolated Room for atomic contact/value/date snapshots. Migration MUST retain

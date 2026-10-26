@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_differences">Różnice między zapisanymi wersjami</string>
+    <string name="conflict_show_same">Pokaż zgodne pola</string>
+    <string name="conflict_same">Ta sama zapisana wartość</string>
+    <string name="conflict_local_only">Tylko w Contako</string>
+    <string name="conflict_proton_only">Tylko w Protonie</string>
+    <string name="conflict_different">Różne</string>
+    <string name="conflict_unavailable">Dokładne porównanie niedostępne</string>
+    <string name="conflict_ambiguous">Nie można wiarygodnie dopasować tych wystąpień. Są wyświetlane osobno.</string>
+    <string name="conflict_not_present">Brak</string>
+    <string name="conflict_occurrence">%1$s · wystąpienie %2$d</string>
+    <string name="conflict_label">Etykieta: %1$s</string>
+    <string name="conflict_position">Pozycja: %1$d</string>
+    <string name="conflict_groups">Grupy: %1$s</string>
+    <string name="conflict_groups_unknown">Grupy: dokładne porównanie niedostępne</string>
+    <string name="conflict_none">Brak</string>
+    <string name="conflict_attributes">Dodatkowe zapisane atrybuty różnią się lub są niedostępne. Powiązania wewnętrzne nie są wyświetlane.</string>
+    <string name="conflict_media_inline">Zapisana reprezentacja obrazu; miniatura jest tylko ilustracją.</string>
+    <string name="conflict_media_reference">Zapisane odwołanie do multimediów; jego zawartość nie jest pobierana ani porównywana.</string>
+    <string name="conflict_preservation_scope">Karty źródłowe pozostają zachowane wewnętrznie. Pola tylko do odczytu są pokazane osobno powyżej. Podczas synchronizacji istniejące reguły zgodności sprawdzają dokładne skutki dla niereprezentowanych właściwości źródłowych.</string>
+    <string name="conflict_choice_preview">Po dokonaniu tego wyboru…</string>
+    <string name="conflict_local_effect">Zachowaj całą wersję Contako i wyślij jej zmiany po weryfikacji. Zgodne nieznane właściwości pozostają zachowane.</string>
+    <string name="conflict_local_delete_effect">Zachowaj usunięcie wskazane w Contako. Po weryfikacji synchronizacja usunie ten kontakt z Protona i jego kopię Androida należącą do Contako.</string>
+    <string name="conflict_proton_effect">Użyj całej wersji Protona. Lokalne daty niestandardowe, nazwy fonetyczne i odpowiednie lokalne etykiety pozostają zachowane. Niezależne zmiany grup są sprawdzane osobno.</string>
+    <string name="conflict_android_effect">Android jest aktualizowany przez zwykłą synchronizację. Zapisanie tego wyboru nie oznacza, że którekolwiek miejsce docelowe go potwierdziło.</string>
+    <string name="conflict_confirm_choice">Potwierdź tę wersję</string>
+    <string name="conflict_after_choice">Wynikowe pola kontaktu przed synchronizacją</string>
+    <string name="conflict_open_status">Zobacz stan synchronizacji</string>
+    <string name="conflict_review_groups">Przejrzyj oczekujące zmiany grup</string>
+    <string name="conflict_contact_kept">Kontakt zachowany</string>
+    <string name="conflict_group_context">Grupy Contako to bieżące przypisania lokalne; grupy Protona pochodzą z zapisanej wersji zdalnej.</string>
+    <string name="conflict_no_comparison">To porównanie nie jest już dostępne. Sprawdź stan synchronizacji, aby zobaczyć aktualne potwierdzenia.</string>
+    <string name="conflict_group_dependency">Oczekujących przypisań do grup nie można bezpiecznie zachować w tej wersji. Najpierw sprawdź te zmiany grup.</string>
+    <string name="conflict_additional_names">Dodatkowe imiona</string>
+    <string name="conflict_name_prefix">Przedrostek imienia i nazwiska</string>
+    <string name="conflict_name_suffix">Przyrostek imienia i nazwiska</string>
+    <string name="conflict_component">Inny składnik %1$d</string>
+    <string name="conflict_preference">Pozycja preferencji: %1$s</string>
+    <string name="conflict_types">Typy: %1$s</string>
+</resources>

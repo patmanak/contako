@@ -1,6 +1,7 @@
 package com.patmanak.contako.domain.sync
 
 import com.patmanak.contako.domain.model.CanonicalContact
+import com.patmanak.contako.domain.model.ContactGroup
 
 enum class ContactConflictChoice { LOCAL, PROTON }
 
@@ -21,6 +22,12 @@ data class ContactConflictDetail(
     val local: CanonicalContact,
     val proton: CanonicalContact,
     val protonChoiceAvailable: Boolean = true,
+    /** Field previews only: these are neither committed revisions nor peer confirmations. */
+    val localPreview: CanonicalContact? = null,
+    val protonPreview: CanonicalContact? = null,
+    /** Current owned catalogue and assignments, read atomically with the conflict snapshots. */
+    val groups: List<ContactGroup> = emptyList(),
+    val isCurrent: Boolean = true,
 ) {
     override fun toString() = "ContactConflictDetail(REDACTED)"
 }
