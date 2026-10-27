@@ -21,8 +21,8 @@ Screenshots show the application interface with fictional contacts.
 ## Features
 
 - Browse and search your contacts offline, with alphabet navigation.
-- Filter missing phone/email, organizations, locally retained fields and recent
-  field changes without restricting synchronization work.
+- Filter missing phone/email, locally retained fields and recent changes over
+  a configurable number of days, without restricting synchronization work.
 - Create, edit and delete contacts, including repeated fields and contact images.
 - Manage Proton groups and assign them to individual email addresses.
 - Use compatible system contact applications to edit the Contako contact account.

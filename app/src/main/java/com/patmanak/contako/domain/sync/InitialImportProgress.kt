@@ -25,11 +25,14 @@ data class InitialImportSnapshot(
     val inventoryContactCount: Int?,
     val deferredContactCount: Int,
     val androidPendingContactCount: Int,
+    /** Active contacts with an acknowledged clean copy in the current provider epoch. */
+    val androidSynchronizedContactCount: Int? = null,
 ) {
     init {
         require(localContactCount >= 0 && deferredContactCount >= 0 && androidPendingContactCount >= 0)
         require(inventoryContactCount == null || inventoryContactCount >= 0)
         require(inventoryEstablished == (inventoryContactCount != null))
+        require(androidSynchronizedContactCount == null || androidSynchronizedContactCount in 0..localContactCount)
     }
 
     /** Only acquisition of the committed remote inventory; independent of Android and uploads. */

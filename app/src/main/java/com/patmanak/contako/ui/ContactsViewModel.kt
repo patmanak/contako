@@ -14,7 +14,6 @@ import com.patmanak.contako.domain.model.GroupMembership
 import com.patmanak.contako.domain.policy.ContactSearch
 import com.patmanak.contako.domain.policy.ContactDirectoryPolicy
 import com.patmanak.contako.domain.policy.DirectoryFilter
-import com.patmanak.contako.domain.policy.OrganizationFacet
 import com.patmanak.contako.domain.repository.ContactDirectorySnapshot
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import com.patmanak.contako.domain.policy.PostalAddressPolicy
@@ -153,7 +152,6 @@ data class ContactsUiState(
     val selectedContact: CanonicalContact? = null,
     val directoryFilter: DirectoryFilter = DirectoryFilter(),
     val directoryFilterDraft: DirectoryFilter = DirectoryFilter(),
-    val organizationFacets: List<OrganizationFacet> = emptyList(),
     val showDirectoryFilters: Boolean = false,
     val directoryLoading: Boolean = false,
     val directoryReadFailed: Boolean = false,
@@ -443,7 +441,6 @@ class ContactsViewModel(
     private val directoryRefresh = MutableStateFlow(0L)
     private data class PreparedDirectory(
         val snapshot: ContactDirectorySnapshot = ContactDirectorySnapshot(),
-        val facets: List<OrganizationFacet> = emptyList(),
         val loading: Boolean = false,
         val failed: Boolean = false,
         val refreshGeneration: Long = 0,
@@ -473,7 +470,7 @@ class ContactsViewModel(
     private val directory = directoryRefresh.flatMapLatest { refresh ->
         repository.observeDirectory(accountId).map { snapshot ->
             val scoped = snapshot.contacts.filter { it.accountId == accountId && !it.isDeleted }
-            PreparedDirectory(snapshot.copy(contacts = scoped), ContactDirectoryPolicy.organizationFacets(scoped),
+            PreparedDirectory(snapshot.copy(contacts = scoped),
                 refreshGeneration = refresh)
         }.catch { error ->
             if (error is CancellationException) throw error
@@ -615,7 +612,6 @@ class ContactsViewModel(
             directoryFilter = criteria,
             directoryFilterDraft = if (acceptsMutation()) values[20] as DirectoryFilter else DirectoryFilter(),
             showDirectoryFilters = acceptsMutation() && values[21] as Boolean,
-            organizationFacets = if (acceptsMutation()) prepared.facets else emptyList(),
             directoryLoading = prepared.loading || searchPreparing,
             directoryReadFailed = prepared.failed || searchFailed,
             actionContacts = actionContacts,
@@ -717,7 +713,7 @@ class ContactsViewModel(
     }
 
     fun updateDirectoryFilterDraft(value: DirectoryFilter) {
-        if (acceptsMutation() && showDirectoryFilters.value) directoryFilterDraft.value = normalizedFilter(value)
+        if (acceptsMutation() && showDirectoryFilters.value) directoryFilterDraft.value = value
     }
 
     fun dismissDirectoryFilters() { showDirectoryFilters.value = false }
@@ -730,7 +726,7 @@ class ContactsViewModel(
 
     fun setDirectoryFilter(value: DirectoryFilter) {
         if (!acceptsMutation()) return
-        directoryFilter.value = normalizedFilter(value)
+        directoryFilter.value = value
         navigationStore.resetScroll(RootDestination.CONTACTS)
         navigation.value = navigationStore.snapshot()
     }
@@ -740,10 +736,6 @@ class ContactsViewModel(
     fun retryDirectoryRead() {
         if (acceptsMutation()) directoryRefresh.value += 1
     }
-
-    private fun normalizedFilter(value: DirectoryFilter) = value.copy(
-        organizations = value.organizations.map(ContactSearch::normalize).filter(String::isNotBlank).toSet(),
-    )
 
     fun updateScroll(index: Int, offset: Int) {
         navigationStore.updateScroll(index, offset)

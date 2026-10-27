@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="compatibility_about">Over de compatibiliteit van %1$s</string>
+    <string name="contact_information">Informatie</string>
+    <string name="contact_information_shared">Proton en Android</string>
+    <string name="contact_information_proton">Alleen Proton</string>
+    <string name="contact_information_android">Alleen Android</string>
+    <string name="contact_information_local">Alleen Contako</string>
+    <string name="contact_information_read_only">Bewaard · Alleen-lezen</string>
+    <string name="contact_information_unknown">Te controleren</string>
+    <string name="contact_information_help">Over het delen van velden</string>
+    <string name="contact_information_help_body">Deze onderdelen tonen welke velden Contako kan versturen. De synchronisatiestatus toont daadwerkelijke bevestigingen. Velden van andere Android-accounts staan hier niet vermeld.</string>
+    <string name="contact_information_empty">Geen extra velden</string>
+    <string name="contact_information_local_label">Label bewaard in Contako</string>
     <string name="compatibility_title">Waar kan deze informatie verschijnen?</string>
     <string name="compatibility_local">Opslag in Contako</string>
     <string name="compatibility_local_text">Het veld blijft bij het opslaan in het contact behouden. Het openen van deze hulp slaat niets op, wijzigt niets en verzendt niets.</string>
@@ -29,10 +40,4 @@
     <string name="compatibility_email_secondary">Dit is een secundair e-mailadres. De eigen Proton-groepen blijven gescheiden; Android gebruikt de groepen van het voorkeurse-mailadres.</string>
     <string name="compatibility_email_preference">Android-groepen komen van het voorkeurse-mailadres, niet van de samenvoeging van alle e-mailtoewijzingen.</string>
     <string name="compatibility_opaque_android">Onbekende Android-MIME-rijen blijven in Android. Deze hulp neemt ze niet over in Contako of Proton.</string>
-    <string name="compatibility_brief_local">Lokale waarde, geen overdracht naar Proton</string>
-    <string name="compatibility_brief_preserved">Behouden, alleen-lezen</string>
-    <string name="compatibility_brief_android_none">Geen Android-projectie</string>
-    <string name="compatibility_brief_primary">Android gebruikt het primaire voorkomen</string>
-    <string name="compatibility_brief_email">Groepen horen bij elk e-mailadres</string>
-    <string name="compatibility_brief_label">Sommige labels blijven lokaal</string>
 </resources>

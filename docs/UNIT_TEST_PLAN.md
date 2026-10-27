@@ -2,11 +2,12 @@
 
 ## Directory criteria
 
-Cover intersection with search, union of organizations, accent/case equivalence,
+Cover intersection with ordinary search, including company-name accent/case equivalence,
 all blank/nonblank occurrences and invalid-but-present phone/email values.
 Check shared local-only field/label provenance independently of pending delivery.
-Use a fixed clock for inclusive seven-day boundaries, unknown/future dates and
-clock rollback. Preserve multiplicity and original values; filters MUST NOT
+Use a fixed clock for configurable positive day windows (seven by default),
+inclusive boundaries, invalid durations, unknown/future dates and clock rollback,
+including large durations without arithmetic overflow. Preserve multiplicity and original values; filters MUST NOT
 mutate contacts, enqueue work or read a peer.
 
 ## Performance evidence integrity

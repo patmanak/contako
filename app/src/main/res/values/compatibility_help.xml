@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="compatibility_about">About %1$s compatibility</string>
+    <string name="contact_information">Information</string>
+    <string name="contact_information_shared">Proton and Android</string>
+    <string name="contact_information_proton">Proton only</string>
+    <string name="contact_information_android">Android only</string>
+    <string name="contact_information_local">Contako only</string>
+    <string name="contact_information_read_only">Preserved · Read-only</string>
+    <string name="contact_information_unknown">To check</string>
+    <string name="contact_information_help">About field sharing</string>
+    <string name="contact_information_help_body">These sections describe which fields Contako can send. Synchronization status shows actual delivery confirmations. Fields belonging to other Android accounts are not listed here.</string>
+    <string name="contact_information_empty">No additional fields</string>
+    <string name="contact_information_local_label">Label kept in Contako</string>
     <string name="compatibility_title">Where can this information appear?</string>
     <string name="compatibility_local">Storage in Contako</string>
     <string name="compatibility_local_text">The field stays in the contact when you save. Opening this help does not save, change or send anything.</string>
@@ -29,10 +40,4 @@
     <string name="compatibility_email_secondary">This is a secondary email. Its own Proton groups stay separate; Android uses the preferred email groups.</string>
     <string name="compatibility_email_preference">Android groups come from the preferred email, not the union of all email assignments.</string>
     <string name="compatibility_opaque_android">Unrecognized Android MIME rows stay in Android. They are not promoted into Contako or Proton by this help.</string>
-    <string name="compatibility_brief_local">Local value, no Proton transfer</string>
-    <string name="compatibility_brief_preserved">Preserved, read-only</string>
-    <string name="compatibility_brief_android_none">No Android projection</string>
-    <string name="compatibility_brief_primary">Android uses the primary occurrence</string>
-    <string name="compatibility_brief_email">Groups belong to each email</string>
-    <string name="compatibility_brief_label">Some labels stay local</string>
 </resources>

@@ -51,8 +51,9 @@ alone. Preserve duplicates, real label/preference changes, foreign-owner and
 unchanged-field witnesses. Verify FK/account cleanup and tombstone exclusion.
 Dates MUST NOT enter conflict selection.
 
-Compose cases MUST cover Apply/Cancel, chips, independent reset actions, 5,000
-lazy facets and 200% text. View-model cases MUST keep an out-of-filter detail open,
+Compose cases MUST cover Apply/Cancel, chips, independent reset actions, day-count
+editing/validation, repeated upward sheet drags, numeric keyboard use and actual
+200% text. View-model cases MUST keep an out-of-filter detail open,
 secondary-email group search and complete Sync issues; distinguish local read
 failures and clear private filter state on owner invalidation. These local cases
 do not establish real Proton or OEM-editor convergence.
@@ -79,8 +80,8 @@ observation-date writes MUST invalidate one coherent snapshot without requiring
 a revision bump. Reopen storage and verify fresh contents and preserved payloads.
 Rows whose account, contact and owner identities disagree MUST NOT enter the
 directory; verify the malformed rows and legitimate payloads remain stored.
-Organization facets MUST retain the reference normalization, minimum-label and
-ordering rules across repeated Unicode labels, deleted contacts and input order.
+Company-name search MUST preserve case/accent equivalence and all organization
+occurrences without adding a separate company criterion.
 Prepared search inputs MUST belong to their immutable directory snapshot, retain
 Unicode matching and occurrence boundaries, and exclude private nonsearchable
 fields. The same contact ID after a field edit MUST use refreshed search inputs.

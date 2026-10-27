@@ -29,19 +29,8 @@ data class FieldCompatibilityTarget(val kind: ContactValueKind, val valueId: Str
 
 @Composable
 internal fun FieldCompatibilityButton(kind: ContactValueKind, onClick: () -> Unit) {
-    val rule = remember(kind) { ContactFieldCompatibility.describeFamily(kind) }
-    Column(Modifier.widthIn(max = 128.dp)) {
-        IconButton(onClick, Modifier.testTag("field-help-${kind.name}")) {
-            Icon(Icons.Outlined.Info, stringResource(R.string.compatibility_about, stringResource(conflictValueLabel(kind))))
-        }
-        Text(stringResource(when {
-            rule.proton == ProtonFieldSupport.LOCAL_ONLY -> R.string.compatibility_brief_local
-            rule.proton == ProtonFieldSupport.PRESERVED_READ_ONLY -> R.string.compatibility_brief_preserved
-            rule.android == AndroidFieldScope.NONE -> R.string.compatibility_brief_android_none
-            rule.android == AndroidFieldScope.PRIMARY_ONLY -> R.string.compatibility_brief_primary
-            kind == ContactValueKind.EMAIL -> R.string.compatibility_brief_email
-            else -> R.string.compatibility_brief_label
-        }), style = MaterialTheme.typography.labelSmall)
+    IconButton(onClick, Modifier.testTag("field-help-${kind.name}")) {
+        Icon(Icons.Outlined.Info, stringResource(R.string.compatibility_about, stringResource(conflictValueLabel(kind))))
     }
 }
 

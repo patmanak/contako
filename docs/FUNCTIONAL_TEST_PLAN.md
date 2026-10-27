@@ -52,7 +52,7 @@ successful evidence or declaring an accepted limitation fixed.
 
 For directory filters, use rich contacts with duplicate emails, secondary-email
 groups, multiple organizations, blank values, a nonblank invalid phone and a
-local date. Apply/cancel, remove criteria, combine search/organizations, clear
+local date. Apply/cancel, remove criteria, combine criteria with company-name search, clear
 filters without clearing search, open/back and rotate at normal/200% text.
 Compare exact identities/counts and original fields. A contact leaving criteria
 after an edit MUST keep its detail open; Sync MUST retain all issues and counts.
@@ -61,6 +61,12 @@ cleanup without a peer request caused by filtering. A fresh process MUST start
 without criteria. Compare first import, unchanged delayed upload/read and a real
 field change: only the last renews observation time. Group-only edits MUST NOT
 renew it. The date is local observation, never a claimed Proton modification date.
+Choose 1, 7 and 30 days; verify both time-window boundaries and the active chip.
+An empty, zero or overflowing day input MUST NOT apply stale criteria. Cancel and
+rotation MUST preserve the appropriate draft/applied duration. Check repeated
+upward sheet drags and numeric keyboard use at normal/200% text: title/options
+stay within the window and Apply/Cancel remain reachable. No company checklist
+or explanatory paragraphs belong in this sheet.
 
 For performance changes, follow the comparable [measurement protocol](QA.md#performance-measurements).
 Keep local Room/Compose evidence separate from these real-peer journeys:
@@ -127,7 +133,12 @@ MUST retain conservative advice without inventing a field or email occurrence.
 For first import, inspect the dismissible availability overview before and after
 the first durable batch, with Android permission granted and denied. Browse an
 already committed contact, dismiss/rotate/restart and return to Sync. Verify
-counts against independent owned records, not emitted event totals. A partial
+the three compact counts (Proton, Contako, system) against independent owned
+records, not emitted event totals. Unknown totals MUST show pending, confirmed
+empty inventories MUST show zero, and system copies MUST count acknowledged
+active contacts in the current provider epoch, excluding failures and deletion
+backlog. Verify in-progress, completed and completed-with-errors states, with
+only short relevant error summaries. A partial
 card rejection MUST retain healthy contacts; an empty confirmed inventory MUST
 finish without an endless animation. An idle interrupted import MUST NOT show
 live activity merely from an old log/checkpoint. Compare source fields and
@@ -478,8 +489,15 @@ untouched values independently on each peer:
   progress; network failure retains intent; a newer local/remote edit requires review.
   Open comparison with structured names and preserved read-only fields; every
   canonical field type MUST have a readable label without crashing.
-- Open contextual field help in the picker, on an edited occurrence and on a
-  read-only field. Closing/Back/rotation MUST preserve the draft, validation and
+- Ordinary contact fields and images MUST have no repeated compatibility captions,
+  notices or help buttons. Open the single Information entry at the bottom of
+  detail/editor; inspect shared, Proton-only, Android-only, local and preserved
+  occurrences when present. Shared fields start collapsed. Unknown support MUST
+  remain unknown, local labels MUST NOT demote an otherwise transferable value,
+  and source-card backups MUST NOT appear as extra properties. Preserved names
+  and values remain selectable here. Check narrow layout, dark theme and 200% fonts.
+- Open contextual field help in the picker (icon only), through Information on
+  an edited occurrence and on a read-only field. Closing/Back/rotation MUST preserve the draft, validation and
   picker position without Save, gateway/provider access or new sync work. Check
   custom dates and complete phonetics, secondary notes/photos, URL value versus
   local label, and preferred/secondary email groups. A successful group LIST MUST
@@ -489,8 +507,8 @@ untouched values independently on each peer:
   Distinguish editor visibility and actual peer confirmation from these rules.
 - For an imported URL, relation and address occurrence, leave the imported label
   unchanged, then edit it to a custom label without Save. Help MUST identify the
-  local-only label immediately while keeping the value's Proton support separate.
-  Revert to the original label before Save: the draft-only warning MUST disappear.
+  local-only label in Information while keeping the value's Proton support separate.
+  Revert to the original label before Save: the draft-only label indication MUST disappear.
   Standard address type changes MUST remain transferable. New and already-local
   labels remain controls. Opening/closing help MUST preserve imported provenance,
   the original, draft, revisions and pending work without peer I/O.

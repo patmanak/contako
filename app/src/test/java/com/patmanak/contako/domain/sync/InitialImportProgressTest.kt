@@ -57,6 +57,8 @@ class InitialImportProgressTest {
             { InitialImportSnapshot(true, 0, -1, 0, 0) },
             { InitialImportSnapshot(true, 0, null, 0, 0) },
             { InitialImportSnapshot(false, 0, 0, 0, 0) },
+            { InitialImportSnapshot(false, 0, null, 0, 0, -1) },
+            { InitialImportSnapshot(false, 0, null, 0, 0, 1) },
         ).forEach { invalid -> assertThrows(IllegalArgumentException::class.java) { invalid() } }
     }
 

@@ -31,7 +31,6 @@ import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.GroupMembership
 import com.patmanak.contako.domain.model.PreservationEnvelope
-import com.patmanak.contako.domain.policy.ContactSearch
 import com.patmanak.contako.domain.policy.DirectoryFilter
 import com.patmanak.contako.domain.repository.SaveResult
 import com.patmanak.contako.ui.theme.ContakoTheme
@@ -81,8 +80,6 @@ class DirectoryFilterIntegrationDeviceTest {
         val groupsBefore = runBlocking { repository.observeGroups(ACCOUNT).first() }
         assertEquals(allBefore, model.uiState.value.directoryContacts)
         assertTrue(runBlocking { db.outboxDao().getAll(ACCOUNT).isEmpty() })
-        assertEquals(1, model.uiState.value.organizationFacets.count { it.key == ORGANIZATION_KEY })
-        assertFalse(model.uiState.value.organizationFacets.any { it.label == "Foreign company canary" })
 
         compose.onNodeWithContentDescription(text(R.string.directory_filter)).performClick()
         compose.onNodeWithText(text(R.string.directory_without_phone)).performClick()
@@ -157,8 +154,7 @@ class DirectoryFilterIntegrationDeviceTest {
         val observation = runBlocking { requireNotNull(database).contactContentChangesDao().get(ACCOUNT, "alice") }
         assertNotNull(observation)
         compose.runOnIdle {
-            model.setDirectoryFilter(DirectoryFilter(withoutPhone = true, organizations = setOf(ORGANIZATION_KEY),
-                recentChanges = true))
+            model.setDirectoryFilter(DirectoryFilter(withoutPhone = true, recentChanges = true, recentDays = 30))
             model.updateQuery("Aster Alice")
         }
         waitForIds(model, setOf("alice"))
@@ -175,7 +171,6 @@ class DirectoryFilterIntegrationDeviceTest {
         assertEquals(DirectoryFilter(), fresh.uiState.value.directoryFilterDraft)
         assertEquals("", fresh.uiState.value.query)
         assertFalse(fresh.uiState.value.showDirectoryFilters)
-        assertFalse(fresh.uiState.value.organizationFacets.any { it.label == "Foreign company canary" })
         runBlocking {
             assertEquals(observation, reopened.contactContentChangesDao().get(ACCOUNT, "alice"))
             assertEquals(before.preservationEnvelope, repository.getContact(ACCOUNT, "alice")?.preservationEnvelope)
@@ -250,6 +245,5 @@ class DirectoryFilterIntegrationDeviceTest {
         private const val ACCOUNT = "directory-filter-fixture-owner"
         private const val FOREIGN = "directory-filter-foreign-owner"
         private const val TIMEOUT = 15_000L
-        private val ORGANIZATION_KEY = ContactSearch.normalize("École Libre")
     }
 }

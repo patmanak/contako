@@ -119,7 +119,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -148,7 +147,6 @@ import com.patmanak.contako.domain.model.GroupOperation
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
-import com.patmanak.contako.domain.policy.ContactValueSupport
 import com.patmanak.contako.data.android.mapping.ContactFieldCompatibility
 import com.patmanak.contako.domain.policy.PostalAddressPolicy
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
@@ -206,7 +204,8 @@ fun ContakoApp(
             state.syncDashboard.androidAvailability.withContactsPermission(state.contactsPermissionGranted),
             state.syncDashboard.actionRequiredCount > 0, ::dismissInitialImport,
             onViewContacts = { dismissInitialImport(); viewModel.selectDestination(RootDestination.CONTACTS) },
-            onViewProblems = { dismissInitialImport(); viewModel.openSecondary(SecondaryDestination.ACTIONS) })
+            onViewProblems = { dismissInitialImport(); viewModel.openSecondary(SecondaryDestination.ACTIONS) },
+            androidErrorContactCount = state.syncDashboard.androidContactIssues.map { it.contactId }.distinct().size)
     }
     val conflictPanel by viewModel.conflictPanel.collectAsState()
     val targetedPanel by viewModel.targetedRecoveryPanel.collectAsState()
@@ -415,7 +414,6 @@ fun ContakoApp(
     }
     if (state.showDirectoryFilters) DirectoryFilterSheet(
         draft = state.directoryFilterDraft,
-        organizations = state.organizationFacets,
         onDraftChange = viewModel::updateDirectoryFilterDraft,
         onApply = viewModel::applyDirectoryFilters,
         onDismiss = viewModel::dismissDirectoryFilters,
@@ -677,7 +675,6 @@ private fun ContactsDirectory(state: ContactsUiState, viewModel: ContactsViewMod
     Column(Modifier.fillMaxSize()) {
         if (!state.directoryLoading && !state.directoryReadFailed) DirectoryFilterSummary(
             filter = state.directoryFilter,
-            organizations = state.organizationFacets,
             resultCount = state.directoryContacts.size,
             onFilterChange = viewModel::setDirectoryFilter,
         )
@@ -957,7 +954,7 @@ private fun orderedContactImageSources(
         .distinct()
 }
 
-private fun contactValueImageSources(value: ContactValue): List<String> = listOfNotNull(
+internal fun contactValueImageSources(value: ContactValue): List<String> = listOfNotNull(
     value.binaryReference?.takeIf(String::isNotBlank),
     value.value.takeIf(String::isNotBlank),
 ).distinct()
@@ -1043,7 +1040,8 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
                         state.syncDashboard.androidAvailability.withContactsPermission(state.contactsPermissionGranted),
                         state.syncDashboard.actionRequiredCount > 0,
                         onViewContacts = { viewModel.selectDestination(RootDestination.CONTACTS) },
-                        onViewProblems = { viewModel.openSecondary(SecondaryDestination.ACTIONS) }) }
+                        onViewProblems = { viewModel.openSecondary(SecondaryDestination.ACTIONS) },
+                        androidErrorContactCount = state.syncDashboard.androidContactIssues.map { it.contactId }.distinct().size) }
                 }
             }
         }
@@ -1490,6 +1488,9 @@ private fun ContactEditorScreen(editor: ContactEditorState, viewModel: ContactsV
                     item { Text(uiMessage(error), color = MaterialTheme.colorScheme.error) }
                 }
                 item {
+                    ContactInformationEntry(editor, viewModel)
+                }
+                item {
                     Button(
                         onClick = viewModel::saveContact,
                         modifier = Modifier.fillMaxWidth().testTag(CONTACT_EDITOR_BOTTOM_SAVE_TAG),
@@ -1672,17 +1673,9 @@ private val editorSections = listOf(
 @Composable
 private fun ContactGroupAssignmentEditor(editor: ContactEditorState, viewModel: ContactsViewModel) {
     if (!editor.assignmentsEnabled) Text(stringResource(R.string.error_group_operation_unavailable))
-    Text(
-        stringResource(R.string.help_group_mapping),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
     val emails = editor.values.filter {
         it.kind == ContactValueKind.EMAIL && it.value.isNotBlank()
     }.sortedBy(ContactValue::order)
-    if (emails.isEmpty() || editor.groupOptions.isEmpty()) FieldCompatibilityButton(ContactValueKind.EMAIL) {
-        viewModel.openFieldCompatibility(ContactValueKind.EMAIL, groups = true)
-    }
     when {
         emails.isEmpty() -> Text(
             stringResource(R.string.groups_membership_empty),
@@ -1708,9 +1701,6 @@ private fun ContactGroupAssignmentEditor(editor: ContactEditorState, viewModel: 
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.weight(1f),
                         )
-                        FieldCompatibilityButton(ContactValueKind.EMAIL) {
-                            viewModel.openFieldCompatibility(ContactValueKind.EMAIL, email.id, groups = true)
-                        }
                     }
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1749,20 +1739,6 @@ private fun ContactValueFamily(
     val rows = editor.values.filter { it.kind == kind }.sortedBy(ContactValue::order)
     val preferredId = CanonicalPrimaryValuePolicy.select(rows)?.id
     Column(Modifier.fillMaxWidth()) {
-        if (kind == ContactValueKind.CUSTOM_DATE) Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(contactValueLabel(kind)), style = MaterialTheme.typography.labelLarge)
-            if (kind == ContactValueKind.CUSTOM_DATE) {
-                val localOnlyDescription = stringResource(R.string.field_custom_date_local_only)
-                Text(
-                    stringResource(R.string.field_local_only_badge),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.semantics {
-                        contentDescription = localOnlyDescription
-                    },
-                )
-            }
-        }
         rows.forEach { value ->
             var optionsExpanded by rememberSaveable(value.id) { mutableStateOf(false) }
             val position = rows.indexOfFirst { it.id == value.id }
@@ -1775,11 +1751,6 @@ private fun ContactValueFamily(
             val moveUpDescription = stringResource(R.string.field_move_up, occurrenceLabel)
             val moveDownDescription = stringResource(R.string.field_move_down, occurrenceLabel)
             Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                if (ContactFieldCompatibility.needsExplanation(kind) || ContactValueSupport.hasLocalOnlyLabel(value)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        FieldCompatibilityButton(kind) { viewModel.openFieldCompatibility(kind, value.id) }
-                    }
-                }
                 if (rows.size > 1 && value.id == preferredId) {
                     PrimaryValueBadge()
                 }
@@ -2022,7 +1993,6 @@ private fun ImageEditorRow(
                 Text(occurrenceLabel, style = MaterialTheme.typography.labelLarge)
                 if (isPrimary) PrimaryValueBadge()
             }
-            FieldCompatibilityButton(image.kind) { viewModel.openFieldCompatibility(image.kind, image.id) }
             TextButton(onClick = onChooseImage) {
                 Text(stringResource(R.string.action_replace))
             }
@@ -2355,11 +2325,6 @@ private fun ContactDetail(contact: CanonicalContact?, groups: List<ContactGroup>
                         .semantics { contentDescription = requireNotNull(singleImageLabel) }
                     else Modifier,
                 )
-                singleImage?.let { image ->
-                    FieldCompatibilityButton(image.kind) {
-                        viewModel.openFieldCompatibility(image.kind, image.id, editing = false)
-                    }
-                }
                 Text(
                     contact.resolvedDisplayName,
                     style = MaterialTheme.typography.headlineMedium,
@@ -2449,9 +2414,6 @@ private fun ContactDetail(contact: CanonicalContact?, groups: List<ContactGroup>
                                         }
                                     }
                                 }
-                                FieldCompatibilityButton(photo.kind) {
-                                    viewModel.openFieldCompatibility(photo.kind, photo.id, editing = false)
-                                }
                             }
                         }
                     }
@@ -2467,43 +2429,7 @@ private fun ContactDetail(contact: CanonicalContact?, groups: List<ContactGroup>
                         values = values,
                         groups = groups,
                         contactId = contact.id,
-                        onFieldHelp = { value, groupContext ->
-                            viewModel.openFieldCompatibility(value.kind, value.id, editing = false, groups = groupContext)
-                        },
                     )
-                }
-            }
-        }
-        // The preservation envelope contains whole source cards, not extra fields.
-        val preservedValues = contact.valuesOf(ContactValueKind.UNKNOWN_VCARD_PROPERTY)
-        if (preservedValues.isNotEmpty()) {
-            item {
-                Card(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        DetailHeading(R.string.contact_preserved_section)
-                        Text(stringResource(R.string.contact_read_only_body),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        preservedValues.forEach { value ->
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                FieldCompatibilityButton(ContactValueKind.UNKNOWN_VCARD_PROPERTY) {
-                                    viewModel.openFieldCompatibility(ContactValueKind.UNKNOWN_VCARD_PROPERTY,
-                                        value.id, editing = false)
-                                }
-                            }
-                            SelectionContainer {
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(value.label?.takeIf(String::isNotBlank)
-                                        ?: stringResource(R.string.contact_preserved_section),
-                                        style = MaterialTheme.typography.labelLarge)
-                                    Text(value.value, style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -2526,6 +2452,9 @@ private fun ContactDetail(contact: CanonicalContact?, groups: List<ContactGroup>
                     }
                 }
             }
+        }
+        item {
+            ContactInformationEntry(contact, viewModel, Modifier.padding(horizontal = 16.dp))
         }
         item { Spacer(Modifier.height(12.dp)) }
     }
@@ -2702,7 +2631,6 @@ private fun ContactDetailCard(
     values: List<Pair<ContactValueKind, ContactValue>>,
     groups: List<ContactGroup>,
     contactId: String,
-    onFieldHelp: (ContactValue, Boolean) -> Unit,
 ) {
     val familySizes = values.groupingBy { it.first }.eachCount()
     val primaryIds = values.groupBy { it.first }.mapValues { (_, family) ->
@@ -2732,7 +2660,6 @@ private fun ContactDetailCard(
                     groups = groups,
                     contactId = contactId,
                     showPrimary = (familySizes[kind] ?: 0) > 1 && primaryIds[kind] == value.id,
-                    onFieldHelp = onFieldHelp,
                 )
             }
         }
@@ -2747,7 +2674,6 @@ private fun ContactDetailValueRow(
     groups: List<ContactGroup>,
     contactId: String,
     showPrimary: Boolean,
-    onFieldHelp: (ContactValue, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
@@ -2804,10 +2730,6 @@ private fun ContactDetailValueRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (showPrimary) PrimaryValueBadge(Modifier.align(Alignment.CenterVertically))
-                if ((ContactFieldCompatibility.needsExplanation(kind) || ContactValueSupport.hasLocalOnlyLabel(value)) &&
-                    (kind != ContactValueKind.EMAIL || assignedGroups.isEmpty())) {
-                    FieldCompatibilityButton(kind) { onFieldHelp(value, false) }
-                }
             }
             Text(
                 displayValue,
@@ -2816,7 +2738,6 @@ private fun ContactDetailValueRow(
             )
             if (kind == ContactValueKind.EMAIL && assignedGroups.isNotEmpty()) {
                 ContactGroupChips(assignedGroups)
-                FieldCompatibilityButton(kind) { onFieldHelp(value, true) }
             }
         }
     }

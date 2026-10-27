@@ -1,6 +1,9 @@
 package com.patmanak.contako.ui
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -13,6 +16,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import com.patmanak.contako.R
+import com.patmanak.contako.qa.saveSyntheticUiEvidence
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactGroup
 import com.patmanak.contako.domain.repository.*
@@ -43,7 +47,8 @@ class InitialImportOverviewDeviceTest {
             navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
         compose.setContent { ContakoTheme { ContakoApp(model) } }
         compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_context)).assertIsDisplayed()
-        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_pending, 1)).assertDoesNotExist()
+        val pending = compose.activity.getString(R.string.initial_import_pending)
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_synced, pending)).assertIsDisplayed()
         compose.runOnIdle {
             recovery.status.value = recovery.status.value!!.copy(androidAvailability = AndroidAvailability.UNAVAILABLE)
         }
@@ -52,13 +57,13 @@ class InitialImportOverviewDeviceTest {
             recovery.status.value = recovery.status.value!!.copy(androidAvailability = AndroidAvailability.UNKNOWN,
                 initialImport = InitialImportSnapshot(false, 0, null, 0, 0))
         }
-        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_unknown)).assertIsDisplayed()
-        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_no_pending)).assertDoesNotExist()
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_synced, pending)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_completed)).assertDoesNotExist()
         compose.runOnIdle {
             recovery.status.value = recovery.status.value!!.copy(androidAvailability = AndroidAvailability.READY,
-                initialImport = InitialImportSnapshot(false, 1, null, 0, 1))
+                initialImport = InitialImportSnapshot(false, 1, null, 0, 1, 0))
         }
-        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_pending, 1)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_synced, pending)).assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.initial_import_view_contacts)).performClick()
         compose.onNodeWithText("Chloë Groß").assertIsDisplayed()
         compose.runOnIdle { assertEquals(0, recovery.requests); owner.viewModelStore.clear() }
@@ -94,6 +99,47 @@ class InitialImportOverviewDeviceTest {
         }
         compose.onNodeWithText(compose.activity.getString(R.string.initial_import_deferred, 1)).assertIsDisplayed()
         compose.runOnIdle { assertEquals(0, recovery.requests); owner.viewModelStore.clear() }
+    }
+
+    @Test fun compactSummaryShowsUnknownThenExactCountsAndOnlyRelevantErrors() {
+        val progress = mutableStateOf(InitialImportSnapshot(false, 0, null, 0, 0))
+        val activity = mutableStateOf(SyncActivity.RUNNING)
+        val errors = mutableStateOf(0)
+        compose.setContent { ContakoTheme { Surface(Modifier.fillMaxSize()) {
+            InitialImportDialog(progress.value, activity.value, AndroidAvailability.READY,
+                errors.value > 0, {}, {}, {}, androidErrorContactCount = errors.value)
+        } } }
+        val pending = compose.activity.getString(R.string.initial_import_pending)
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_title)).assertIsDisplayed()
+        listOf(R.string.initial_import_inventory, R.string.initial_import_available,
+            R.string.initial_import_android_synced).forEach {
+            compose.onNodeWithText(compose.activity.getString(it, pending)).assertIsDisplayed()
+        }
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_view_problems)).assertDoesNotExist()
+        compose.waitForIdle()
+        saveSyntheticUiEvidence("first-sync-pending")
+        compose.runOnIdle {
+            progress.value = InitialImportSnapshot(true, 12, 15, 3, 2, 10)
+            errors.value = 2
+            activity.value = SyncActivity.IDLE
+        }
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_completed_errors)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_inventory, "15")).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_available, "12")).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_synced, "10")).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_deferred, 3)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_errors, 2)).assertIsDisplayed()
+        compose.waitForIdle()
+        saveSyntheticUiEvidence("first-sync-errors")
+        compose.runOnIdle {
+            progress.value = InitialImportSnapshot(true, 0, 0, 0, 0, 0)
+            errors.value = 0
+        }
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_completed)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_android_synced, "0")).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.initial_import_view_problems)).assertDoesNotExist()
+        compose.waitForIdle()
+        saveSyntheticUiEvidence("first-sync-complete")
     }
 
     private object ReadOnlyRepository : ContactRepository {

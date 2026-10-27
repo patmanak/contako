@@ -2,23 +2,28 @@ package com.patmanak.contako.ui
 
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollToKey
-import androidx.compose.ui.unit.Density
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.geometry.Offset
 import com.patmanak.contako.R
 import com.patmanak.contako.domain.policy.DirectoryFilter
-import com.patmanak.contako.domain.policy.OrganizationFacet
+import com.patmanak.contako.qa.saveSyntheticUiEvidence
 import com.patmanak.contako.ui.theme.ContakoTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -35,7 +40,7 @@ class DirectoryFilterUiDeviceTest {
         var visible by mutableStateOf(true)
         compose.setContent {
             ContakoTheme {
-                if (visible) DirectoryFilterSheet(draft, emptyList(),
+                if (visible) DirectoryFilterSheet(draft,
                     onDraftChange = { draft = it },
                     onApply = { applied = draft; visible = false },
                     onDismiss = { visible = false })
@@ -46,6 +51,8 @@ class DirectoryFilterUiDeviceTest {
             assertTrue(draft.withoutPhone)
             assertEquals(DirectoryFilter(), applied)
         }
+        compose.onNodeWithText(text(R.string.directory_recent_changes)).performClick()
+        compose.onNodeWithTag("directory_recent_days").performScrollTo().performTextReplacement("30")
         compose.onNodeWithText(text(R.string.action_cancel)).performClick()
         compose.onNodeWithTag("directory_filter_sheet").assertDoesNotExist()
         compose.runOnIdle {
@@ -53,30 +60,62 @@ class DirectoryFilterUiDeviceTest {
             draft = applied
             visible = true
         }
+        compose.onNodeWithText(text(R.string.directory_recent_changes)).performClick()
+        compose.onNodeWithTag("directory_recent_days").assertTextContains("7")
+        compose.onNodeWithText(text(R.string.directory_recent_changes)).performClick()
         compose.onNodeWithText(text(R.string.directory_without_email)).performClick()
         compose.onNodeWithText(text(R.string.directory_apply_filters)).performClick()
         compose.runOnIdle { assertEquals(DirectoryFilter(withoutEmail = true), applied) }
     }
 
-    @Test fun fiveThousandFacetsRemainLazyAndApplyAccessibleAtDoubleFontScale() {
+    @Test fun recentDayCountIsConfigurableAndRejectsInvalidValuesBeforeApply() {
         var draft by mutableStateOf(DirectoryFilter())
         var applied = DirectoryFilter()
-        val organizations = List(5_000) { OrganizationFacet("fixture-$it", "Fixture company $it") }
         compose.setContent {
-            val density = LocalDensity.current.density
-            CompositionLocalProvider(LocalDensity provides Density(density, fontScale = 2f)) {
-                ContakoTheme {
-                    DirectoryFilterSheet(draft, organizations, onDraftChange = { draft = it },
-                        onApply = { applied = draft }, onDismiss = {})
-                }
+            ContakoTheme {
+                DirectoryFilterSheet(draft, onDraftChange = { draft = it },
+                    onApply = { applied = draft }, onDismiss = {})
             }
         }
+        assertEquals(4, compose.onAllNodesWithTag("directory_filter_option").fetchSemanticsNodes().size)
+        compose.onNodeWithTag("directory_recent_days").assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.directory_recent_changes)).performClick()
+        listOf("", "0", "2147483648").forEach { invalid ->
+            compose.onNodeWithTag("directory_recent_days").performScrollTo().performTextReplacement(invalid)
+            compose.onNodeWithText(text(R.string.directory_apply_filters)).assertIsNotEnabled()
+            compose.runOnIdle { assertEquals(DirectoryFilter(), applied) }
+        }
+        compose.onNodeWithTag("directory_recent_days").performTextReplacement("30")
+        compose.onNodeWithText(text(R.string.directory_apply_filters)).assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(DirectoryFilter(recentChanges = true, recentDays = 30), applied) }
+    }
+
+    @Test fun draggingToTheTopAndEditingDaysKeepsTheSheetAndActionsReachable() {
+        var draft by mutableStateOf(DirectoryFilter(recentChanges = true, recentDays = 30))
+        var applied = DirectoryFilter()
+        compose.setContent { ContakoTheme {
+            DirectoryFilterSheet(draft, onDraftChange = { draft = it }, onApply = { applied = draft }, onDismiss = {})
+        } }
+        compose.waitForIdle()
+        val before = compose.onNodeWithTag("directory_filter_sheet").fetchSemanticsNode().boundsInRoot
+        repeat(3) {
+            compose.onNodeWithTag("directory_filter_handle", useUnmergedTree = true).performTouchInput {
+                swipe(start = center, end = Offset(center.x, center.y - 300f), durationMillis = 400)
+            }
+        }
+        compose.waitForIdle()
+        val after = compose.onNodeWithTag("directory_filter_sheet").fetchSemanticsNode().boundsInRoot
+        assertEquals(before.top, after.top, 2f)
+        assertEquals(before.bottom, after.bottom, 2f)
+        compose.onNodeWithText(text(R.string.directory_filter)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.directory_apply_filters)).assertIsDisplayed()
-        assertTrue(compose.onAllNodesWithTag("directory_filter_option").fetchSemanticsNodes().size < 50)
-        compose.onNodeWithTag("directory_filter_options").performScrollToKey("organization:fixture-4999")
-        compose.onNodeWithText("Fixture company 4999").assertIsDisplayed().performClick()
-        compose.onNodeWithText(text(R.string.directory_apply_filters)).assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals(setOf("fixture-4999"), applied.organizations) }
+        saveSyntheticUiEvidence("filters-expanded")
+        compose.onNodeWithTag("directory_recent_days").performScrollTo().performClick().performTextReplacement("14")
+        compose.onNodeWithText(text(R.string.directory_apply_filters)).assertIsDisplayed()
+        saveSyntheticUiEvidence("filters-keyboard")
+        compose.onNodeWithTag("directory_recent_days").performImeAction()
+        compose.onNodeWithText(text(R.string.directory_apply_filters)).performClick()
+        compose.runOnIdle { assertEquals(14, applied.recentDays) }
     }
 
     @Test fun removingOneChipAndClearingSearchKeepOtherCriteriaSeparate() {
@@ -86,7 +125,7 @@ class DirectoryFilterUiDeviceTest {
         compose.setContent {
             ContakoTheme {
                 Column {
-                    DirectoryFilterSummary(filter, emptyList(), resultCount = 0, onFilterChange = { filter = it })
+                    DirectoryFilterSummary(filter, resultCount = 0, onFilterChange = { filter = it })
                     FilteredDirectoryEmpty(true, true, onClearFilters = { clearFilters++ },
                         onClearQuery = { clearSearch++ })
                 }
@@ -109,6 +148,17 @@ class DirectoryFilterUiDeviceTest {
         compose.onNodeWithText(text(R.string.directory_filtered_empty)).assertDoesNotExist()
         compose.onNodeWithText(text(R.string.directory_retry_read)).performClick()
         compose.runOnIdle { assertEquals(1, retries) }
+    }
+
+    @Test fun recentChipDisplaysTheChosenDurationAndCanBeRemoved() {
+        var filter by mutableStateOf(DirectoryFilter(recentChanges = true, recentDays = 30))
+        compose.setContent { ContakoTheme {
+            DirectoryFilterSummary(filter, resultCount = 2, onFilterChange = { filter = it })
+        } }
+        val label = compose.activity.resources.getQuantityString(R.plurals.directory_recent_window, 30, 30)
+        compose.onNodeWithText(label).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(DirectoryFilter(recentDays = 30), filter) }
+        compose.onNodeWithTag("directory_active_filters").assertDoesNotExist()
     }
 
     private fun text(id: Int) = compose.activity.getString(id)

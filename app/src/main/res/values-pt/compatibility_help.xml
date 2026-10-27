@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="compatibility_about">Sobre a compatibilidade de %1$s</string>
+    <string name="contact_information">Informações</string>
+    <string name="contact_information_shared">Proton e Android</string>
+    <string name="contact_information_proton">Apenas Proton</string>
+    <string name="contact_information_android">Apenas Android</string>
+    <string name="contact_information_local">Apenas Contako</string>
+    <string name="contact_information_read_only">Preservados · Só de leitura</string>
+    <string name="contact_information_unknown">A verificar</string>
+    <string name="contact_information_help">Sobre a partilha de campos</string>
+    <string name="contact_information_help_body">Estas secções indicam que campos o Contako pode enviar. O estado da sincronização mostra as confirmações de entrega. Os campos de outras contas Android não são apresentados aqui.</string>
+    <string name="contact_information_empty">Sem campos adicionais</string>
+    <string name="contact_information_local_label">Etiqueta mantida no Contako</string>
     <string name="compatibility_title">Onde pode aparecer esta informação?</string>
     <string name="compatibility_local">Armazenamento no Contako</string>
     <string name="compatibility_local_text">O campo permanece no contacto ao guardar. Abrir esta ajuda não guarda, altera nem envia nada.</string>
@@ -29,10 +40,4 @@
     <string name="compatibility_email_secondary">Este é um e-mail secundário. Os seus grupos Proton permanecem separados; o Android utiliza os grupos do e-mail preferido.</string>
     <string name="compatibility_email_preference">Os grupos Android provêm do e-mail preferido, não da união das atribuições de todos os e-mails.</string>
     <string name="compatibility_opaque_android">As linhas MIME Android não reconhecidas permanecem no Android. Esta ajuda não as transfere para o Contako ou Proton.</string>
-    <string name="compatibility_brief_local">Valor local, sem envio para o Proton</string>
-    <string name="compatibility_brief_preserved">Preservado, só de leitura</string>
-    <string name="compatibility_brief_android_none">Sem projeção no Android</string>
-    <string name="compatibility_brief_primary">O Android utiliza a ocorrência principal</string>
-    <string name="compatibility_brief_email">Os grupos pertencem a cada e-mail</string>
-    <string name="compatibility_brief_label">Algumas etiquetas permanecem locais</string>
 </resources>

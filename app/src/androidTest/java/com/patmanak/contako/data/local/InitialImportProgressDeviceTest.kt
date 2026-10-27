@@ -136,6 +136,44 @@ class InitialImportProgressDeviceTest {
         assertEquals(0, snapshot().androidPendingContactCount)
     }
 
+    @Test fun synchronizedCountRequiresCurrentAcknowledgedActiveCopiesAndExcludesIssues() = runBlocking {
+        contact("one")
+        contact("two")
+        contact("deleted", deleted = true)
+        contact("foreign", OTHER)
+        val dao = database.androidProjectionLedgerDao()
+        RoomAndroidProjectionLedger(database).ensureAccount(AccountScope(OWNER))
+        suspend fun count() = database.contactInventoryCheckpointDao().observeInitialImportProgress(OWNER)
+            .first().androidSynchronizedContactCount
+        assertEquals(0, count())
+        dao.insert(ledger("one"))
+        assertEquals(0, count()) // A bare CLEAN flag without an acknowledged copy is insufficient.
+        val clean = ledger("one").copy(rawContactLocator = 1,
+            canonicalProjectionFingerprint = "a".repeat(64), androidBaselineFingerprint = "b".repeat(64))
+        dao.update(clean)
+        assertEquals(1, count())
+        dao.insert(clean.copy(canonicalContactId = "deleted", rawContactLocator = 2))
+        database.androidContactIssueDao().upsert(AndroidContactIssueEntity(
+            OWNER, "deleted", "PROJECTION", 0, 1, "REPAIR_REQUIRED"))
+        assertEquals(1, count()) // Deletion backlog cannot subtract an unrelated live copy.
+        listOf(clean.copy(providerEpoch = 1), clean.copy(projectionState = "WRITE_PENDING"),
+            clean.copy(pendingProjectionFingerprint = "c".repeat(64)), clean.copy(tombstoneState = "PENDING")
+        ).forEach { unverified ->
+            dao.update(unverified)
+            assertEquals(0, count())
+        }
+        dao.update(clean)
+        val issue = AndroidContactIssueEntity(OWNER, "one", "INGEST", 0, 1, "REPAIR_REQUIRED")
+        database.androidContactIssueDao().upsert(issue)
+        assertEquals(0, count())
+        database.androidContactIssueDao().delete(OWNER, "one", "INGEST", 0)
+        database.androidContactIssueDao().upsert(issue.copy(providerEpoch = 1))
+        assertEquals(1, count())
+        database.openHelper.writableDatabase.execSQL(
+            "UPDATE android_projection_accounts SET provider_repair_pending=1 WHERE account_id=?", arrayOf(OWNER))
+        assertEquals(0, count())
+    }
+
     private suspend fun snapshot(owner: String = OWNER): InitialImportSnapshot {
         val counts = database.contactInventoryCheckpointDao().observeInitialImportProgress(owner).first()
         return InitialImportSnapshot(counts.inventoryEstablished, counts.localContactCount, counts.inventoryContactCount,

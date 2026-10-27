@@ -2,18 +2,18 @@
 
 ## Filter the contact directory
 
-Use **Filter** in Contacts, choose criteria and press **Apply filters**. Closing
+Use **Filter** in Contacts, choose criteria and press **Apply**. Closing
 the sheet cancels its draft. The directory shows a result count and removable
 criteria. **Clear filters** keeps search text; clearing search is separate.
-Search and different criteria intersect. Selecting several organizations matches
-any of them, ignoring case and accents without changing stored names.
+Search and different criteria intersect. Company names use ordinary search,
+ignoring case and accents without changing stored names.
 
 **Without phone/email** considers every nonblank occurrence, including secondary
-and invalid values. **Locally retained data** finds custom dates, phonetic names
+and invalid values. **Local-only fields** finds custom dates, phonetic names
 and established labels that Proton cannot represent. Pending delivery alone does
 not make data local-only.
 
-**Changes received or entered — 7 days** uses local observation time of contact
+**Recently changed** offers a **Days** field, set to seven by default. It uses local observation time of contact
 field changes. It does not claim when a field was edited on Proton. First imports
 and migrated contacts without a known observation date are excluded. An unknown
 historical remote baseline is first verified without inventing a change date. Unchanged
@@ -157,7 +157,7 @@ Cached contacts remain readable offline, and saved edits wait for synchronizatio
   types; existing values are shown when editing. Tap the avatar to add a photo.
 - **Field options** reveals labels, preferred values and ordering. **Manage email
   groups** opens assignments for each address, including secondary addresses.
-- **Preserved data** shows additional unsupported fields in read-only form; their
+- **Information** at the bottom of the contact shows unsupported fields in read-only form; their
   text can be selected and copied. They remain preserved during compatible edits.
 - Save commits the edit locally before upload. A pending indicator does not mean
   that Save lost the edit. Reopen the contact to check the saved values.
@@ -222,11 +222,12 @@ version check for the final write.
 
 ## Understand field compatibility
 
-Fields with special rules show a short indication and an information button in
-**Add a field**, the editor and read-only details. **Where can this information
-appear?** separates storage in Contako, Proton format support, Android representation
-and visibility in other contact apps. It works offline and does not save, change,
-probe or send anything. Closing it returns to the same draft or field picker.
+Open **Information** at the bottom of a contact or its editor. Fields are grouped
+by their Proton and Android support; shared fields start collapsed. Local labels
+and preserved read-only properties are shown there. Select a field for details,
+or use the page's information icon for the general explanation. **Add a field**
+also offers icon-only help. Closing help returns to the same contact, draft or
+picker without saving or contacting a peer.
 
 Custom dates and complete phonetic names stay local. A supported URL can still
 have a local-only label. Android may project only a primary occurrence; secondary

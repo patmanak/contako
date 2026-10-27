@@ -1,20 +1,31 @@
 # User-interface contracts
 
+Routine screens MUST use concise labels and prioritize the user's data and
+actions. Explanations of implementation or interoperability SHOULD be available
+on demand, rather than repeated beside every field. Inline text SHOULD identify
+a current error or a decision the user needs to make.
+
 ## Contact-directory filters
 
 Contacts MUST offer a sheet with a separate draft, explicit Apply and Cancel.
 Removable chips, count and list MUST reflect one result. Clearing criteria MUST
 preserve search text. A filtered-empty state MUST offer distinct reset actions;
-loading/failed local reads MUST NOT look like zero matches. Facets and actions
-MUST work at 200% text size, with lazy composition for large organization lists.
+loading/failed local reads MUST NOT look like zero matches. Options and actions
+MUST work at 200% text size. The sheet MUST fit its content without a forced
+viewport-height fraction, keep actions reachable with the keyboard visible and
+remain stable after repeated upward drags. Only constrained options scroll.
 Accessible descriptions MUST name removable criteria without announcing every
-search keystroke.
+search keystroke. The sheet MUST use short labels without explanatory paragraphs.
+Company names remain part of ordinary search, without a duplicate company filter.
+Recent changes MUST offer a positive configurable day count, defaulting to seven;
+invalid or empty input MUST NOT apply an older valid draft silently.
 
 Filters MUST affect only the directory, including its tablet pane. Detail and
 group-member resolution MUST use complete owned data. Preserve compatible scroll
 position on return; applying different criteria MAY reset to the beginning.
 State MUST stay in the owner-scoped ViewModel rather than persisted preferences
-or diagnostics. Fresh sessions/owner cleanup MUST clear criteria, drafts and facets.
+or diagnostics. Fresh sessions/owner cleanup MUST clear criteria and drafts,
+including the chosen recent-change duration.
 
 ## Deleted-contact recovery
 
@@ -62,8 +73,13 @@ The latest scoped recovery failure MUST be distinguishable from the original
 import problem and supply its own admissible action.
 
 The first-import overview MUST be dismissible and keep committed contacts
-accessible. Its persistent Sync summary MUST distinguish local availability,
-the last processed remote inventory, deferred verification and Android copies.
+accessible. Its persistent Sync summary MUST show a fixed first-synchronization
+title, one status (in progress, completed, completed with errors) and three counts:
+Proton contacts, contacts available in Contako and acknowledged system copies.
+Unknown counts MUST display as pending, distinct from a confirmed zero. Errors
+MAY add short scoped counts and a link to details, without explanatory paragraphs.
+Completed MUST require remote acquisition and acknowledged current system copies;
+the copy count MUST NOT be inferred by subtracting backlog from local contacts.
 Only live activity may animate progress; unknown totals MUST remain unknown.
 Dismissal/navigation restoration MUST NOT cancel or restart durable work.
 Android availability MUST distinguish permission, unestablished context,
@@ -143,7 +159,16 @@ reachable directly from the email section. Field labels, preference and ordering
 controls expand on demand; deletion remains directly available. These display
 choices MUST NOT change draft contents, validation or preservation semantics.
 
-Contact detail MUST show actual unsupported property names and values as
+Contact lists, detail and editors MUST prioritize contact values and useful actions.
+Compatibility notices and per-occurrence help buttons MUST NOT interrupt ordinary
+fields. One Information entry at the bottom of detail/editor opens a separate
+scrollable page, grouped by Proton/Android support for the actual occurrences.
+Shared fields SHOULD start collapsed; special cases and local labels remain
+inspectable there. Generic field-picker help MAY use an icon without a caption.
+Explanations MUST be opt-in, preserve drafts and navigation, and distinguish format
+support from actual delivery. Unknown or ambiguous support MUST remain unknown.
+
+The Information page MUST show actual unsupported property names and values as
 selectable read-only content. Whole source cards in the preservation envelope
 MUST NOT be counted or rendered as additional properties. The detail screen MUST
 NOT describe an otherwise idle contact as Android-compatible: pending edits,

@@ -24,6 +24,18 @@ import com.patmanak.contako.domain.sync.InitialImportSnapshot
 import com.patmanak.contako.domain.sync.AndroidAvailability
 import com.patmanak.contako.domain.sync.SyncActivity
 
+internal enum class InitialImportStatus { IN_PROGRESS, COMPLETED, COMPLETED_WITH_ERRORS }
+
+internal fun initialImportStatus(progress: InitialImportSnapshot, activity: SyncActivity,
+    availability: AndroidAvailability, hasProblems: Boolean): InitialImportStatus = when {
+    activity != SyncActivity.IDLE -> InitialImportStatus.IN_PROGRESS
+    hasProblems || progress.deferredContactCount > 0 || availability in setOf(
+        AndroidAvailability.PERMISSION_REQUIRED, AndroidAvailability.UNAVAILABLE) -> InitialImportStatus.COMPLETED_WITH_ERRORS
+    progress.remoteComplete && availability == AndroidAvailability.READY && progress.androidPendingContactCount == 0 &&
+        progress.androidSynchronizedContactCount == progress.localContactCount -> InitialImportStatus.COMPLETED
+    else -> InitialImportStatus.IN_PROGRESS
+}
+
 /** A read-only view of durable availability, never a second synchronization driver. */
 @Composable
 internal fun InitialImportOverview(
@@ -33,39 +45,49 @@ internal fun InitialImportOverview(
     hasProblems: Boolean,
     onViewContacts: () -> Unit,
     onViewProblems: () -> Unit,
+    androidErrorContactCount: Int = 0,
 ) {
+    val problems = hasProblems || androidErrorContactCount > 0
+    val status = initialImportStatus(progress, activity, androidAvailability, problems)
+    val pending = stringResource(R.string.initial_import_pending)
     Column(Modifier.fillMaxWidth().testTag("initial_import_overview"),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(if (progress.remoteComplete) R.string.initial_import_ready else R.string.initial_import_title),
-            style = MaterialTheme.typography.titleMedium)
-        Text(stringResource(when {
-            progress.inventoryEstablished -> R.string.initial_import_inventory_done
-            activity == SyncActivity.RUNNING -> R.string.initial_import_inventory_search
-            else -> R.string.initial_import_waiting
-        }))
+        Text(stringResource(R.string.initial_import_title), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(when (status) {
+            InitialImportStatus.IN_PROGRESS -> R.string.initial_import_in_progress
+            InitialImportStatus.COMPLETED -> R.string.initial_import_completed
+            InitialImportStatus.COMPLETED_WITH_ERRORS -> R.string.initial_import_completed_errors
+        }), color = if (status == InitialImportStatus.COMPLETED_WITH_ERRORS) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant)
         // Activity comes from the live runner. A durable checkpoint never animates by itself.
-        if (!progress.remoteComplete && activity == SyncActivity.RUNNING) {
+        if (activity == SyncActivity.RUNNING) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-        Text(stringResource(R.string.initial_import_available, progress.localContactCount))
-        progress.inventoryContactCount?.let {
-            Text(stringResource(R.string.initial_import_inventory, it))
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.initial_import_inventory, progress.inventoryContactCount?.toString() ?: pending))
+            Text(stringResource(R.string.initial_import_available,
+                progress.localContactCount.takeIf { it > 0 || progress.inventoryEstablished }?.toString() ?: pending))
+            Text(stringResource(R.string.initial_import_android_synced,
+                progress.androidSynchronizedContactCount?.takeIf { androidAvailability == AndroidAvailability.READY &&
+                    (it > 0 || progress.inventoryEstablished) }?.toString() ?: pending))
         }
         if (progress.deferredContactCount > 0) {
             Text(stringResource(R.string.initial_import_deferred, progress.deferredContactCount))
         }
-        Text(stringResource(when (androidAvailability) {
+        val androidProblem = when (androidAvailability) {
             AndroidAvailability.PERMISSION_REQUIRED -> R.string.initial_import_android_permission
             AndroidAvailability.CONTEXT_NOT_ESTABLISHED -> R.string.initial_import_android_context
             AndroidAvailability.UNAVAILABLE -> R.string.initial_import_android_unavailable
-            AndroidAvailability.UNKNOWN -> R.string.initial_import_android_unknown
-            AndroidAvailability.READY -> if (progress.androidPendingContactCount > 0)
-                R.string.initial_import_android_pending else R.string.initial_import_android_no_pending
-        }, progress.androidPendingContactCount))
+            AndroidAvailability.UNKNOWN, AndroidAvailability.READY -> null
+        }
+        if (androidProblem != null) Text(stringResource(androidProblem))
+        if (androidErrorContactCount > 0) {
+            Text(stringResource(R.string.initial_import_android_errors, androidErrorContactCount))
+        }
         if (progress.localContactCount > 0) {
             Button(onClick = onViewContacts) { Text(stringResource(R.string.initial_import_view_contacts)) }
         }
-        if (hasProblems || progress.deferredContactCount > 0) {
+        if (problems || progress.deferredContactCount > 0) {
             TextButton(onClick = onViewProblems) { Text(stringResource(R.string.initial_import_view_problems)) }
         }
     }
@@ -80,12 +102,14 @@ internal fun InitialImportDialog(
     onDismiss: () -> Unit,
     onViewContacts: () -> Unit,
     onViewProblems: () -> Unit,
+    androidErrorContactCount: Int = 0,
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = MaterialTheme.shapes.large) {
             Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState()).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                InitialImportOverview(progress, activity, androidAvailability, hasProblems, onViewContacts, onViewProblems)
+                InitialImportOverview(progress, activity, androidAvailability, hasProblems, onViewContacts, onViewProblems,
+                    androidErrorContactCount)
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
             }
         }

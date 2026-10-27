@@ -59,7 +59,6 @@ class DirectorySearchPreparationViewModelTest {
             // No speculative normalization job runs after first useful rendering.
             assertFalse(worker.hasTasks)
             assertEquals(listOf(first, second), model.uiState.value.contacts)
-            assertEquals("Équipe", model.uiState.value.organizationFacets.single().label)
             val beforeFirstQuery = countedValues.reads
             countedValues.onRead = { assertTrue("Cold normalization must run on the worker", worker.executing) }
             model.updateQuery("ZOE")
@@ -189,7 +188,6 @@ class DirectorySearchPreparationViewModelTest {
             assertEquals(oldReads, oldValues.reads)
             repository.contacts.value = listOf(latest)
             runCurrent()
-            assertEquals("Newest organization", model.uiState.value.organizationFacets.single().label)
             model.updateQuery("after@")
             runCurrent()
             val afterReplacement = seen.size

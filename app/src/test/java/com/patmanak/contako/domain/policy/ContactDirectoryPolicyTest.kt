@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ContactDirectoryPolicyTest {
@@ -17,59 +18,12 @@ class ContactDirectoryPolicyTest {
     @Test fun defaultFilterIsInactiveAndEachCriterionActivatesIt() {
         assertFalse(DirectoryFilter().isActive)
         listOf(DirectoryFilter(withoutPhone = true), DirectoryFilter(withoutEmail = true),
-            DirectoryFilter(organizations = setOf("company")), DirectoryFilter(localOnly = true),
+            DirectoryFilter(localOnly = true),
             DirectoryFilter(recentChanges = true)).forEach { assertTrue(it.isActive) }
         assertTrue(matches(contact(), DirectoryFilter()))
     }
 
-    @Test fun accentAndCaseEquivalentOrganizationFacetsAreDeterministicAndIntersectSearch() {
-        val elodie = contact(value(ContactValueKind.ORGANIZATION, " Société Démo ")).copy(displayName = "Élodie")
-        val other = contact(value(ContactValueKind.ORGANIZATION, "societe demo"),
-            value(ContactValueKind.ORGANIZATION, "Second Company", order = 1)).copy(id = "other", displayName = "Alice")
-        val facets = ContactDirectoryPolicy.organizationFacets(listOf(elodie, other))
-        assertEquals(listOf(OrganizationFacet("second company", "Second Company"),
-            OrganizationFacet("societe demo", "Société Démo")), facets)
-        assertEquals(facets, ContactDirectoryPolicy.organizationFacets(listOf(other, elodie)))
-        val filter = DirectoryFilter(organizations = setOf(ContactSearch.normalize("SOCIÉTÉ DÉMO")))
-        val result = listOf(elodie, other).filter { matches(it, filter) && ContactSearch.matches(it, "ELODIE") }
-        assertEquals(listOf(elodie), result)
-        assertEquals(" Société Démo ", elodie.values.single().value)
-        assertEquals("societe demo", other.values.first().value)
-    }
 
-    @Test fun accumulatedFacetsMatchGroupingReferenceForUnicodeDuplicatesAndLongDirectories() {
-        val labels = listOf(" Société Démo ", "societe demo", "SOCIÉTÉ DÉMO", "E\u0301quipe", "Équipe",
-            "İpek", "Ipek", "Işık", "ışık", "Straße", "STRASSE", "東京", "Δelta", "\u0301", "\u0300\u0301",
-            "", " \t\n", "\u00a0\u202f", "Ångström", "A\u030angström", " ANGSTROM ")
-        val contacts = (0 until 5_000).map { index ->
-            val repeated = labels[index % labels.size]
-            CanonicalContact("facet-reference-owner", "facet-$index", isDeleted = index % 23 == 0,
-                values = listOf(
-                    value(ContactValueKind.ORGANIZATION, repeated),
-                    value(ContactValueKind.ORGANIZATION, labels[(index + 3) % labels.size], order = 1),
-                    value(ContactValueKind.ORGANIZATION, repeated, order = 2),
-                    value(ContactValueKind.ORGANIZATION, "Synthetic company ${index.toString().padStart(5, '0')}", order = 3),
-                    value(ContactValueKind.NOTE, "Must never become a company facet"),
-                ))
-        }
-        // Independent grouping/sorting reference keeps the previous observable rules: empty
-        // normalized keys are valid, labels use natural minimum, and source multiplicity survives.
-        fun reference(input: List<CanonicalContact>) = input.asSequence()
-            .filterNot(CanonicalContact::isDeleted)
-            .flatMap { it.values.asSequence() }
-            .filter { it.kind == ContactValueKind.ORGANIZATION && it.value.isNotBlank() }
-            .map { it.value.trim() }
-            .groupBy(ContactSearch::normalize)
-            .toSortedMap()
-            .map { (key, group) -> OrganizationFacet(key, group.minOrNull()!!) }
-        val expected = reference(contacts)
-        val originals = contacts.map { it.copy(values = it.values.map { value -> value.copy() }) }
-        assertEquals(expected, ContactDirectoryPolicy.organizationFacets(contacts))
-        assertEquals(expected, ContactDirectoryPolicy.organizationFacets(contacts.reversed()))
-        assertEquals(expected, ContactDirectoryPolicy.organizationFacets(contacts.shuffled(kotlin.random.Random(47))))
-        assertTrue(expected.any { it.key.isEmpty() })
-        assertEquals(originals, contacts)
-    }
 
     @Test fun withoutEmailAndPhoneExamineEveryOccurrenceIncludingInvalidNonblankValues() {
         for ((kind, filter) in listOf(ContactValueKind.EMAIL to DirectoryFilter(withoutEmail = true),
@@ -82,19 +36,6 @@ class ContactDirectoryPolicyTest {
         }
     }
 
-    @Test fun organizationsUseOrWhileOtherCriteriaUseAndWithoutDuplicatingContacts() {
-        val filter = DirectoryFilter(withoutPhone = true, organizations = setOf("alpha", "beta"))
-        val alpha = contact(value(ContactValueKind.ORGANIZATION, "Alpha"))
-        val beta = contact(value(ContactValueKind.ORGANIZATION, "BÉTA"))
-        val both = contact(value(ContactValueKind.ORGANIZATION, "Alpha"), value(ContactValueKind.ORGANIZATION, "Beta", order = 1))
-        assertTrue(matches(alpha, filter))
-        assertTrue(matches(beta, filter))
-        assertEquals(listOf(both), listOf(both).filter { matches(it, filter) })
-        assertFalse(matches(contact(value(ContactValueKind.ORGANIZATION, "Gamma")), filter))
-        assertFalse(matches(contact(value(ContactValueKind.ORGANIZATION, "Alpha"), value(ContactValueKind.PHONE, "x")), filter))
-        assertFalse(matches(contact(value(ContactValueKind.ORGANIZATION, " \t")), filter))
-        assertTrue(matches(contact(), DirectoryFilter(organizations = emptySet())))
-    }
 
     @Test fun localOnlyRequiresContentAndDoesNotInferRepresentationFromPendingOrUnknownFields() {
         val filter = DirectoryFilter(localOnly = true)
@@ -118,10 +59,9 @@ class ContactDirectoryPolicyTest {
             value(ContactValueKind.CUSTOM_DATE, "--10-25", metadata = mapOf("fixture" to "preserve")))
         val original = CanonicalContact("synthetic-account", "synthetic-contact", values = values)
         val snapshot = original.copy(values = values.map { it.copy(components = it.components.toMap(), metadata = it.metadata.toMap()) })
-        val filter = DirectoryFilter(withoutPhone = true, withoutEmail = true, organizations = setOf("example"),
+        val filter = DirectoryFilter(withoutPhone = true, withoutEmail = true,
             localOnly = true, recentChanges = true)
         assertTrue(matches(original, filter, now))
-        ContactDirectoryPolicy.organizationFacets(listOf(original))
         assertEquals(snapshot, original)
         assertSame(values, original.values)
         assertSame(values.last(), original.values.last())
@@ -150,16 +90,35 @@ class ContactDirectoryPolicyTest {
         assertFalse(ContactDirectoryPolicy.matches(contact(), filter, Long.MIN_VALUE, Long.MAX_VALUE))
     }
 
-    @Test fun tombstonesDoNotMatchOrContributeOrganizationFacets() {
+    @Test fun tombstonesDoNotMatch() {
         val deleted = contact(value(ContactValueKind.ORGANIZATION, "Deleted Company")).copy(isDeleted = true)
         assertFalse(matches(deleted, DirectoryFilter()))
-        assertTrue(ContactDirectoryPolicy.organizationFacets(listOf(deleted)).isEmpty())
     }
 
-    @Test fun diagnosticStringsDoNotExposeOrganizationLabelsOrKeys() {
-        val privateLabel = "Synthetic Organization Canary"
-        assertFalse(OrganizationFacet(privateLabel.lowercase(), privateLabel).toString().contains("Canary", ignoreCase = true))
-        assertFalse(DirectoryFilter(organizations = setOf(privateLabel)).toString().contains("Canary", ignoreCase = true))
+
+    @Test fun companiesRemainSearchableWithCaseAndAccentEquivalence() {
+        val original = contact(value(ContactValueKind.ORGANIZATION, "Société Démo"),
+            value(ContactValueKind.ORGANIZATION, "Second Company", order = 1))
+        assertTrue(ContactSearch.matches(original, "SOCIETE DEMO"))
+        assertTrue(ContactSearch.matches(original, "second company"))
+        assertFalse(ContactSearch.matches(original, "other company"))
+        assertEquals("Société Démo", original.values.first().value)
+    }
+
+    @Test fun recentWindowUsesTheChosenPositiveDayCountWithoutOverflow() {
+        val day = week / 7
+        listOf(1, 7, 30, 365, Int.MAX_VALUE).forEach { days ->
+            val filter = DirectoryFilter(recentChanges = true, recentDays = days)
+            val duration = days.toLong() * day
+            assertTrue(matches(contact(), filter, now - duration))
+            assertFalse(matches(contact(), filter, now - duration - 1))
+            assertTrue(ContactDirectoryPolicy.matches(contact(), filter, Long.MIN_VALUE, Long.MIN_VALUE + duration))
+            assertFalse(ContactDirectoryPolicy.matches(contact(), filter, Long.MIN_VALUE, Long.MIN_VALUE + duration + 1))
+        }
+        assertFalse(DirectoryFilter(recentDays = 30).isActive)
+        assertThrows(IllegalArgumentException::class.java) { DirectoryFilter(recentDays = 0) }
+        assertThrows(IllegalArgumentException::class.java) { DirectoryFilter(recentDays = -1) }
+        assertEquals("DirectoryFilter(redacted)", DirectoryFilter(recentChanges = true, recentDays = 30).toString())
     }
 
     private fun matches(contact: CanonicalContact, filter: DirectoryFilter, changedAt: Long? = null): Boolean =

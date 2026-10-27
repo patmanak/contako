@@ -178,7 +178,8 @@ internal class RoomSyncRecoveryDataSource(
                     identities.toSet().size + snapshot.importProblems.size))
         }.combine(database.contactInventoryCheckpointDao().observeInitialImportProgress(boundAccount(accountId).value)) { snapshot, counts ->
             val progress = InitialImportSnapshot(counts.inventoryEstablished, counts.localContactCount,
-                counts.inventoryContactCount, counts.deferredContactCount, counts.androidPendingContactCount)
+                counts.inventoryContactCount, counts.deferredContactCount, counts.androidPendingContactCount,
+                counts.androidSynchronizedContactCount)
             snapshot.copy(initialImport = progress,
                 state = if (snapshot.state == SyncDashboardState.CURRENT && !progress.remoteComplete)
                     SyncDashboardState.PENDING else snapshot.state)

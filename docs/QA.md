@@ -103,8 +103,8 @@ timings include Compose synchronization and semantics inspection overhead.
 Protocol `accepted-action-v3` measures the current `observeDirectory` snapshot;
 its repository acquisition MUST NOT be compared directly with protocol-v2
 `observeContacts` results as if the paths were identical. Separate diagnostics
-cover Room plus DTO materialization, canonical conversion, sorting, organization
-facets, search/group matching and directory-section construction. Replayed
+cover Room plus DTO materialization, canonical conversion, sorting,
+search/group matching and directory-section construction. Replayed
 component timings are diagnostic, not a decomposition whose P95 values may be
 summed or subtracted. Report aggregate DTO rows and UTF-8 string volume outside
 timing; these are not SQLite cursor bytes or native peak memory. The separate

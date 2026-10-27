@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="compatibility_about">Informacje o zgodności pola %1$s</string>
+    <string name="contact_information">Informacje</string>
+    <string name="contact_information_shared">Proton i Android</string>
+    <string name="contact_information_proton">Tylko Proton</string>
+    <string name="contact_information_android">Tylko Android</string>
+    <string name="contact_information_local">Tylko Contako</string>
+    <string name="contact_information_read_only">Zachowane · Tylko do odczytu</string>
+    <string name="contact_information_unknown">Do sprawdzenia</string>
+    <string name="contact_information_help">Udostępnianie pól</string>
+    <string name="contact_information_help_body">Te sekcje pokazują, które pola Contako może wysłać. Stan synchronizacji pokazuje potwierdzenia dostarczenia. Pola innych kont Androida nie są tutaj wymienione.</string>
+    <string name="contact_information_empty">Brak dodatkowych pól</string>
+    <string name="contact_information_local_label">Etykieta zachowana w Contako</string>
     <string name="compatibility_title">Gdzie mogą pojawić się te informacje?</string>
     <string name="compatibility_local">Przechowywanie w Contako</string>
     <string name="compatibility_local_text">Pole pozostaje w kontakcie po zapisaniu. Otwarcie tej pomocy niczego nie zapisuje, nie zmienia ani nie wysyła.</string>
@@ -29,10 +40,4 @@
     <string name="compatibility_email_secondary">To jest dodatkowy adres e-mail. Jego grupy Protona pozostają oddzielne; Android używa grup preferowanego adresu e-mail.</string>
     <string name="compatibility_email_preference">Grupy Androida pochodzą z preferowanego adresu e-mail, a nie z sumy przypisań wszystkich adresów.</string>
     <string name="compatibility_opaque_android">Nierozpoznane wiersze MIME Androida pozostają w Androidzie. Ta pomoc nie przenosi ich do Contako ani Protona.</string>
-    <string name="compatibility_brief_local">Wartość lokalna, bez przesyłania do Protona</string>
-    <string name="compatibility_brief_preserved">Zachowane, tylko do odczytu</string>
-    <string name="compatibility_brief_android_none">Bez odwzorowania w Androidzie</string>
-    <string name="compatibility_brief_primary">Android używa głównego wystąpienia</string>
-    <string name="compatibility_brief_email">Grupy należą do każdego adresu e-mail</string>
-    <string name="compatibility_brief_label">Niektóre etykiety pozostają lokalne</string>
 </resources>

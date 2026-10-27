@@ -71,8 +71,6 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
 
     InfoCard(stringResource(R.string.diagnostics_title)) {
         Text(stringResource(R.string.diagnostics_body), style = MaterialTheme.typography.bodySmall)
-        Text(stringResource(R.string.diagnostics_journal_body), style = MaterialTheme.typography.bodySmall)
-        Text(stringResource(R.string.sync_issue_history), style = MaterialTheme.typography.bodySmall)
         OutlinedButton(enabled = !exporting, onClick = {
             exporting = true
             scope.launch {

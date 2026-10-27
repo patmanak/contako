@@ -4,8 +4,13 @@ Features and improvements by version.
 
 ## 0.20.0
 
-- Explain field compatibility from the field picker, editor and read-only details,
-  with separate Contako, Proton, Android and contact-app visibility sections.
+- Shorten the diagnostic report description to its contents and privacy exclusions.
+- Simplify directory filters, keep company names in ordinary search and make the
+  recent-change period configurable; keep the compact sheet stable when dragged.
+- Simplify the first synchronization panel to one status, three contact counts
+  and concise error summaries; distinguish pending totals from confirmed zero.
+- Keep contact screens concise, with one Information entry for field sharing,
+  local labels and preserved data, and icon-only help in the field picker.
 - Derive Android occurrence support from the existing mapper and distinguish
   local values from local-only labels, preferred email groups and media limits.
 - Show cached email-assignment capability as unknown, available or refused without

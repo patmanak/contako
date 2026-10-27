@@ -53,7 +53,6 @@ import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.GroupMembership
 import com.patmanak.contako.domain.model.PreservationEnvelope
-import com.patmanak.contako.domain.policy.ContactDirectoryPolicy
 import com.patmanak.contako.domain.policy.ContactSearch
 import com.patmanak.contako.ui.ContakoApp
 import com.patmanak.contako.ui.ContactsViewModel
@@ -718,8 +717,6 @@ class CachedDirectoryPerformanceDeviceTest {
         val mapped = dtos.map(ContactWithValues::toDomain)
         val oracleById = oracle.associateBy { it.id }
         assertTrue("Mapping differs from production snapshot", mapped.associateBy { it.id } == oracleById)
-        val facets = ContactDirectoryPolicy.organizationFacets(oracle)
-        assertEquals(profile.contacts, facets.size)
         val sections = DirectorySectionIndex.create(oracle, locale, CanonicalContact::resolvedDisplayName)
         assertEquals(oracle.map { it.id }, sections.sections.flatMap { it.items }.map { it.id })
 
@@ -745,9 +742,6 @@ class CachedDirectoryPerformanceDeviceTest {
             val collator = Collator.getInstance(locale)
             mapped.sortedWith { left, right -> collator.compare(left.resolvedDisplayName, right.resolvedDisplayName) }
         }) { actual -> assertTrue("Sort differs from production order and values", oracle == actual) }
-        component("ORGANIZATION-FACETS", { ContactDirectoryPolicy.organizationFacets(oracle) }) { actual ->
-            assertTrue("Organization facets differ", facets == actual)
-        }
         component("SEARCH-AND-GROUP-NAMES", {
             val search = ContactSearch.prepare(SEARCH)
             val matchingGroups = fixture.groups.filter { search.matchesGroupName(it.name) }

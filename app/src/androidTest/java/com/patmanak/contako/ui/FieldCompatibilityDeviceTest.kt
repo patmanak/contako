@@ -24,6 +24,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.patmanak.contako.R
+import com.patmanak.contako.qa.saveSyntheticUiEvidence
 import com.patmanak.contako.data.android.mapping.ContactFieldCompatibility
 import com.patmanak.contako.data.proton.ProtonContactVCardCodec
 import com.patmanak.contako.data.proton.ProtonPlainContactCard
@@ -65,13 +66,13 @@ class FieldCompatibilityDeviceTest {
             compose.runOnIdle { model.editContact(original) }
             compose.waitUntil(10_000) { model.uiState.value.contactEditor != null }
             fun help(localLabel: Boolean) {
-                compose.onNodeWithTag("contact_editor_fields").performScrollToNode(hasTestTag("field-help-URL"))
-                compose.onNodeWithTag("field-help-URL").performClick()
+                openInformationValue(ContactValueKind.URL)
                 awaitHelp()
                 show(R.string.compatibility_proton_generated)
                 if (localLabel) show(R.string.compatibility_local_label)
                 else compose.onNodeWithText(text(R.string.compatibility_local_label)).assertDoesNotExist()
                 compose.onNodeWithTag("field-help-close").performScrollTo().performClick()
+                compose.onNodeWithTag("contact-information-back").performClick()
             }
             help(false)
             compose.onNodeWithTag("contact_editor_fields").performScrollToNode(hasTestTag("contact_value_options_${url.id}"))
@@ -86,6 +87,7 @@ class FieldCompatibilityDeviceTest {
                 assertEquals(false, model.uiState.value.contactEditor?.values?.single { it.id == url.id }
                     ?.metadata?.containsKey("contakoLocalOnlyLabel"))
             }
+            compose.onNodeWithTag("contact_editor_fields").performScrollToNode(hasTestTag("contact_value_options_${url.id}"))
             compose.onNodeWithText(text(R.string.field_custom_label)).performScrollTo().performTextReplacement(url.label.orEmpty())
             help(false)
             compose.runOnIdle {
@@ -237,15 +239,12 @@ class FieldCompatibilityDeviceTest {
             compose.runOnIdle { model.editContact(original) }
             compose.waitUntil(10_000) { model.uiState.value.contactEditor != null }
             val draft = requireNotNull(model.uiState.value.contactEditor)
-            compose.onNodeWithTag("contact_editor_fields").performScrollToNode(
-                hasText(text(R.string.contact_identity_gallery_section)))
-            compose.onNodeWithText(text(R.string.contact_identity_gallery_section)).performClick()
-            compose.onNodeWithTag("contact_editor_fields").performScrollToNode(hasTestTag("field-help-PHOTO"))
-            compose.onNodeWithTag("field-help-PHOTO").assertIsDisplayed().performClick()
+            openInformationValue(ContactValueKind.PHOTO)
             awaitHelp()
             compose.onNodeWithTag("field-compatibility-help").assertIsDisplayed()
             show(R.string.compatibility_photo)
             compose.onNodeWithTag("field-help-close").performScrollTo().assertIsDisplayed().performClick()
+            compose.onNodeWithTag("contact-information-back").performClick()
             compose.runOnIdle {
                 assertEquals(draft, model.uiState.value.contactEditor)
                 assertEquals(listOf(image), model.uiState.value.contactEditor?.images)
@@ -253,6 +252,58 @@ class FieldCompatibilityDeviceTest {
                 assertEquals(0, repository.writes)
             }
         } finally { compose.runOnIdle { owner.clear() } }
+    }
+
+    @Test fun contactDetailKeepsTechnicalFieldsBehindOneEntryAndRestoresTheInformationPage() {
+        val opaque = ContactValue("opaque", ContactValueKind.UNKNOWN_VCARD_PROPERTY,
+            "X-SYNTHETIC:preserved", label = "X-SYNTHETIC", order = 1)
+        val original = contact(listOf(ContactValue("phone", ContactValueKind.PHONE, "+33600000001", order = 0), opaque))
+        val repository = NoWrites(original)
+        val owner = ViewModelStore()
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(repository, accountId = original.accountId,
+            navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
+        val restoration = StateRestorationTester(compose)
+        try {
+            restoration.setContent { ContakoTheme { ContakoApp(model) } }
+            compose.runOnIdle { model.selectContact(original) }
+            compose.onNodeWithText("+33600000001").assertIsDisplayed()
+            compose.onNodeWithText(opaque.value).assertDoesNotExist()
+            compose.onNodeWithText(text(R.string.contact_read_only_body)).assertDoesNotExist()
+            compose.onNodeWithTag("field-help-PHONE").assertDoesNotExist()
+            compose.waitForIdle()
+            saveSyntheticUiEvidence("contact-detail")
+            compose.onNodeWithTag("contact-information-entry").performScrollTo().performClick()
+            awaitInformationProperties()
+            compose.waitForIdle()
+            saveSyntheticUiEvidence("contact-information")
+            compose.onNodeWithTag("contact-information-fields").performScrollToNode(hasText(opaque.value))
+            compose.onNodeWithText(opaque.value).assertIsDisplayed()
+            restoration.emulateSavedInstanceStateRestore()
+            compose.onNodeWithTag("contact-information-page").assertIsDisplayed()
+            awaitInformationProperties()
+            compose.onNodeWithTag("contact-information-fields").performScrollToNode(hasText(opaque.value))
+            compose.onNodeWithText(opaque.value).assertIsDisplayed()
+            compose.onNodeWithTag("contact-information-back").performClick()
+            compose.onNodeWithText("+33600000001").assertIsDisplayed()
+            compose.runOnIdle { assertEquals(0, repository.writes) }
+        } finally { compose.runOnIdle { owner.clear() } }
+    }
+
+    private fun openInformationValue(kind: ContactValueKind) {
+        compose.onNodeWithTag("contact_editor_fields").performScrollToNode(hasTestTag("contact-information-entry"))
+        compose.onNodeWithTag("contact-information-entry").performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("contact-information-SHARED").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("contact-information-SHARED").performClick()
+        compose.onNodeWithTag("contact-information-fields").performScrollToNode(hasTestTag("contact-information-value-${kind.name}"))
+        compose.waitForIdle()
+        saveSyntheticUiEvidence("information-${kind.name.lowercase(java.util.Locale.ROOT)}")
+        compose.onNodeWithTag("contact-information-value-${kind.name}").performClick()
+    }
+
+    private fun awaitInformationProperties() = compose.waitUntil(10_000) {
+        compose.onAllNodesWithTag("contact-information-READ_ONLY").fetchSemanticsNodes().isNotEmpty()
     }
 
     private fun show(id: Int) = compose.onNodeWithText(text(id)).performScrollTo().assertIsDisplayed()

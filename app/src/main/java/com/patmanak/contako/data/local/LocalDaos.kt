@@ -502,6 +502,7 @@ internal data class InitialImportProgressCounts(
     val inventoryContactCount: Int?,
     val deferredContactCount: Int,
     val androidPendingContactCount: Int,
+    val androidSynchronizedContactCount: Int,
 ) {
     override fun toString() = "InitialImportProgressCounts(REDACTED)"
 }
@@ -525,7 +526,18 @@ internal interface ContactInventoryCheckpointDao {
                         JOIN android_projection_accounts account ON account.account_id=issue.account_id
                             AND account.provider_epoch=issue.provider_epoch
                         WHERE issue.account_id=c.account_id AND issue.canonical_contact_id=c.id
-                            AND issue.origin='PROJECTION'))) AS androidPendingContactCount
+                            AND issue.origin='PROJECTION'))) AS androidPendingContactCount,
+            (SELECT COUNT(*) FROM contacts c JOIN android_projection_ledger l
+                ON l.account_id=c.account_id AND l.canonical_contact_id=c.id
+                JOIN android_projection_accounts account ON account.account_id=l.account_id
+                    AND account.provider_epoch=l.provider_epoch
+                WHERE c.account_id=:accountId AND c.is_deleted=0 AND account.provider_repair_pending=0
+                    AND l.projection_state='CLEAN' AND l.pending_projection_fingerprint IS NULL
+                    AND l.raw_contact_locator IS NOT NULL AND l.canonical_projection_fingerprint IS NOT NULL
+                    AND l.android_baseline_fingerprint IS NOT NULL AND l.tombstone_state='NONE'
+                    AND NOT EXISTS(SELECT 1 FROM android_contact_issues issue
+                        WHERE issue.account_id=c.account_id AND issue.canonical_contact_id=c.id
+                            AND issue.provider_epoch=l.provider_epoch)) AS androidSynchronizedContactCount
     """)
     fun observeInitialImportProgress(accountId: String): Flow<InitialImportProgressCounts>
 
