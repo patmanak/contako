@@ -80,16 +80,15 @@ The first import opens an overview that can be closed at any time. **View my
 contacts** opens the contacts already saved on this device; it does not cancel
 the import. Sync keeps the same availability summary afterwards.
 
-The overview separates the most recent processed Proton inventory, contacts
-available in Contako, remote cards still needing verification and Android
-copies awaiting processing. Before an inventory is established its total is
-unknown. The indicator follows current synchronization activity, with no
-estimated percentage or finish time. A confirmed empty inventory completes
-normally. Refusing Android permission leaves Contako and Proton available.
+**First synchronization** shows **In progress**, **Completed** or **Completed
+with errors**, followed by three counts: Proton contacts, contacts imported into
+Contako and system contacts synced. Unknown totals show **Pending**; a confirmed
+empty inventory shows zero. Errors add a short summary and **View problems**.
 
-After restart the summary is rebuilt from saved contacts, inventory and pending
-obligations. No pending Android copy means no known copy obligation, rather
-than a promise that every field in every peer was compared simultaneously.
+After restart the summary is rebuilt from saved records. The system count covers
+acknowledged active copies, not a fresh comparison of every field. Only current
+activity animates the indicator. Refusing Contacts permission leaves Contako and
+Proton available while system synchronization waits.
 
 ## Understanding a synchronization issue
 

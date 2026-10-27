@@ -215,9 +215,11 @@ Android failures may precede successful remote stages; the final stage alone
 MUST NOT be treated as the origin of an error. Retries already collapsed by a
 lower boundary may still lack a detailed category.
 
-Events live only in Android's bounded log buffer and may be evicted or lost on
-reboot. There is no new on-disk report, telemetry or automatic export. Capture
-only the allowlisted diagnostic fields promptly after an authorized
+These additional Logcat events live only in Android's bounded log buffer and
+may be evicted or lost on reboot. They do not add a separate on-disk report,
+telemetry or automatic export; the schema-3 local journal described above remains
+available in all builds. Capture only the allowlisted diagnostic fields promptly
+after an authorized
 reproduction; raw buffers MUST NOT be printed, committed or shared. A missing
 event MUST NOT establish success. Log-read permission does not by itself authorize
 installation, app execution or account mutations. Consult the current task scope.

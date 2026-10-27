@@ -28,7 +28,7 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
 | Provider photo transformations | New synchronous photo copies retain a durable receipt of the actual provider representation, separately from the original. A supplier with unexpected version increments, delayed display-file publication or an unverified interrupted legacy write remains pending. The new transaction boundary requires physical OEM qualification; a visually correct photo alone does not prove convergence. |
 | Missing owned Android copy | Normal sync checks metadata before skipping a stored clean copy. A missing or rebound source delegates to guarded retry/repair; it does not authorize blind recreation, rebinding or adoption of a linked foreign contact. |
 | Yearless birthday edited on Web | An unrelated Proton Web save has removed a yearless date. Contako MUST NOT invent a year or silently restore a remote omission. |
-| Custom dates and unsupported field types | Some values remain local/Android-only with an explicit indicator. Android exposes only representable fields and selected primary occurrences; see [mapping](CONTACTS.md). |
+| Custom dates and unsupported field types | Some values remain local/Android-only; the contact's Information page shows their support. Android exposes only representable fields and selected primary occurrences; see [mapping](CONTACTS.md). |
 | Local labels on unsupported field types | Remote adoption retains labels with explicit local provenance and an unambiguous unchanged value occurrence. Historical labels without that proof, or repeated identical values with ambiguous mappings, cannot safely be restored. Remote deletions and explicit remote labels remain authoritative. URL values and labels require separate checks. |
 
 ## Interface and runtime
@@ -52,9 +52,11 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
   Real fault/physical accessibility qualification remains distinct from the
   controlled Room/provider and interface regressions.
 
-- The import-availability overview has deterministic state coverage and retained
-  Room/Compose integration tests. Physical first-import navigation, recreation,
-  large-font and accessibility behavior still require separate qualification.
+- The first-synchronization summary and contact Information page have scoped
+  physical Compose coverage with synthetic repositories, including navigation,
+  composition restoration, light/dark rendering and selected 200% font cases.
+  Counts also have isolated Room coverage. These checks do not qualify live
+  first-import transitions, process death, every window configuration or TalkBack.
 - Actionable synchronization advice uses current closed causes. Generic internal
   or validation failures may still lack a field-level cause; the UI deliberately
   leaves that detail unknown. New issue-card navigation and accessibility need
