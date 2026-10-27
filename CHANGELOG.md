@@ -14,6 +14,10 @@ Features and improvements by version.
   including before saving and after reverting the draft.
 - Prepare searchable text once per directory snapshot when first needed, preserving
   Unicode matching without delaying the initial list for speculative search work.
+- Prepare the first search off the UI thread, discard obsolete snapshot/account
+  work and retry failed preparation without editing the contact data.
+- Require current contact and group receipts before completing a targeted Android
+  recovery, including resumption after an interrupted acknowledgement.
 - Read local contact values in bounded owner-scoped batches within one transaction,
   retaining all fields, metadata and occurrence identities.
 

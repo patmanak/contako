@@ -282,6 +282,7 @@ dependencies {
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
     // Room's migration bundles require this serializer ABI. AGP aligns instrumentation
     // dependencies to its host APK, so the selected test host must include it too.
     // Release and preview keep their production dependency graph.

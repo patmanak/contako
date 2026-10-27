@@ -257,6 +257,8 @@ class CachedDirectoryPerformanceDeviceTest {
             "timingProtocol":"${if (renderOracle == RenderOracle.LEGACY_V3) "accepted-action-v3" else "mixed-${renderOracle.argument}-and-other-v3"}",
             "renderOracle":"${renderOracle.argument}","renderedTimingProtocol":"${timingProtocol("SEARCH-RENDER")}",
             "otherTimingProtocol":"accepted-action-v3",
+            "coldSearch":"fresh-ViewModel-and-snapshot-per-sample-blank-list-ready-before-first-query-db-process-warm",
+            "coldSearchOnly":${InstrumentationRegistry.getArguments().getString("performanceColdSearchOnly") == "true"},
             "modelIdentityVerification":"${if (renderOracle == RenderOracle.ATOMIC_V5) "immutable-model-captured-at-stop-verified-after" else "inside-render-clock"}",
             "protocolBreak":"REPOSITORY-FIRST-vs-v2-and-rendered-v3-v4-v5-are-not-directly-comparable",
             "admissionWait":"recorded-separately-not-subtracted-from-total",
@@ -271,6 +273,10 @@ class CachedDirectoryPerformanceDeviceTest {
             phase.contractFinishedAt = SystemClock.elapsedRealtimeNanos()
             assertTrue("Production directory snapshot differs", directoryOracle == snapshot)
             assertEquals(fixture.ids, snapshot.contacts.map { it.id }.toSet())
+        }
+        if (InstrumentationRegistry.getArguments().getString("performanceColdSearchOnly") == "true") {
+            measureColdSearch(profile, repository, fixture)
+            return // Distribution only; this does not qualify the other directory budgets.
         }
         measureDiagnosticComponents(profile, db, diagnosticRows, directoryOracle.contacts, fixture)
         // This opt-in is a component diagnostic, never a pass for the UI latency contracts.
@@ -403,6 +409,48 @@ class CachedDirectoryPerformanceDeviceTest {
             compose.waitUntil(TIMEOUT) { vm.uiState.value.contactEditor == null }
             phase.editorClosedAt = SystemClock.elapsedRealtimeNanos()
         }
+        measureColdSearch(profile, repository, fixture)
+    }
+
+    private fun measureColdSearch(profile: Profile, repository: RoomContactRepository, fixture: Fixture) {
+        val oracle = runBlocking { repository.observeDirectory(ACCOUNT).first() }
+        val groups = runBlocking { repository.observeGroups(ACCOUNT).first() }
+        val matchingGroups = groups.filter { ContactSearch.prepare(SEARCH).matchesGroupName(it.name) }
+        val expected = setOf(fixture.contact(0).id, fixture.contact(1).id)
+        lateinit var fresh: ContactsViewModel
+        // Every warmup AND measured attempt owns a new PreparedDirectory with no search index.
+        // Initial list acquisition is outside query time, and MUST remain usable without search.
+        measure(profile, "COLD-SEARCH-RENDER", Long.MAX_VALUE, prepare = {
+            disposeViewModel()
+            fresh = compose.runOnIdle { createViewModel(repository).also { shownViewModel = it } }
+            waitForDirectory(fresh, fixture)
+            assertEquals(oracle.contacts, fresh.uiState.value.directoryContacts)
+            assertEquals(groups, fresh.uiState.value.groups)
+            compose.onNodeWithText(fixture.contact(2).resolvedDisplayName).assertIsDisplayed()
+        }) { phase ->
+            compose.runOnIdle {
+                phase.actionAcceptedAt = SystemClock.elapsedRealtimeNanos()
+                fresh.updateQuery(SEARCH)
+            }
+            if (renderOracle != RenderOracle.LEGACY_V3) {
+                awaitAtomicRender(fresh, fixture, SEARCH, expected,
+                    wantedNames = (0..1).map { fixture.contact(it).resolvedDisplayName },
+                    absentNames = listOf(fixture.contact(2).resolvedDisplayName), phase = phase)
+            } else compose.waitUntil(TIMEOUT) {
+                fresh.uiState.value.query == SEARCH && !fresh.uiState.value.directoryLoading &&
+                    fresh.uiState.value.directoryContacts.map { it.id }.toSet() == expected &&
+                    (0..1).all { visible(fixture.contact(it).resolvedDisplayName) } &&
+                    compose.onAllNodesWithText(fixture.contact(2).resolvedDisplayName).fetchSemanticsNodes().isEmpty()
+            }
+            (0..1).forEach { compose.onNodeWithText(fixture.contact(it).resolvedDisplayName).assertIsDisplayed() }
+            if (renderOracle == RenderOracle.LEGACY_V3) phase.contractFinishedAt = SystemClock.elapsedRealtimeNanos()
+            assertEquals(oracle.contacts.filter { it.id in expected }, fresh.uiState.value.directoryContacts)
+            assertEquals(matchingGroups, fresh.uiState.value.groups)
+        }
+        val retained = runBlocking { repository.observeDirectory(ACCOUNT).first() }
+        assertEquals(oracle.contacts, retained.contacts)
+        assertEquals(oracle.contentChanges, retained.contentChanges)
+        assertEquals(groups, runBlocking { repository.observeGroups(ACCOUNT).first() })
     }
 
     private fun createViewModel(repository: RoomContactRepository): ContactsViewModel {
@@ -557,7 +605,7 @@ class CachedDirectoryPerformanceDeviceTest {
     }
 
     private fun isAtomicRenderedOperation(operation: String): Boolean = renderOracle != RenderOracle.LEGACY_V3 &&
-        operation in setOf("REOPENED-VM", "CACHED-RENDER", "SEARCH-RENDER", "DIAGNOSTIC-STEADY-SEARCH-SEMANTICS")
+        operation in setOf("REOPENED-VM", "CACHED-RENDER", "SEARCH-RENDER", "COLD-SEARCH-RENDER", "DIAGNOSTIC-STEADY-SEARCH-SEMANTICS")
 
     private fun timingProtocol(operation: String): String = when {
         !isAtomicRenderedOperation(operation) -> "accepted-action-v3"

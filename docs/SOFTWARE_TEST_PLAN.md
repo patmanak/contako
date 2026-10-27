@@ -152,6 +152,17 @@ require current contact/membership receipts before resolution. A synthetic
 `Applied` without those receipts, a concurrent revision or a failed issue clear
 MUST remain unresolved. Native ingestion MUST commit canonical intent/outbox
 before projection; target-only page readers MUST not touch other contact rows.
+`TargetedRecoveryCompositionDeviceTest` MUST compose the durable request,
+executor and guarded projector/reconciliation through refusal, reopened storage
+and lost return after commit. Compare complete contact and membership receipts,
+encoded baseline integrity, target fields and independent obligations. Missing
+or stale membership proof MUST prevent settlement even with a CLEAN contact row.
+Unavailable offline photos MUST use the same omission policy in projection and
+receipt validation, without fetching a remote image.
+`TargetedRecoverySchedulingCompositionDeviceTest` MUST connect the durable
+eligibility flow to the production waiter, account runner and executor. With a
+controlled clock and reopened Room, require no request before Retry-After and
+one eligible retry at/after the deadline, preserving attempts and untouched data.
 These controlled seams and database cases do not qualify physical OEM photo
 processing or Proton delivery.
 

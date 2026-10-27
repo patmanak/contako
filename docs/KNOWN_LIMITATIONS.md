@@ -84,8 +84,8 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
   the single displayed-layout observation in protocols v4/v5. V5 verifies every
   identity against model lists captured before the clock stops. Scoped reference
   runs meet the warmed-search target with these protocols, but reopening a ViewModel over 5,000
-  contacts still exceeds 500 ms. The first nonblank query prepares a lazy index
-  and may exceed 100 ms; warmed searches do not qualify that preparation cost or
+  contacts still exceeds 500 ms. The first nonblank query prepares an index on a
+  worker and may exceed 100 ms end to end; warmed searches do not qualify that cost or
   a query following snapshot replacement. See the
   [measurement protocol](QA.md#performance-measurements).
 - The artwork has raster masters and provenance, but no fully editable layered

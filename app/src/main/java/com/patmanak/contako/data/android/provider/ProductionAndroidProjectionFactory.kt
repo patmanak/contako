@@ -26,9 +26,7 @@ internal fun productionAndroidProjectionCoordinator(
     val inlinePhotoLoader = AndroidInlinePhotoBinaryLoader(binaryLoader)
     val displayPhotoLoader = AndroidDisplayPhotoBinaryLoader(binaryLoader)
     val photoWriter = RoomAndroidPhotoProviderWriteCoordinator(database, contentResolver, reader, displayPhotoLoader)
-    val mapper = CanonicalAndroidContactMapper(
-        photoBytesAvailable = { reference -> reference != null && inlinePhotoLoader.load(reference) != null },
-    )
+    val mapper = offlineAndroidProjectionMapper(inlinePhotoLoader)
     return RoomBoundedAndroidProjectionCoordinator(
         database,
         ProductionAndroidProjectionItemExecutor(
@@ -61,6 +59,13 @@ internal fun productionAndroidProjectionCoordinator(
         },
     )
 }
+
+/** The same offline photo-availability policy is required when checking stored receipts. */
+internal fun offlineAndroidProjectionMapper(
+    inlinePhotoLoader: AndroidProjectionBinaryLoader = AndroidInlinePhotoBinaryLoader(CanonicalPhotoBinaryLoader),
+): CanonicalAndroidContactMapper = CanonicalAndroidContactMapper(
+    photoBytesAvailable = { reference -> reference != null && inlinePhotoLoader.load(reference) != null },
+)
 
 /** A locator alone, or an aggregate match, is insufficient proof of this binding. */
 internal fun cleanProjectionIdsWithOwnedMetadata(

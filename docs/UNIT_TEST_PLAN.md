@@ -11,6 +11,12 @@ mutate contacts, enqueue work or read a peer.
 
 ## Performance evidence integrity
 
+Search preparation MUST remain off Main and start only for a nonblank query.
+Cover query echo while the worker is pending, two nonblank queries sharing one
+index, clearing the query, same-ID/revision snapshot replacement, owner closure
+and a preparation failure retried without changing contacts. No obsolete result,
+partial index or peer mutation may be published by those paths.
+
 Verify five warmups/thirty samples, nearest-rank P95, median and maximum with a
 deterministic monotonic clock. Partial reports MUST retain elapsed failures and
 omit comparable P95. Timeout, cancellation, rejection and failed warmups MUST

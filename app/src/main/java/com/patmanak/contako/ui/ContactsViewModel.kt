@@ -46,6 +46,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import com.patmanak.contako.domain.sync.DeletionRecoverySummary
 import com.patmanak.contako.domain.sync.DeletionRecoveryChoice
@@ -194,6 +198,7 @@ class ContactsViewModel(
     groupAssignmentAvailability: Flow<com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability> =
         flowOf(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN),
     private val directoryDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val searchDispatcher: CoroutineDispatcher = directoryDispatcher,
 ) : ViewModel() {
     private val accountGeneration = mutationAdmission.access.value.generation
     private fun acceptsMutation() = mutationAdmission.accepts(accountGeneration)
@@ -441,20 +446,38 @@ class ContactsViewModel(
         val facets: List<OrganizationFacet> = emptyList(),
         val loading: Boolean = false,
         val failed: Boolean = false,
+        val refreshGeneration: Long = 0,
     ) {
-        // Empty-query rendering never normalizes fields speculatively. The first nonblank query
-        // prepares this immutable snapshot once; replacing the snapshot replaces its lazy index.
-        val searchInputs: List<ContactSearch.PreparedContact> by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-            snapshot.contacts.map(ContactSearch::prepareContact)
+        // Only a completed index is cached; cancellation never publishes partial inputs. This
+        // cache belongs to this immutable snapshot, not to contact IDs or revision numbers.
+        @Volatile var searchInputs: List<ContactSearch.PreparedContact>? = null
+            private set
+
+        suspend fun prepareSearchInputs(): List<ContactSearch.PreparedContact> {
+            searchInputs?.let { return it }
+            val inputs = ArrayList<ContactSearch.PreparedContact>(snapshot.contacts.size)
+            for (contact in snapshot.contacts) {
+                currentCoroutineContext().ensureActive()
+                inputs += ContactSearch.prepareContact(contact)
+            }
+            currentCoroutineContext().ensureActive()
+            searchInputs = inputs
+            return inputs
         }
     }
-    private val directory = directoryRefresh.flatMapLatest {
+    private data class PreparedSearch(
+        val directory: PreparedDirectory? = null,
+        val inputs: List<ContactSearch.PreparedContact>? = null,
+        val failed: Boolean = false,
+    )
+    private val directory = directoryRefresh.flatMapLatest { refresh ->
         repository.observeDirectory(accountId).map { snapshot ->
             val scoped = snapshot.contacts.filter { it.accountId == accountId && !it.isDeleted }
-            PreparedDirectory(snapshot.copy(contacts = scoped), ContactDirectoryPolicy.organizationFacets(scoped))
+            PreparedDirectory(snapshot.copy(contacts = scoped), ContactDirectoryPolicy.organizationFacets(scoped),
+                refreshGeneration = refresh)
         }.catch { error ->
             if (error is CancellationException) throw error
-            emit(PreparedDirectory(failed = true))
+            emit(PreparedDirectory(failed = true, refreshGeneration = refresh))
         }
     }.flowOn(directoryDispatcher)
         .stateIn(viewModelScope, SharingStarted.Eagerly, PreparedDirectory(loading = true))
@@ -479,6 +502,23 @@ class ContactsViewModel(
             clearMissingSelection(RootDestination.GROUPS, groups.map { it.id }.toSet())
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val searchIndex = combine(directory, navigation, mutationAdmission.access) { prepared, route, _ ->
+        prepared.takeIf { acceptsMutation() && !it.loading && !it.failed &&
+            it.snapshot.contacts.isNotEmpty() && route.current.query.isNotBlank() }
+    }.distinctUntilChanged { previous, next -> previous === next }
+        .mapLatest { requested ->
+            if (requested == null) PreparedSearch()
+            else try {
+                val cached = requested.searchInputs
+                val inputs = cached ?: withContext(searchDispatcher) { requested.prepareSearchInputs() }
+                PreparedSearch(requested, inputs)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                PreparedSearch(requested, failed = true)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PreparedSearch())
 
     val uiState: StateFlow<ContactsUiState> = combine(
         directory,
@@ -508,6 +548,7 @@ class ContactsViewModel(
         showDirectoryFilters,
         filterClock,
         mutationAdmission.access,
+        searchIndex,
     ) { values ->
         val prepared = values[0] as PreparedDirectory
         val contacts = if (acceptsMutation()) prepared.snapshot.contacts else emptyList()
@@ -545,11 +586,17 @@ class ContactsViewModel(
         val actionContacts = contacts.filter { it.actionRequiredReasons.isNotEmpty() || it.conflictState != null ||
             it.id in failedAndroidContactIds || it.id in dashboard.blockedMutationContactIds }
         val criteria = if (acceptsMutation()) values[19] as DirectoryFilter else DirectoryFilter()
+        val preparedSearch = values[24] as PreparedSearch
+        val needsIndex = activeQuery.isNotBlank() && contacts.isNotEmpty()
+        // A late result from another snapshot/account cannot satisfy this query. Queries share
+        // a query-independent index: matching below always uses the current navigation query.
+        val indexReady = preparedSearch.directory === prepared && prepared === directory.value
+        val searchFailed = needsIndex && indexReady && preparedSearch.failed
+        val searchPreparing = needsIndex && (!indexReady || preparedSearch.inputs == null) && !searchFailed
         val searchedContacts = if (activeQuery.isBlank() || contacts.isEmpty()) contacts else {
-            val searchInputs = prepared.searchInputs
-            contacts.filterIndexed { index, contact ->
-                search.matches(searchInputs[index]) || contact.id in contactsInMatchingGroups
-            }
+            val inputs = preparedSearch.inputs.takeIf { indexReady && !searchFailed }
+            if (inputs == null) emptyList() else contacts.filterIndexed { index, contact ->
+                search.matches(inputs[index]) || contact.id in contactsInMatchingGroups }
         }
         // Every new snapshot must use a fresh reference time: a just-committed change must
         // not be mistaken for a future date relative to the previous periodic clock tick.
@@ -569,8 +616,8 @@ class ContactsViewModel(
             directoryFilterDraft = if (acceptsMutation()) values[20] as DirectoryFilter else DirectoryFilter(),
             showDirectoryFilters = acceptsMutation() && values[21] as Boolean,
             organizationFacets = if (acceptsMutation()) prepared.facets else emptyList(),
-            directoryLoading = prepared.loading,
-            directoryReadFailed = prepared.failed,
+            directoryLoading = prepared.loading || searchPreparing,
+            directoryReadFailed = prepared.failed || searchFailed,
             actionContacts = actionContacts,
             actionGroups = groups.filter { group -> dashboard.blockedItems.any {
                 it.type == com.patmanak.contako.domain.sync.SyncBlockedItemType.GROUP && it.id == group.id
@@ -1412,6 +1459,7 @@ class ContactsViewModel(
             groupAssignmentAvailability: Flow<com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability> =
                 flowOf(com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability.UNKNOWN),
             directoryDispatcher: CoroutineDispatcher = Dispatchers.Default,
+            searchDispatcher: CoroutineDispatcher = directoryDispatcher,
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
@@ -1427,6 +1475,7 @@ class ContactsViewModel(
                         mutationAdmission = mutationAdmission,
                         groupAssignmentAvailability = groupAssignmentAvailability,
                         directoryDispatcher = directoryDispatcher,
+                        searchDispatcher = searchDispatcher,
                     ) as T
             }
     }

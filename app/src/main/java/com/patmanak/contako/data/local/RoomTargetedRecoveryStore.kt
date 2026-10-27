@@ -10,6 +10,9 @@ import com.patmanak.contako.data.sync.RetryDecision
 import com.patmanak.contako.data.sync.TargetedRecoveryExecutionStore
 import com.patmanak.contako.data.sync.TargetedRecoveryWorkResult
 import com.patmanak.contako.data.sync.hasCompletedAndroidContactDeletion
+import com.patmanak.contako.data.sync.currentAndroidProjectionReceiptIds
+import com.patmanak.contako.data.android.provider.offlineAndroidProjectionMapper
+import com.patmanak.contako.data.android.mapping.CanonicalAndroidContactMapper
 import com.patmanak.contako.data.sync.toTargetedRecoveryFailure
 import com.patmanak.contako.domain.sync.*
 import java.security.MessageDigest
@@ -18,7 +21,9 @@ import kotlinx.coroutines.flow.map
 
 /** Account-owned request metadata; all authority is reconstructed inside guarded transactions. */
 internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
-    private val retryPolicy: MutationRetryPolicy = MutationRetryPolicy()) : TargetedRecoveryExecutionStore {
+    private val retryPolicy: MutationRetryPolicy = MutationRetryPolicy(),
+    private val canonicalMapper: CanonicalAndroidContactMapper = offlineAndroidProjectionMapper(),
+) : TargetedRecoveryExecutionStore {
     private val dao get() = database.targetedRecoveryRequestDao()
 
     suspend fun preview(account: AccountScope, kind: TargetedRecoveryKind, targetId: String): TargetedRecoveryPreview =
@@ -43,12 +48,18 @@ internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
         val issues = listOfNotNull(database.androidContactIssueDao().get(account, target, "PROJECTION"),
             database.androidContactIssueDao().get(account, target, "INGEST"))
             .filter { it.providerEpoch == binding?.providerEpoch }
+        val completeReceipt = !contact.isDeleted && ledger != null && binding != null &&
+            ledger.providerEpoch == binding.providerEpoch && target in currentAndroidProjectionReceiptIds(
+                database, AccountScope(account), binding.providerEpoch, listOf(ledger), canonicalMapper)
         val pending = if (contact.isDeleted) {
             !hasCompletedAndroidContactDeletion(contact, ledger, binding?.providerEpoch) || issues.isNotEmpty()
-        } else (ledger == null || ledger.projectionState != "CLEAN" ||
-            ledger.pendingProjectionFingerprint != null || issues.isNotEmpty())
+        } else !completeReceipt || issues.isNotEmpty()
+        val membership = database.androidGroupProjectionDao().getMembership(account, target)
+        val baseline = database.androidGroupProjectionDao().getMembershipBaseline(account, target)
         val source = listOf(contact.revision, binding?.providerEpoch, ledger?.revision, ledger?.projectionState,
-            ledger?.pendingProjectionFingerprint, issues.map { "${it.origin}:${it.canonicalRevision}:${it.reason}" }).joinToString("|")
+            ledger?.pendingProjectionFingerprint, completeReceipt, membership?.revision, membership?.providerEpoch,
+            membership?.projectionState, membership?.pendingProjectionFingerprint, membership?.androidBaselineFingerprint,
+            baseline?.fingerprint, issues.map { "${it.origin}:${it.canonicalRevision}:${it.reason}" }).joinToString("|")
         val generation = MessageDigest.getInstance("SHA-256").digest(source.toByteArray(Charsets.UTF_8))
             .joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }
         return TargetedRecoveryPreview(kind, target, generation, contact.revision, binding?.providerEpoch,

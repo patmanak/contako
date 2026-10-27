@@ -5,6 +5,11 @@ import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.patmanak.contako.data.android.RoomAndroidProjectionLedger
+import com.patmanak.contako.data.android.mapping.AndroidGroupMembershipAvailability
+import com.patmanak.contako.data.android.mapping.AndroidGroupMembershipSnapshot
+import com.patmanak.contako.data.android.mapping.AndroidGroupMembershipSnapshotBinaryCodec
+import com.patmanak.contako.data.android.mapping.AndroidRowKind
+import com.patmanak.contako.data.android.mapping.CanonicalAndroidContactMapper
 import com.patmanak.contako.data.gateway.*
 import com.patmanak.contako.data.proton.ContactInventoryBaseline
 import com.patmanak.contako.data.sync.TargetedRecoveryWorkResult
@@ -20,6 +25,7 @@ import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.ContactGroup
+import com.patmanak.contako.domain.model.PreservationEnvelope
 import com.patmanak.contako.domain.repository.SaveResult
 import com.patmanak.contako.domain.sync.*
 import kotlinx.coroutines.flow.first
@@ -134,18 +140,58 @@ class RoomTargetedRecoveryStoreDeviceTest {
     }
 
     @Test fun androidCompletionRebasesOnlyToTheExactReceiptRevisionAndCurrentEpoch() = runBlocking {
-        val contact = CanonicalContact(ACCOUNT.value, "android", displayName = "Synthetic", revision = 1)
+        val contact = CanonicalContact(ACCOUNT.value, "android", displayName = "Synthetic", revision = 1,
+            remoteContactId = "synthetic-remote-android")
         database.contactDao().upsert(contact.toEntity())
         bindAndroid()
         val preview = store.preview(ACCOUNT, TargetedRecoveryKind.ANDROID_COPY, "android")
         store.queue(ACCOUNT, preview, 0)
         val claim = requireNotNull(store.claim(database.targetedRecoveryRequestDao().all(ACCOUNT.value).single(), 0))
-        // Controlled DB representation of the helper's guarded, verified projection receipt.
+        // Controlled DB representation of the helper's guarded contact AND membership receipts.
         database.contactDao().upsert(contact.copy(revision = 2).toEntity())
-        database.androidProjectionLedgerDao().insert(AndroidProjectionLedgerEntity(ACCOUNT.value, "android", 1, 0,
-            null, null, null, null, null, null, "CLEAN", "BASELINED", "NONE", "ADOPTED"))
+        writeCurrentAndroidReceipts(contact.id)
+        assertEquals(TargetedRecoveryPrerequisite.NO_OBLIGATION,
+            store.preview(ACCOUNT, TargetedRecoveryKind.ANDROID_COPY, contact.id).prerequisite)
         store.finish(claim, TargetedRecoveryWorkResult.Resolved(2), 1_000) { false }
         assertEquals("RESOLVED", database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().state)
+    }
+
+    @Test fun anUnavailableRemotePhotoRemainsCanonicalWhenItsLegitimateOfflineCopyReceiptsResolve() = runBlocking {
+        val photoReference = "https://example.invalid/photo"
+        val canonical = CanonicalContact(ACCOUNT.value, "remote-photo", firstName = "Zoë", lastName = "Groß",
+            displayName = "Synthetic remote photo", revision = 3, remoteContactId = "synthetic-remote-photo",
+            remoteVCardUid = "synthetic-photo-uid", remoteVersion = "synthetic-photo-version", values = listOf(
+                ContactValue("phone", ContactValueKind.PHONE, "+12025550123", order = 0),
+                ContactValue("note", ContactValueKind.NOTE, "Keep exact: Straße; ë\n東京", order = 0),
+                ContactValue("photo", ContactValueKind.PHOTO, photoReference, order = 0, isPrimary = true,
+                    binaryReference = photoReference, preservationKey = "synthetic-imported-photo")),
+            preservationEnvelope = PreservationEnvelope(
+                mapOf("synthetic-source" to "PHOTO:https://example.invalid/photo\r\nX-SYNTHETIC:retain-exact")))
+        database.withTransaction {
+            database.contactDao().upsert(canonical.toEntity())
+            database.contactDao().upsertValues(canonical.values.map { it.toEntity(canonical) })
+            database.contactPayloadDao().upsert(requireNotNull(canonical.preservationEnvelope).toEntity(ACCOUNT.value, canonical.id))
+        }
+        bindAndroid()
+        val before = requireNotNull(RoomContactRepository(database).getContact(ACCOUNT.value, canonical.id))
+        val preview = store.preview(ACCOUNT, TargetedRecoveryKind.ANDROID_COPY, canonical.id)
+        assertTrue(preview.canQueue)
+        assertEquals(TargetedRecoveryQueueResult.QUEUED, store.queue(ACCOUNT, preview, 0))
+
+        // A remote URL cannot be loaded by the offline photo boundary. No URL is requested here.
+        val offlineMapper = CanonicalAndroidContactMapper(photoBytesAvailable = { false })
+        assertFalse(offlineMapper.project(canonical).rows.any { it.kind == AndroidRowKind.PHOTO })
+        assertTrue(CanonicalAndroidContactMapper().project(canonical).rows.any { it.kind == AndroidRowKind.PHOTO })
+        writeCurrentAndroidReceipts(canonical.id, offlineMapper)
+        val receipt = database.androidProjectionLedgerDao().get(ACCOUNT.value, canonical.id)
+        assertEquals(TargetedRecoveryPrerequisite.NO_OBLIGATION,
+            store.preview(ACCOUNT, TargetedRecoveryKind.ANDROID_COPY, canonical.id).prerequisite)
+        store.settleAfterOrdinaryPass(ACCOUNT, 1_000) { false }
+        assertEquals("RESOLVED", database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().state)
+        assertEquals(receipt, database.androidProjectionLedgerDao().get(ACCOUNT.value, canonical.id))
+        assertTrue("Resolving the offline copy altered canonical photo or other fields",
+            before == RoomContactRepository(database).getContact(ACCOUNT.value, canonical.id))
+        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
     }
 
     @Test fun accountCleanupRemovesOnlyItsRequestsAndDefeatsLateClaimCallbacks() = runBlocking {
@@ -215,14 +261,16 @@ class RoomTargetedRecoveryStoreDeviceTest {
     }
 
     @Test fun ingestionOnlyFailureIsAnExplicitAndroidObligationAndUnreadyBindingCannotOfferAnUnsafePreview() = runBlocking {
-        val contact = CanonicalContact(ACCOUNT.value, "android", displayName = "Synthetic", revision = 1)
+        val contact = CanonicalContact(ACCOUNT.value, "android", displayName = "Synthetic", revision = 1,
+            remoteContactId = "synthetic-remote-android")
         database.contactDao().upsert(contact.toEntity())
         RoomAndroidProjectionLedger(database).ensureAccount(ACCOUNT)
         assertEquals(TargetedRecoveryPrerequisite.ANDROID_CONTEXT,
             store.preview(ACCOUNT, TargetedRecoveryKind.ANDROID_COPY, "android").prerequisite)
         bindAndroid()
-        database.androidProjectionLedgerDao().insert(AndroidProjectionLedgerEntity(ACCOUNT.value, "android", 1, 0,
-            null, null, null, null, null, null, "CLEAN", "BASELINED", "NONE", "ADOPTED"))
+        writeCurrentAndroidReceipts(contact.id)
+        assertEquals(TargetedRecoveryPrerequisite.NO_OBLIGATION,
+            store.preview(ACCOUNT, TargetedRecoveryKind.ANDROID_COPY, contact.id).prerequisite)
         database.androidContactIssueDao().upsert(AndroidContactIssueEntity(ACCOUNT.value, "android", "INGEST", 0, 1, "REPAIR_REQUIRED"))
         val preview = store.preview(ACCOUNT, TargetedRecoveryKind.ANDROID_COPY, "android")
         assertTrue(preview.canQueue)
@@ -421,6 +469,30 @@ class RoomTargetedRecoveryStoreDeviceTest {
         store.completeVerified(claim, card(), 501_000) { false }
         assertNull(store.observe(ACCOUNT).first().single().lastFailure)
         assertNull(database.targetedRecoveryRequestDao().all(ACCOUNT.value).single().hydrationCategory)
+    }
+
+    /** Only for live, no-email fixtures. This models persisted receipts, not a provider write. */
+    private suspend fun writeCurrentAndroidReceipts(contactId: String,
+        mapper: CanonicalAndroidContactMapper = CanonicalAndroidContactMapper()) = database.withTransaction {
+        val canonical = requireNotNull(database.contactDao().get(ACCOUNT.value, contactId)).toDomain()
+        require(!canonical.isDeleted && canonical.valuesOf(ContactValueKind.EMAIL).isEmpty())
+        val binding = requireNotNull(database.androidProjectionLedgerDao().getAccount(ACCOUNT.value))
+        requireNotNull(binding.androidAccountName)
+        val fingerprint = mapper.fingerprint(mapper.project(canonical)).sha256Hex
+        val rawLocator = 42L
+        database.androidProjectionLedgerDao().insert(AndroidProjectionLedgerEntity(ACCOUNT.value, contactId, 1,
+            binding.providerEpoch, rawLocator, requireNotNull(canonical.remoteContactId), fingerprint,
+            fingerprint, null, null, "CLEAN", "BASELINED", "NONE", "ADOPTED"))
+        val memberships = AndroidGroupMembershipSnapshot.create(ACCOUNT.value, contactId, null,
+            AndroidGroupMembershipAvailability.NO_EMAIL, emptyList())
+        val encoded = AndroidGroupMembershipSnapshotBinaryCodec.encode(memberships)
+        val membershipFingerprint = memberships.semanticFingerprint().sha256Hex
+        database.androidGroupProjectionDao().insertMembership(AndroidGroupMembershipProjectionLedgerEntity(
+            ACCOUNT.value, contactId, 1, binding.providerEpoch, rawLocator, null, membershipFingerprint,
+            membershipFingerprint, null, "CLEAN", "NONE"))
+        database.androidGroupProjectionDao().upsertMembershipBaseline(AndroidGroupMembershipBaselineEntity(
+            ACCOUNT.value, contactId,
+            AndroidGroupMembershipSnapshotBinaryCodec.integrityFingerprint(encoded).sha256Hex, encoded))
     }
 
     private suspend fun bindAndroid() {

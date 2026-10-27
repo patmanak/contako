@@ -61,8 +61,14 @@ class DirectorySearchPreparationViewModelTest {
             assertEquals(listOf(first, second), model.uiState.value.contacts)
             assertEquals("Équipe", model.uiState.value.organizationFacets.single().label)
             val beforeFirstQuery = countedValues.reads
+            countedValues.onRead = { assertTrue("Cold normalization must run on the worker", worker.executing) }
             model.updateQuery("ZOE")
             runCurrent()
+            assertEquals("The UI remains responsive before its worker runs", "ZOE", model.uiState.value.query)
+            assertTrue(model.uiState.value.directoryLoading)
+            assertTrue(model.uiState.value.directoryContacts.isEmpty())
+            assertEquals("No normalization on Main", beforeFirstQuery, countedValues.reads)
+            untilDirectory(worker) { !model.uiState.value.directoryLoading }
             assertEquals(listOf(first), model.uiState.value.directoryContacts)
             assertTrue("First nonblank query must prepare its fields", countedValues.reads > beforeFirstQuery)
             val preparedReads = countedValues.reads
@@ -70,6 +76,7 @@ class DirectorySearchPreparationViewModelTest {
             runCurrent()
             assertEquals(listOf(first), model.uiState.value.directoryContacts)
             assertEquals("Another query must reuse its snapshot index", preparedReads, countedValues.reads)
+            countedValues.onRead = null
 
             // Same ID, changed names and email: the next base MUST NOT use the previous index.
             val changed = first.copy(displayName = "Chloë", revision = 8, values = first.values.map {
@@ -81,6 +88,7 @@ class DirectorySearchPreparationViewModelTest {
             untilDirectory(worker) { model.uiState.value.contacts.firstOrNull()?.displayName == "Chloë" }
             model.updateQuery("zoe")
             runCurrent()
+            untilDirectory(worker) { !model.uiState.value.directoryLoading }
             assertTrue(model.uiState.value.directoryContacts.isEmpty())
             model.updateQuery("CHLOE")
             runCurrent()
@@ -117,6 +125,7 @@ class DirectorySearchPreparationViewModelTest {
             untilDirectory(worker) { model.uiState.value.contacts.singleOrNull()?.displayName == "Before" }
             model.updateQuery("before@")
             runCurrent()
+            untilDirectory(worker) { !model.uiState.value.directoryLoading }
             assertEquals(listOf(original), model.uiState.value.directoryContacts)
             model.updateQuery("")
             runCurrent()
@@ -128,6 +137,7 @@ class DirectorySearchPreparationViewModelTest {
             val afterNewBase = published.size
             model.updateQuery("after@")
             runCurrent()
+            untilDirectory(worker) { !model.uiState.value.directoryLoading }
             assertEquals(listOf(newest), model.uiState.value.directoryContacts)
             worker.drain()
             runCurrent()
@@ -152,6 +162,134 @@ class DirectorySearchPreparationViewModelTest {
         }
     }
 
+    @Test fun queuedColdWorkRejectsReplacedSnapshotLatestQueryAndClosedOwner() = runTest(main) {
+        val original = contact("same", "Before", "before@example.test")
+        val oldValues = CountingValues(original.values)
+        val before = original.copy(values = oldValues)
+        val latest = original.copy(displayName = "After", values = original.values.map {
+            when (it.kind) {
+                ContactValueKind.EMAIL -> it.copy(value = "after@example.test")
+                ContactValueKind.ORGANIZATION -> it.copy(value = "Newest organization")
+                else -> it
+            } })
+        val repository = ReadOnlyRepository(listOf(before))
+        val worker = QueuedDispatcher()
+        val store = ViewModelStore()
+        val admission = AccountLifecycleAdmission()
+        val model = model(repository, worker, store, admission, StandardTestDispatcher(testScheduler))
+        val seen = mutableListOf<ContactsUiState>()
+        val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect { seen += it } }
+        try {
+            untilDirectory(worker) { !model.uiState.value.directoryLoading }
+            worker.drain(); runCurrent()
+            val oldReads = oldValues.reads
+            model.updateQuery("before@")
+            runCurrent() // Its cold worker is queued, but has not normalized any field.
+            assertTrue(worker.hasTasks)
+            assertEquals(oldReads, oldValues.reads)
+            repository.contacts.value = listOf(latest)
+            runCurrent()
+            assertEquals("Newest organization", model.uiState.value.organizationFacets.single().label)
+            model.updateQuery("after@")
+            runCurrent()
+            val afterReplacement = seen.size
+            untilDirectory(worker) { !model.uiState.value.directoryLoading && model.uiState.value.query == "after@" }
+            worker.drain(); runCurrent()
+            assertEquals(listOf(latest), model.uiState.value.directoryContacts)
+            assertEquals("Cancelled old snapshot must not be traversed", oldReads, oldValues.reads)
+            assertTrue(seen.drop(afterReplacement).all { it.query == "after@" &&
+                it.directoryContacts.all { contact -> contact == latest } })
+
+            // Clearing an in-flight query restores the unfiltered list without waiting for work.
+            model.updateQuery(""); runCurrent()
+            repository.contacts.value = listOf(original)
+            untilDirectory(worker) { model.uiState.value.contacts.singleOrNull()?.displayName == "Before" }
+            model.updateQuery("before@"); runCurrent()
+            model.updateQuery(""); runCurrent()
+            assertFalse(model.uiState.value.directoryLoading)
+            assertEquals(listOf(original), model.uiState.value.directoryContacts)
+            worker.drain(); runCurrent()
+            assertEquals("", model.uiState.value.query)
+            assertEquals(listOf(original), model.uiState.value.directoryContacts)
+
+            // Owner invalidation while another first query is pending must discard all results.
+            repository.contacts.value = listOf(latest)
+            untilDirectory(worker) { model.uiState.value.contacts.singleOrNull()?.displayName == "After" }
+            model.updateQuery("after@"); runCurrent()
+            admission.cleanup {}; runCurrent()
+            val closedAt = seen.size
+            worker.drain(); runCurrent()
+            assertTrue(model.uiState.value.contacts.isEmpty())
+            assertTrue(seen.drop(closedAt).all { it.contacts.isEmpty() && it.directoryContacts.isEmpty() })
+            assertEquals(listOf(latest), repository.contacts.value)
+        } finally {
+            subscription.cancel(); store.clear(); worker.drain(); runCurrent()
+        }
+    }
+
+    @Test fun latestNonblankQuerySharesOneInFlightIndexOnTheSameSnapshot() = runTest(main) {
+        val first = contact("one", "First", "first@example.test")
+        val counted = CountingValues(first.values)
+        val retained = first.copy(values = counted)
+        val second = contact("two", "Second", "second@example.test")
+        val repository = ReadOnlyRepository(listOf(retained, second))
+        val worker = QueuedDispatcher()
+        val store = ViewModelStore()
+        val model = model(repository, worker, store)
+        val seen = mutableListOf<ContactsUiState>()
+        val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect { seen += it } }
+        try {
+            untilDirectory(worker) { !model.uiState.value.directoryLoading }
+            worker.drain(); runCurrent()
+            val before = counted.reads
+            counted.onRead = { assertTrue(worker.executing) }
+            model.updateQuery("first@"); runCurrent()
+            model.updateQuery("second@"); runCurrent()
+            val latestAt = seen.size
+            assertEquals("second@", model.uiState.value.query)
+            assertTrue(model.uiState.value.directoryLoading)
+            assertEquals(before, counted.reads)
+            untilDirectory(worker) { !model.uiState.value.directoryLoading }
+            worker.drain(); runCurrent()
+            assertEquals(listOf(second), model.uiState.value.directoryContacts)
+            assertEquals("One preparation, not one per query", counted.size, counted.reads - before)
+            assertTrue(seen.drop(latestAt).all { it.query == "second@" &&
+                it.directoryContacts.none { contact -> contact.id == first.id } })
+            val prepared = counted.reads
+            model.updateQuery("first@"); runCurrent()
+            assertEquals(listOf(retained), model.uiState.value.directoryContacts)
+            assertEquals(prepared, counted.reads)
+        } finally { counted.onRead = null; subscription.cancel(); store.clear(); worker.drain(); runCurrent() }
+    }
+
+    @Test fun retryAfterSearchPreparationFailureRebuildsAnUnchangedSnapshot() = runTest(main) {
+        val original = contact("retry", "Zoë", "retry@example.test")
+        val values = CountingValues(original.values)
+        val retained = original.copy(values = values)
+        val repository = ReadOnlyRepository(listOf(retained))
+        val worker = QueuedDispatcher()
+        val store = ViewModelStore()
+        val model = model(repository, worker, store, directoryWorker = StandardTestDispatcher(testScheduler))
+        val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        try {
+            untilDirectory(worker) { !model.uiState.value.directoryLoading }
+            values.onRead = { error("Synthetic normalization failure") }
+            model.updateQuery("ZOE"); runCurrent()
+            untilDirectory(worker) { model.uiState.value.directoryReadFailed }
+            assertTrue(model.uiState.value.directoryContacts.isEmpty())
+            assertEquals("ZOE", model.uiState.value.query)
+            values.onRead = null
+            model.retryDirectoryRead(); runCurrent()
+            assertTrue("Retry must queue a new cold index even for unchanged contents", worker.hasTasks)
+            assertTrue(model.uiState.value.directoryLoading)
+            untilDirectory(worker) { !model.uiState.value.directoryLoading && !model.uiState.value.directoryReadFailed }
+            assertEquals(listOf(retained), model.uiState.value.directoryContacts)
+            assertEquals("ZOE", model.uiState.value.query)
+            assertEquals(listOf(retained), repository.contacts.value)
+            assertEquals(original.preservationEnvelope, retained.preservationEnvelope)
+        } finally { values.onRead = null; subscription.cancel(); store.clear(); worker.drain(); runCurrent() }
+    }
+
     private fun TestScope.untilDirectory(worker: QueuedDispatcher, ready: () -> Boolean) {
         repeat(200) {
             runCurrent()
@@ -162,16 +300,21 @@ class DirectorySearchPreparationViewModelTest {
     }
 
     private fun model(repository: ContactRepository, worker: CoroutineDispatcher, store: ViewModelStore,
-        admission: ContactMutationAdmission = UnrestrictedContactMutationAdmission) = ViewModelProvider(store,
+        admission: ContactMutationAdmission = UnrestrictedContactMutationAdmission,
+        directoryWorker: CoroutineDispatcher = worker) = ViewModelProvider(store,
         ContactsViewModel.factory(repository, accountId = ACCOUNT, mutationAdmission = admission,
-            navigationState = SavedStateHandle(), directoryDispatcher = worker))[ContactsViewModel::class.java]
+            navigationState = SavedStateHandle(), directoryDispatcher = directoryWorker,
+            searchDispatcher = worker))[ContactsViewModel::class.java]
 
     private class QueuedDispatcher : CoroutineDispatcher() {
         private val tasks = ArrayDeque<Runnable>()
         val hasTasks: Boolean get() = tasks.isNotEmpty()
+        var executing = false
+            private set
         override fun dispatch(context: CoroutineContext, block: Runnable) { tasks.addLast(block) }
-        fun runNext(): Boolean = tasks.pollFirst()?.let { it.run(); true } ?: false
-        fun runLast() { tasks.pollLast()?.run() }
+        private fun execute(task: Runnable) { executing = true; try { task.run() } finally { executing = false } }
+        fun runNext(): Boolean = tasks.pollFirst()?.let { execute(it); true } ?: false
+        fun runLast() { tasks.pollLast()?.let(::execute) }
         fun drain() {
             repeat(1_000) { if (!runNext()) return }
             error("Directory worker did not quiesce")
@@ -180,10 +323,11 @@ class DirectorySearchPreparationViewModelTest {
 
     /** Count actual field traversal without a production normalization hook. */
     private class CountingValues(private val values: List<ContactValue>) : AbstractList<ContactValue>() {
+        var onRead: (() -> Unit)? = null
         var reads = 0
             private set
         override val size: Int get() = values.size
-        override fun get(index: Int): ContactValue = values[index].also { reads++ }
+        override fun get(index: Int): ContactValue = values[index].also { onRead?.invoke(); reads++ }
     }
 
     private class ReadOnlyRepository(initial: List<CanonicalContact>) : ContactRepository {

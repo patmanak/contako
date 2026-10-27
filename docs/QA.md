@@ -145,6 +145,13 @@ contracts; ordinary runs retain the existing contract measurements and ceilings.
 Search keys are lazy per immutable snapshot. Retain and report the first-query
 warmup duration separately: warm samples with an existing index do not qualify
 cold preparation or a query immediately following a directory replacement.
+`COLD-SEARCH-RENDER` creates a new ViewModel/store and blank navigation state for
+every warmup and each of thirty measured first queries. List readiness is proved
+before starting query time; the index is unprepared. Require exact identities,
+values, groups and unchanged storage. Report this P95 separately from warm search:
+it includes first index preparation but is not an OS/process/database cold start.
+`performanceColdSearchOnly=true` selects only that distribution; it MUST NOT be
+reported as qualification of the other budgets or compared with their ceilings.
 Search diagnostics MUST include query preparation inside each timed evaluation;
 preparing the query once MUST preserve the same contact identities, searchable
 families, Unicode normalization and group-member results as individual matching.

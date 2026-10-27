@@ -3,14 +3,10 @@ package com.patmanak.contako.data.sync
 import android.database.sqlite.SQLiteException
 import androidx.room.withTransaction
 import com.patmanak.contako.data.android.AndroidProjectionWriteState
-import com.patmanak.contako.data.android.AndroidAdoptionState
 import com.patmanak.contako.data.android.RoomAndroidProjectionLedger
-import com.patmanak.contako.data.android.mapping.AndroidGroupMembershipSnapshotBinaryCodec
-import com.patmanak.contako.data.android.mapping.AndroidGroupProjectionPolicy
 import com.patmanak.contako.data.android.mapping.CanonicalAndroidContactMapper
 import com.patmanak.contako.data.local.AndroidProjectionLedgerEntity
 import com.patmanak.contako.data.local.ContakoDatabase
-import com.patmanak.contako.data.local.toDomain
 import com.patmanak.contako.data.gateway.GatewayFailureCategory
 import com.patmanak.contako.domain.sync.TargetedRecoveryPrerequisite
 import kotlinx.coroutines.CancellationException
@@ -254,58 +250,7 @@ internal class RoomBoundedAndroidProjectionCoordinator(
     private suspend fun currentProjectionIds(
         context: AndroidInteroperabilityContext,
         page: List<AndroidProjectionLedgerEntity>,
-    ): Set<String> = database.withTransaction {
-        require(page.size <= MAX_PAGE_SIZE)
-        if (page.isEmpty()) return@withTransaction emptySet()
-        val ids = page.map { it.canonicalContactId }
-        // Keep the same transactional freshness proof, with four bounded queries per page
-        // instead of one canonical/value pair and two membership queries per contact.
-        val contacts = database.contactDao().getForProjectionPage(context.account.value, ids)
-            .associateBy { it.contact.id }
-        val memberships = database.androidGroupProjectionDao()
-            .getMembershipsForProjectionPage(context.account.value, ids).associateBy { it.canonicalContactId }
-        val baselines = database.androidGroupProjectionDao()
-            .getMembershipBaselinesForProjectionPage(context.account.value, ids).associateBy { it.canonicalContactId }
-        val groups = database.contactGroupDao().getAll(context.account.value).map { it.toDomain() }
-        val policy = AndroidGroupProjectionPolicy()
-        page.mapNotNull { ledger ->
-            val canonical = contacts[ledger.canonicalContactId]?.toDomain() ?: return@mapNotNull null
-            if (hasCompletedAndroidContactDeletion(contacts.getValue(ledger.canonicalContactId).contact,
-                    ledger, context.providerEpoch)) return@mapNotNull ledger.canonicalContactId
-            if (ledger.projectionState != AndroidProjectionWriteState.CLEAN.name ||
-                ledger.adoptionState != AndroidAdoptionState.ADOPTED.name ||
-                ledger.pendingProjectionFingerprint != null || ledger.rawContactLocator == null ||
-                ledger.tombstoneState != "NONE"
-            ) return@mapNotNull null
-            if (canonical.isDeleted || canonical.remoteContactId != ledger.sourceIdentity) return@mapNotNull null
-            try {
-                if (canonicalMapper.fingerprint(canonicalMapper.project(canonical)).sha256Hex !=
-                    ledger.canonicalProjectionFingerprint
-                ) return@mapNotNull null
-                val membership = memberships[ledger.canonicalContactId] ?: return@mapNotNull null
-                if (membership.projectionState != AndroidProjectionWriteState.CLEAN.name ||
-                    membership.pendingProjectionFingerprint != null ||
-                    membership.providerEpoch != context.providerEpoch ||
-                    membership.rawContactLocator != ledger.rawContactLocator
-                ) return@mapNotNull null
-                val baseline = baselines[ledger.canonicalContactId] ?: return@mapNotNull null
-                if (AndroidGroupMembershipSnapshotBinaryCodec.integrityFingerprint(baseline.encodedSnapshot)
-                        .sha256Hex != baseline.fingerprint
-                ) return@mapNotNull null
-                val observed = AndroidGroupMembershipSnapshotBinaryCodec.decode(baseline.encodedSnapshot)
-                observed.requireCurrentCanonicalContext(canonical)
-                val desired = policy.projectMemberships(canonical, groups)
-                if (observed.semanticFingerprint().sha256Hex != membership.androidBaselineFingerprint ||
-                    observed.canonicalGroupIds.toSet() != desired.canonicalGroupIds ||
-                    observed.membershipAvailability != desired.availability
-                ) return@mapNotNull null
-                ledger.canonicalContactId
-            } catch (_: IllegalArgumentException) {
-                // Let the item executor report the bounded repair reason; never claim CLEAN.
-                null
-            }
-        }.toSet()
-    }
+    ): Set<String> = currentAndroidProjectionReceiptIds(database, context.account, context.providerEpoch, page, canonicalMapper)
 
     /**
      * Keeps every approved slot useful instead of waiting for the slowest item in a fixed wave.
@@ -354,7 +299,7 @@ internal class RoomBoundedAndroidProjectionCoordinator(
 
     private companion object {
         const val DEFAULT_PAGE_SIZE = 100
-        const val MAX_PAGE_SIZE = 100
+        const val MAX_PAGE_SIZE = MAX_ANDROID_RECEIPT_PAGE_SIZE
         const val CONTACT_PROJECTION_CONCURRENCY = 16
     }
 }
