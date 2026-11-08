@@ -20,12 +20,16 @@ decorations or weakening codec provenance is not a valid recovery.
 Explicit names take precedence. Without one, Contako derives a display name from
 available structured name, phonetic name, nickname, organization, phone or email, following the
 [Android display-name source priorities](https://developer.android.com/reference/android/provider/ContactsContract.DisplayNameSources).
-It MUST NOT fill invented first/last names. A protected `X-CONTAKO-AUTO-FN` marker
+It MUST NOT fill invented first/last names. An encrypted and signed Type 3
+`X-CONTAKO-AUTO-FN` marker
 records the generated value; a matching verified round trip preserves its generated
 status, while a different explicit `FN` takes precedence. An explicit-name marker
 disambiguates preserved generated markers during a compatible edit. Clients that remove this
 marker leave an ordinary explicit name; Contako MUST NOT guess that their `FN`
-was generated.
+was generated. A private marker is interpreted only when its nonempty UID matches
+the unique authenticated public signed `FN` card. It MUST NOT add a private `FN`
+that could hide a later public-name edit. Legacy authenticated Type 2 markers
+remain readable and migrate to the encrypted partition on a compatible write.
 
 ## Guarded Android formatting equivalences
 

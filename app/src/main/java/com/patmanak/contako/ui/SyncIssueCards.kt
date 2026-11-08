@@ -34,12 +34,18 @@ internal data class SyncIssueItem(
 internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactConflictSummary>): List<SyncIssueItem> {
     val snapshot = state.syncDashboard
     val contacts = state.actionContacts.associateBy { it.id }
+    val groups = state.actionGroups.associateBy { it.id }
     val result = mutableListOf<SyncIssueItem>()
     fun add(key: String, id: String?, name: String?, problem: SyncProblem?, scope: SyncIssueScope,
         durable: Boolean = false, review: Boolean = false, deleted: Boolean = false,
         compare: Boolean = false, queuedChoice: Boolean = false, retry: SyncMutationRetry? = null,
         importGeneration: String? = null) {
-        result += SyncIssueItem(key, id, name, problem,
+        val resolvedName = name?.takeIf(String::isNotBlank) ?: when (scope) {
+            SyncIssueScope.CONTACT, SyncIssueScope.ANDROID_COPY -> contacts[id]?.resolvedDisplayName
+            SyncIssueScope.GROUP -> groups[id]?.name?.takeIf(String::isNotBlank)
+            else -> null
+        }
+        result += SyncIssueItem(key, id, resolvedName, problem,
             SyncIssuePresentationPolicy.present(problem, scope, snapshot.state, durable, compare, review,
                 contactsPermissionMissing = !state.contactsPermissionGranted,
                 conflictChoiceQueued = queuedChoice,
@@ -60,7 +66,7 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
     snapshot.blockedItems.forEach { item ->
         if (item.type == SyncBlockedItemType.CONTACT && result.any { it.key == "conflict:${item.id}" }) return@forEach
         val group = item.type == SyncBlockedItemType.GROUP
-        val review = !item.isDeleted && if (group) state.actionGroups.any { it.id == item.id } else contacts.containsKey(item.id)
+        val review = !item.isDeleted && if (group) groups.containsKey(item.id) else contacts.containsKey(item.id)
         add("blocked:${item.type}:${item.id}", item.id, item.displayName, item.problem,
             if (group) SyncIssueScope.GROUP else SyncIssueScope.CONTACT,
             durable = true, review = review, deleted = item.isDeleted, retry = item.retry)

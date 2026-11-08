@@ -31,6 +31,47 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class ProtonContactCardCryptoDeviceTest {
     @Test
+    fun generatedNameMetadataIsPrivateAuthenticatedAndBoundToTheSignedPublicName() = runBlocking {
+        val material = EphemeralKeyMaterial.create("generated-name-partition")
+        try {
+            val codec = ProtonContactVCardCodec()
+            val contact = com.patmanak.contako.domain.model.CanonicalContact("synthetic-generated", "generated-fixture",
+                values = listOf(
+                    com.patmanak.contako.domain.model.ContactValue("company", com.patmanak.contako.domain.model.ContactValueKind.ORGANIZATION,
+                        "Café Straße", order = 0),
+                    com.patmanak.contako.domain.model.ContactValue("phone", com.patmanak.contako.domain.model.ContactValueKind.PHONE,
+                        "+49301234567", order = 0)))
+            val prepared = codec.encode(contact)
+            val allowed = setOf(
+                "BEGIN", "END", "VERSION", "PRODID", "FN", "UID", "EMAIL", "KEY",
+                "X-PM-MIMETYPE", "X-PM-ENCRYPT", "X-PM-ENCRYPT-UNTRUSTED", "X-PM-SIGN",
+                "X-PM-SCHEME", "X-PM-TLS",
+            )
+            prepared.signed.lineSequence().filter { it.isNotBlank() && !it.startsWith(' ') }.forEach { line ->
+                val property = line.substringBefore(':').substringBefore(';').substringAfterLast('.').uppercase()
+                assertTrue("SIGNED_PUBLIC_FIELD_WHITELIST", property in allowed)
+            }
+            assertTrue(!prepared.signed.contains("X-CONTAKO-") && !prepared.clear.contains("X-CONTAKO-"))
+            assertTrue(prepared.encryptedPrivate.contains("X-CONTAKO-AUTO-FN:Café Straße"))
+            assertTrue(prepared.encryptedPrivate.lineSequence().none { it.startsWith("FN:") || it.startsWith("N:") })
+            val crypto = ProtonCoreContactCardCrypto(material.provider())
+            val protected = crypto.protect(USER_ID, prepared)
+            val plain = crypto.decryptAndVerify(USER_ID, protected)
+            assertTrue(plain.single { it.type == ContactCardType.EncryptedAndSigned }.vCard.contains("X-CONTAKO-AUTO-FN:Café Straße"))
+            val remote = me.proton.core.contact.domain.entity.Contact(USER_ID,
+                me.proton.core.contact.domain.entity.ContactId("generated-fixture"), "Café Straße", emptyList())
+            val read = codec.decode(contact.accountId, remote, plain)
+            assertEquals("", read.displayName)
+            assertEquals("", read.firstName)
+            assertEquals("", read.lastName)
+            assertEquals("Café Straße", read.resolvedDisplayName)
+            val unsigned = protected.map { if (it is ContactCard.Encrypted) it.copy(signature = null) else it }
+            val unauthenticated = codec.decode(contact.accountId, remote, crypto.decryptAndVerify(USER_ID, unsigned))
+            assertEquals("Café Straße", unauthenticated.displayName)
+        } finally { material.close() }
+    }
+
+    @Test
     fun corruptedCompressedPacketNeverReturnsUnauthenticatedPlaintext() = runBlocking {
         val primary = EphemeralKeyMaterial.create("stream-integrity")
         try {

@@ -378,7 +378,6 @@ class ContactCryptoFoundationTest {
         assertEquals(
             "BEGIN:VCARD\r\n" +
                 "VERSION:4.0\r\n" +
-                "N:;;;;\r\n" +
                 "TEL;PREF=1:+12025550123\r\n" +
                 "NOTE:fixture-note\r\n" +
                 "END:VCARD",

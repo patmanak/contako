@@ -625,7 +625,14 @@ untouched values independently on each peer:
 - Create organization-, nickname-, phonetic-, phone- and email-only contacts.
   Verify the generated display name without fabricated structured parts; change
   its source after a Proton round trip and restart, then set an explicit name.
-  Unsigned/altered marker data MUST NOT replace an explicit name.
+  Verify actual Proton CREATE and UPDATE acceptance: generated-name metadata
+  belongs in the encrypted and signed private card, bound by UID to the unique
+  authenticated public FN. Do not invent an empty N or a private FN. Preserve an
+  imported empty N. Migrate recognized legacy public markers on a compatible
+  write; unsigned, altered or unbound marker data MUST NOT replace an explicit
+  name. A later Proton Web FN edit MUST take precedence over an old marker.
+  If this contact is blocked, Sync MUST identify it by its resolved name and
+  offer the applicable contact action; a blank stored alias is not its label.
 - Keep an unrelated contact blocked while changing a group, including removed
   email edges, an empty group and repeated addresses. Only proved dependencies
   may defer that group; legacy incomplete catalogs require verified membership

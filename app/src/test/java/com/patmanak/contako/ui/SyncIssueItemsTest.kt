@@ -1,6 +1,9 @@
 package com.patmanak.contako.ui
 
 import com.patmanak.contako.domain.model.CanonicalContact
+import com.patmanak.contako.domain.model.ContactGroup
+import com.patmanak.contako.domain.model.ContactValue
+import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.sync.*
 import com.patmanak.contako.R
 import org.junit.Assert.*
@@ -8,6 +11,35 @@ import org.junit.Test
 
 class SyncIssueItemsTest {
     private val contact = CanonicalContact("synthetic-owner", "one", displayName = "Chloë Groß")
+
+    @Test fun blankIssueNamesUseTheCanonicalGeneratedContactNameForBlockedAndAndroidIssues() {
+        val unnamed = contact.copy(displayName = "", values = listOf(
+            ContactValue("org", ContactValueKind.ORGANIZATION, "Atelier Café", order = 0),
+            ContactValue("tel", ContactValueKind.PHONE, "+49 30 123456", order = 0)))
+        for (name in listOf(null, "", "  ")) for (android in listOf(false, true)) {
+            val snapshot = SyncDashboardSnapshot(SyncDashboardState.BLOCKED,
+                blockedItems = if (android) emptyList() else listOf(SyncBlockedItem(unnamed.id,
+                    SyncBlockedItemType.CONTACT, name, false, SyncProblem.INTERNAL_FAILURE)),
+                androidContactIssues = if (!android) emptyList() else listOf(SyncAndroidContactIssue(
+                    unnamed.id, SyncAndroidContactIssueKind.ANDROID_PROJECTION, displayName = name)))
+            val issue = currentSyncIssues(ContactsUiState(actionContacts = listOf(unnamed), syncDashboard = snapshot), emptyList()).single()
+            assertEquals("Atelier Café", issue.name)
+            assertEquals(unnamed.id, issue.targetId)
+            assertTrue(issue.canReview)
+        }
+    }
+
+    @Test fun blankGroupIssueNamesUseTheAffectedGroupButExplicitIssueNamesRemainUnchanged() {
+        val group = ContactGroup("synthetic-owner", "group", "Family")
+        for (name in listOf(null, "", "  ", "Retained issue name")) {
+            val state = ContactsUiState(actionGroups = listOf(group), syncDashboard = SyncDashboardSnapshot(
+                SyncDashboardState.BLOCKED, blockedItems = listOf(SyncBlockedItem(group.id,
+                    SyncBlockedItemType.GROUP, name, false, SyncProblem.GROUP_CAPABILITY_REQUIRED))))
+            val issue = currentSyncIssues(state, emptyList()).single()
+            assertEquals(name?.takeIf(String::isNotBlank) ?: group.name, issue.name)
+            assertEquals(group.id, issue.targetId)
+        }
+    }
 
     @Test fun exhaustedTransientWritesOfferOneItemRetryEvenForDeletedContactsAndGroups() {
         for (type in SyncBlockedItemType.entries) {
