@@ -17,7 +17,23 @@ data class LocalDiagnosticInput(
     val journal: SyncJournalSnapshot? = null,
     val problem: com.patmanak.contako.domain.sync.SyncProblem? = null,
     val androidPendingContactCount: Int = 0,
+    val currentIssues: DiagnosticCurrentIssues? = null,
+    val deviceFamily: DiagnosticDeviceFamily = DiagnosticDeviceFamily.UNKNOWN,
 )
+
+enum class DiagnosticDeviceFamily {
+    SAMSUNG, GOOGLE, ONEPLUS, LENOVO, OTHER, UNKNOWN;
+    companion object {
+        fun fromManufacturer(value: String): DiagnosticDeviceFamily = when (value.trim().lowercase(java.util.Locale.ROOT)) {
+            "samsung" -> SAMSUNG
+            "google" -> GOOGLE
+            "oneplus" -> ONEPLUS
+            "lenovo" -> LENOVO
+            "" -> UNKNOWN
+            else -> OTHER
+        }
+    }
+}
 
 enum class DiagnosticSyncState {
     CURRENT,
@@ -56,7 +72,7 @@ object LocalDiagnosticReportGenerator {
                 input.pendingMutationCount >= 0 && input.actionRequiredCount >= 0 && input.androidPendingContactCount >= 0,
         )
         val report = buildString {
-            appendLine("contako_diagnostic_schema=${if (input.journal != null) 3 else if (input.importInvestigation) 2 else 1}")
+            appendLine("contako_diagnostic_schema=${if (input.journal != null && input.currentIssues != null) 4 else if (input.journal != null) 3 else if (input.importInvestigation) 2 else 1}")
             appendLine("app_version=${input.appVersion}")
             appendLine("platform=android")
             appendLine("api_level_band=${apiBand(input.apiLevel)}")
@@ -76,6 +92,17 @@ object LocalDiagnosticReportGenerator {
                 appendLine("journal_last_failure=${input.journal.lastFailure?.encoded ?: "none"}")
                 appendLine("journal_events=" + input.journal.events.takeLast(SyncDiagnosticBuffer.MAX_EVENTS)
                     .joinToString("|") { it.encoded }.ifEmpty { "none" })
+                input.currentIssues?.let { issues ->
+                    appendLine("device_family=${input.deviceFamily.name}")
+                    appendLine("current_issue_read=${issues.read.name}")
+                    appendLine("current_issues=${issues.rows.joinToString("|").ifEmpty { "none" }}")
+                    appendLine("current_issue_truncated=${if (issues.truncated) "yes" else "no"}")
+                    val failures = input.journal.events.map { it.encoded.substringAfterLast(',') }
+                        .filter(SyncJournalCodes::failure).groupingBy { it }.eachCount().toSortedMap()
+                    appendLine("journal_retained_failure_counts=" + failures.map { (code, count) ->
+                        "$code~${DiagnosticCurrentIssues.countBand(count)}"
+                    }.joinToString("|").ifEmpty { "none" })
+                }
             } else if (input.importInvestigation) {
                 appendLine("import_mode=batch_25_parallel_10")
                 appendLine("investigation_events=" + input.investigationEvents.takeLast(InvestigationTrace.MAX_EVENTS)
@@ -105,7 +132,7 @@ object LocalDiagnosticReportGenerator {
 object LocalDiagnosticSafetyScanner {
     private val countBand = Regex("none|small|medium|large|very_large")
     private val schema = linkedMapOf(
-        "contako_diagnostic_schema" to Regex("1|2|3"),
+        "contako_diagnostic_schema" to Regex("1|2|3|4"),
         "app_version" to Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-RC[1-9][0-9]*)?(?:-(?:debug|preview|diagnostic|sync-diagnostic|benchmark|investigation[0-9]*))?"),
         "platform" to Regex("android"),
         "api_level_band" to Regex("below_supported|31_34|35|36_or_later"),
@@ -135,8 +162,9 @@ object LocalDiagnosticSafetyScanner {
         if (forbidden.any { it.containsMatchIn(candidate) }) return false
         val lines = candidate.lineSequence().filter(String::isNotEmpty).toList()
         val investigation = lines.firstOrNull() == "contako_diagnostic_schema=2"
-        val journal = lines.firstOrNull() == "contako_diagnostic_schema=3"
-        if (lines.size != schema.size + if (journal) 6 else if (investigation) 2 else 0) return false
+        val current = lines.firstOrNull() == "contako_diagnostic_schema=4"
+        val journal = current || lines.firstOrNull() == "contako_diagnostic_schema=3"
+        if (lines.size != schema.size + if (current) 11 else if (journal) 6 else if (investigation) 2 else 0) return false
         if (journal) {
             val metadata = lines.drop(schema.size)
             fun value(index: Int, key: String): String? = metadata[index].takeIf { it.startsWith("$key=") }
@@ -152,6 +180,27 @@ object LocalDiagnosticSafetyScanner {
             if (events != "none") {
                 val entries = events.split('|')
                 if (entries.size > SyncDiagnosticBuffer.MAX_EVENTS || entries.any { !SyncJournalEntry.valid(it) }) return false
+            }
+            if (current) {
+                if (DiagnosticDeviceFamily.entries.none { it.name == value(6, "device_family") }) return false
+                val read = value(7, "current_issue_read") ?: return false
+                if (DiagnosticIssueRead.entries.none { it.name == read }) return false
+                val issues = value(8, "current_issues") ?: return false
+                if (issues != "none") {
+                    val rows = issues.split('|')
+                    if (rows.size > DiagnosticCurrentIssues.MAX_ROWS || rows.any { !DiagnosticCurrentIssues.validRow(it) }) return false
+                    if (read != DiagnosticIssueRead.AVAILABLE.name) return false
+                }
+                if (value(9, "current_issue_truncated") !in setOf("yes", "no")) return false
+                val failures = value(10, "journal_retained_failure_counts") ?: return false
+                if (failures != "none") {
+                    val groups = failures.split('|')
+                    if (groups.size > SyncDiagnosticBuffer.MAX_EVENTS || groups.any { item ->
+                            val pair = item.split('~')
+                            pair.size != 2 || !SyncJournalCodes.allowed(pair[0]) || !SyncJournalCodes.failure(pair[0]) ||
+                                pair[1] !in DiagnosticCurrentIssues.bands
+                        }) return false
+                }
             }
         }
         if (investigation) {

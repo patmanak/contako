@@ -50,18 +50,20 @@ class DiagnosticSettingsDeviceTest {
 
         compose.onNodeWithText(compose.activity.getString(R.string.nav_sync)).performClick()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(compose.activity.getString(R.string.diagnostics_generate)))
-        assertEquals(0, compose.onAllNodesWithText("contako_diagnostic_schema=3", substring = true).fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodesWithText("contako_diagnostic_schema=4", substring = true).fetchSemanticsNodes().size)
         compose.onNodeWithText(compose.activity.getString(R.string.diagnostics_generate)).performClick()
-        compose.waitForIdle()
-        assertEquals(0, compose.onAllNodesWithText("contako_diagnostic_schema=3", substring = true).fetchSemanticsNodes().size)
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodesWithText(compose.activity.getString(R.string.diagnostics_show_details)).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(0, compose.onAllNodesWithText("contako_diagnostic_schema=4", substring = true).fetchSemanticsNodes().size)
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(compose.activity.getString(R.string.diagnostics_show_details)))
         compose.onNodeWithText(compose.activity.getString(R.string.diagnostics_show_details)).performClick()
-        compose.onNode(hasScrollAction()).performScrollToNode(hasText("contako_diagnostic_schema=3", substring = true))
-        compose.onNodeWithText("contako_diagnostic_schema=3", substring = true).assertIsDisplayed()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("contako_diagnostic_schema=4", substring = true))
+        compose.onNodeWithText("contako_diagnostic_schema=4", substring = true).assertIsDisplayed()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(compose.activity.getString(R.string.diagnostics_delete)))
         compose.onNodeWithText(compose.activity.getString(R.string.diagnostics_delete)).performClick()
         compose.waitForIdle()
-        assertEquals(0, compose.onAllNodesWithText("contako_diagnostic_schema=3", substring = true).fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodesWithText("contako_diagnostic_schema=4", substring = true).fetchSemanticsNodes().size)
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(compose.activity.getString(R.string.diagnostics_generate)))
         compose.onNodeWithText(compose.activity.getString(R.string.diagnostics_generate)).assertIsDisplayed()
     }

@@ -510,4 +510,11 @@
     <string name="directory_loading">Contacten laden</string>
     <string name="directory_read_failed">De contacten op dit apparaat konden niet worden gelezen.</string>
     <string name="directory_retry_read">Lokaal lezen opnieuw proberen</string>
+    <string name="sync_item_retry">Opnieuw proberen</string>
+    <string name="sync_item_retry_needed">Deze wijzigingen hebben nog een poging nodig.</string>
+    <string name="sync_retry_verification">De externe verificatie is onvolledig.</string>
+    <string name="sync_import_ignore">Negeren tot wijziging</string>
+    <string name="sync_import_waiting">Sommige Proton-contacten wachten op een nieuwe poging.</string>
+    <string name="sync_email_partial_title">Gedeeltelijk gesynchroniseerd</string>
+    <string name="sync_email_partial_body">E-mailadressen moeten worden nagekeken.</string>
 </resources>

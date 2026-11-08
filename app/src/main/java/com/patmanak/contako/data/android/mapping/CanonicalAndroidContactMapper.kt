@@ -105,6 +105,91 @@ internal class CanonicalAndroidContactMapper(
         })
     }
 
+    /**
+     * Comparison only, after a version-guarded write. Never use this view as an ingestion
+     * baseline or for adopting an initial observation: the real provider snapshot is retained.
+     * Every row/linked identity and every non-equivalent value remains significant.
+     */
+    fun postWriteComparisonSnapshot(observed: AndroidContactSnapshot, desired: AndroidContactSnapshot): AndroidContactSnapshot {
+        if (observed.canonicalContactId != desired.canonicalContactId) return projectionComparisonSnapshot(observed)
+        val expected = projectionComparisonSnapshot(desired).rows.associateBy { it.identity.canonicalValueId to it.kind }
+        val normalized = projectionComparisonSnapshot(observed)
+        return normalized.copy(rows = normalized.rows.map { actual ->
+            val target = expected[actual.identity.canonicalValueId to actual.kind] ?: return@map actual
+            var row = actual.copy(order = target.order)
+            if (row.kind == AndroidRowKind.PHONE) row = row.copy(isPrimary = target.isPrimary, isSuperPrimary = target.isSuperPrimary)
+            if (sameWhitespace(row.value, target.value) ||
+                (row.kind == AndroidRowKind.PHONE && sameFormattedPhone(row.value, target.value))) row = row.copy(value = target.value)
+            val components = row.components.toMutableMap()
+            AndroidComponent.entries.forEach { component ->
+                val before = target.components[component].orEmpty()
+                val after = components[component].orEmpty()
+                if (sameWhitespace(before, after)) {
+                    if (before.isEmpty()) components.remove(component) else components[component] = before
+                }
+            }
+            row = row.copy(components = components)
+            if (row.kind == AndroidRowKind.STRUCTURED_NAME) {
+                val parts = listOf(AndroidComponent.PREFIX, AndroidComponent.GIVEN_NAME, AndroidComponent.MIDDLE_NAME,
+                    AndroidComponent.FAMILY_NAME, AndroidComponent.SUFFIX)
+                if (wordMultiset(parts.map { target.components[it].orEmpty() }) ==
+                    wordMultiset(parts.map { row.components[it].orEmpty() })) {
+                    row = row.copy(components = row.components + parts.associateWith { target.components[it].orEmpty() })
+                }
+                // Existing display-only splitting may add words to initially empty structured parts.
+                row = normalizeGeneratedName(AndroidContactSnapshot(observed.canonicalContactId, listOf(row)),
+                    AndroidContactSnapshot(desired.canonicalContactId, listOf(target))).rows.single()
+            }
+            if (row.kind == AndroidRowKind.ORGANIZATION && sameOrganization(row, target)) {
+                val parts = listOf(AndroidComponent.COMPANY, AndroidComponent.DEPARTMENT, AndroidComponent.TITLE, AndroidComponent.ROLE)
+                row = row.copy(value = target.value, components = row.components + parts.associateWith { target.components[it].orEmpty() })
+            }
+            if (sameTypeMeaning(row, target)) row = row.copy(semanticType = target.semanticType, customLabel = target.customLabel)
+            row.copy(components = row.components.filterValues(String::isNotEmpty))
+        })
+    }
+
+    private fun sameWhitespace(first: String, second: String): Boolean =
+        first.trim().replace(Regex("[\\s\\p{Z}]+"), " ") == second.trim().replace(Regex("[\\s\\p{Z}]+"), " ")
+
+    private fun sameFormattedPhone(first: String, second: String): Boolean {
+        fun unformat(value: String) = value.replace(Regex("[\\s\\p{Z}().\\p{Pd}]"), "")
+        val left = unformat(first)
+        val right = unformat(second)
+        return left.isNotEmpty() && left == right && Regex("\\+?[0-9]+").matches(left)
+    }
+
+    private fun wordMultiset(parts: List<String>): Map<String, Int> = parts.flatMap { it.split(Regex("[\\s\\p{Z}.,;]+")) }
+        .filter(String::isNotEmpty).groupingBy { it }.eachCount()
+
+    private fun sameOrganization(actual: AndroidContactRow, expected: AndroidContactRow): Boolean {
+        val parts = listOf(AndroidComponent.COMPANY, AndroidComponent.DEPARTMENT, AndroidComponent.TITLE, AndroidComponent.ROLE)
+        // VALUE duplicates COMPANY in the provider model. A composite must preserve the complete
+        // token multiset across components and keep VALUE consistent with the observed company.
+        if (!sameWhitespace(actual.value, actual.components[AndroidComponent.COMPANY].orEmpty()) ||
+            !sameWhitespace(expected.value, expected.components[AndroidComponent.COMPANY].orEmpty())) return false
+        val before = wordMultiset(parts.map { expected.components[it].orEmpty() })
+        return before.isNotEmpty() && before == wordMultiset(parts.map { actual.components[it].orEmpty() })
+    }
+
+    private fun sameTypeMeaning(actual: AndroidContactRow, expected: AndroidContactRow): Boolean {
+        if (actual.kind !in setOf(AndroidRowKind.EMAIL, AndroidRowKind.PHONE, AndroidRowKind.POSTAL_ADDRESS,
+                AndroidRowKind.ORGANIZATION, AndroidRowKind.WEBSITE)) return false
+        fun meaning(row: AndroidContactRow): AndroidSemanticType? {
+            if (row.semanticType != AndroidSemanticType.CUSTOM) return row.semanticType
+            val label = row.customLabel?.trim()?.lowercase(Locale.ROOT) ?: return null
+            return when (label) {
+                "home" -> AndroidSemanticType.HOME
+                "work" -> AndroidSemanticType.WORK
+                "other" -> AndroidSemanticType.OTHER
+                "mobile", "cell", "cellular" -> if (row.kind == AndroidRowKind.PHONE) AndroidSemanticType.MOBILE else null
+                else -> null
+            }
+        }
+        val left = meaning(actual)
+        return left != null && left == meaning(expected)
+    }
+
     fun planProjection(
         current: AndroidContactSnapshot,
         canonical: CanonicalContact,

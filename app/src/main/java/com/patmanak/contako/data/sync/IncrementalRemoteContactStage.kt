@@ -60,7 +60,11 @@ internal fun interface RemoteContactActionRequiredObserver {
 
 internal sealed interface RemoteContactStageResult {
     /** Healthy cards and the inventory cursor are durable; rejected cards remain durable obligations. */
-    data class Partial(val deferredCount: Int) : RemoteContactStageResult
+    data class Partial(val deferredCount: Int, val retryWaitingCount: Int = 0,
+        val ignoredCount: Int = 0) : RemoteContactStageResult {
+        val actionRequiredCount: Int get() = deferredCount - retryWaitingCount - ignoredCount
+        init { require(deferredCount > 0 && retryWaitingCount >= 0 && ignoredCount >= 0 && actionRequiredCount >= 0) }
+    }
     data class Success(
         val inventoryCount: Int,
         val hydratedCount: Int,
@@ -191,7 +195,8 @@ internal class IncrementalRemoteContactStage(
         val events = when (val result = eventsGateway?.read(account, cursor)) {
             null -> null
             is GatewayOutcome.Success -> result.value
-            is GatewayOutcome.Failure -> return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result)
+            is GatewayOutcome.Failure -> return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result,
+                GatewayDiagnosticBoundary.EVENT_READ)
         }
         observe(RemoteImportPhase.EVENT_READ_DONE)
         observe(RemoteImportPhase.INVENTORY_READ_START)
@@ -222,12 +227,31 @@ internal class IncrementalRemoteContactStage(
                 }
             }
         }
-        val hydrationBatches = plan.hydrate.sortedBy { it.value }.chunked(hydrationBatchSize)
         val durableHydrations = mutableSetOf<RemoteContactId>()
         val deferredHydrations = mutableSetOf<RemoteContactId>()
+        val retryHydrations = mutableSetOf<RemoteContactId>()
+        val ignoredHydrations = mutableSetOf<RemoteContactId>()
         val baselines = plan.nextCheckpoint.entries.associateBy { it.id }
+        val knownEmailIds = baselines.values.flatMap { baseline -> baseline.emailGroupMemberships.map { it.emailId } }.toSet()
+        val unknownEmailEvent = events?.changedEmails.orEmpty().any { it !in knownEmailIds }
+        val readable = mutableListOf<RemoteContactId>()
+        for (id in plan.hydrate.sortedBy { it.value }) {
+            if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
+            val baseline = baselines.getValue(id)
+            val eventChanged = forceHydration || events?.refreshAll == true || unknownEmailEvent ||
+                id in events?.changedContacts.orEmpty() ||
+                baseline.emailGroupMemberships.any { it.emailId in events?.changedEmails.orEmpty() }
+            when (obligations?.readDisposition(account, baseline, eventChanged) ?: RemoteHydrationReadDisposition.READ) {
+                RemoteHydrationReadDisposition.READ -> readable += id
+                RemoteHydrationReadDisposition.RETRY_WAITING -> { deferredHydrations += id; retryHydrations += id }
+                RemoteHydrationReadDisposition.ACTION_REQUIRED -> deferredHydrations += id
+                RemoteHydrationReadDisposition.IGNORED -> { deferredHydrations += id; ignoredHydrations += id }
+            }
+        }
+        val hydrationBatches = readable.chunked(hydrationBatchSize)
         val durableLabels = mutableSetOf<RemoteContactId>()
         val durableDeletions = mutableSetOf<RemoteContactId>()
+        var sharedRateLimit: GatewayOutcome.Failure? = null
         val batchCount = maxOf(1, hydrationBatches.size)
         repeat(batchCount) { batchIndex ->
             if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
@@ -235,11 +259,14 @@ internal class IncrementalRemoteContactStage(
             val hydrationBatch = hydrationBatches.getOrNull(batchIndex).orEmpty()
             hydrationBatch.chunked(hydrationReadConcurrency).forEach { window ->
                 if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
+                val rateLimitAtWindowStart = sharedRateLimit
                 val hydratedWindow = coroutineScope {
                     window.map { contactId ->
                         async {
                             contactId to if (isCancellationRequested()) {
                                 GatewayOutcome.Failure(GatewayFailureCategory.CANCELLED)
+                            } else if (rateLimitAtWindowStart != null) {
+                                rateLimitAtWindowStart
                             } else {
                                 observe(RemoteImportPhase.CARD_READ_START)
                                 cardGateway.fetch(account, contactId).also { observe(RemoteImportPhase.CARD_READ_DONE) }
@@ -251,13 +278,18 @@ internal class IncrementalRemoteContactStage(
                 hydratedWindow.forEach { (contactId, hydrated) ->
                     when (hydrated) {
                         is GatewayOutcome.Failure -> {
-                            if (obligations == null || hydrated.category !in ISOLATABLE_CARD_FAILURES) {
+                            if (obligations == null || hydrated.category !in ISOLATABLE_CARD_FAILURES &&
+                                !hydrated.category.isTransientHydrationFailure) {
                                 return mapFailure(RemoteContactActionRequiredBoundary.HYDRATION, hydrated)
                             }
                             // The obligation MUST precede cursor acknowledgement. Never import an unverified card.
-                            obligations.defer(account, baselines.getValue(contactId), hydrated)
+                            if (rateLimitAtWindowStart != null) {
+                                obligations.postpone(account, baselines.getValue(contactId), hydrated)
+                            } else obligations.defer(account, baselines.getValue(contactId), hydrated)
                             deferredHydrations += contactId
+                            if (hydrated.category.isTransientHydrationFailure) retryHydrations += contactId
                             mapFailure(RemoteContactActionRequiredBoundary.HYDRATION, hydrated)
+                            if (hydrated.category == GatewayFailureCategory.RATE_LIMITED) sharedRateLimit = hydrated
                         }
                         is GatewayOutcome.Success -> {
                             if (hydrated.value.id != contactId) {
@@ -280,13 +312,51 @@ internal class IncrementalRemoteContactStage(
             observe(RemoteImportPhase.LOCAL_COMMIT_START)
             val receipt = try {
                 canonicalStore.commit(account, plan, cards, labels, deletions)
-            } catch (error: Throwable) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: LocalReconciliationInvariantFailure) {
+                observe(RemoteImportPhase.LOCAL_COMMIT_FAILED)
+                observeFailure(error)
+                if (obligations == null || error.invariant != LocalReconciliationInvariant.PENDING_GROUP_EMAIL_REMAP)
+                    return RemoteContactStageResult.LocalPersistenceFailure
+                // The failed atomic batch was rolled back. Attribute only the known per-card remap
+                // refusal; storage, ownership, revision and receipt failures keep their closed outcome.
+                try {
+                    val committed = mutableSetOf<RemoteContactId>()
+                    for (card in cards) {
+                        if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
+                        try {
+                            val single = canonicalStore.commit(account, plan, listOf(card), emptySet(), emptySet())
+                            check(single.hydrated == setOf(card.id) && single.labelsReconciled.isEmpty() &&
+                                single.deletionsReconciled.isEmpty())
+                            committed += card.id
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (refusal: LocalReconciliationInvariantFailure) {
+                            if (refusal.invariant != LocalReconciliationInvariant.PENDING_GROUP_EMAIL_REMAP) throw refusal
+                            observeFailure(refusal)
+                            val failure = GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT)
+                            obligations.defer(account, baselines.getValue(card.id), failure)
+                            deferredHydrations += card.id
+                            mapFailure(RemoteContactActionRequiredBoundary.HYDRATION, failure)
+                        }
+                    }
+                    val rest = if (labels.isNotEmpty() || deletions.isNotEmpty())
+                        canonicalStore.commit(account, plan, emptyList(), labels, deletions)
+                        else CanonicalReconciliationReceipt(emptySet(), emptySet(), emptySet())
+                    check(rest.hydrated.isEmpty())
+                    CanonicalReconciliationReceipt(committed, rest.labelsReconciled, rest.deletionsReconciled)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    observeFailure(failure)
+                    return RemoteContactStageResult.LocalPersistenceFailure
+                }
+            } catch (error: Exception) {
                 observe(RemoteImportPhase.LOCAL_COMMIT_FAILED)
                 observeFailure(error)
                 return RemoteContactStageResult.LocalPersistenceFailure
             }
             observe(RemoteImportPhase.LOCAL_COMMIT_DONE)
-            if (receipt.hydrated != cards.map(VerifiedContactCard::id).toSet() ||
+            if (receipt.hydrated != cards.map(VerifiedContactCard::id).toSet() - deferredHydrations ||
                 receipt.labelsReconciled != labels || receipt.deletionsReconciled != deletions
             ) {
                 observe(RemoteImportPhase.RECEIPT_MISMATCH)
@@ -296,7 +366,7 @@ internal class IncrementalRemoteContactStage(
             obligations?.resolved(account, receipt.hydrated + receipt.deletionsReconciled)
             durableLabels += receipt.labelsReconciled
             durableDeletions += receipt.deletionsReconciled
-            batchObserver.afterDurableBatch(cards.size, labels.size, deletions.size)
+            batchObserver.afterDurableBatch(receipt.hydrated.size, labels.size, deletions.size)
         }
         val completed = try {
             plan.completedAfterDurableReconciliation(
@@ -315,13 +385,16 @@ internal class IncrementalRemoteContactStage(
             planner.commit(account, completed)
         } catch (_: StaleContactInventoryPlan) {
             return RemoteContactStageResult.StalePlan
-        } catch (error: Throwable) {
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
             observe(RemoteImportPhase.CHECKPOINT_COMMIT_FAILED)
             observeFailure(error)
             return RemoteContactStageResult.LocalPersistenceFailure
         }
         observe(RemoteImportPhase.CHECKPOINT_COMMIT_DONE)
-        if (deferredHydrations.isNotEmpty()) return RemoteContactStageResult.Partial(deferredHydrations.size)
+        if (deferredHydrations.isNotEmpty()) return RemoteContactStageResult.Partial(
+            deferredHydrations.size, retryHydrations.size, ignoredHydrations.size)
         return RemoteContactStageResult.Success(
             inventoryCount = inventory.totalCount,
             hydratedCount = plan.hydrate.size,
@@ -341,8 +414,14 @@ internal class IncrementalRemoteContactStage(
     private fun mapFailure(
         boundary: RemoteContactActionRequiredBoundary,
         failure: GatewayOutcome.Failure,
+        diagnosticBoundary: GatewayDiagnosticBoundary = when (boundary) {
+            RemoteContactActionRequiredBoundary.INVENTORY -> GatewayDiagnosticBoundary.INVENTORY_READ
+            RemoteContactActionRequiredBoundary.DELETION_CONFIRMATION -> GatewayDiagnosticBoundary.DELETION_CHECK
+            else -> GatewayDiagnosticBoundary.CARD_READ
+        },
     ): RemoteContactStageResult = failure.category.toStageResult().also { result ->
         lastFailureCategory = failure.category
+        runCatching { importObserver.onGatewayFailure(diagnosticBoundary, failure) }
         if (result == RemoteContactStageResult.ActionRequired) {
             runCatching {
                 actionRequiredObserver.onActionRequired(

@@ -459,6 +459,7 @@ internal class ProductionAndroidProjectionItemExecutor(
             return repair(AndroidProjectionRepairCategory.POST_WRITE_OBSERVATION)
         } ?: return replan(AndroidProjectionReplanCategory.POST_WRITE_OBSERVATION)
         var committedPhotoSha256: String? = null
+        var committedPhotoVersion: Long? = null
         if (desiredPhoto != null) {
             val reference = desiredPhoto.binaryReference
                 ?: return repair(AndroidProjectionRepairCategory.PHOTO_PAYLOAD)
@@ -476,7 +477,7 @@ internal class ProductionAndroidProjectionItemExecutor(
                 context, ledger.canonicalContactId, canonical.revision, preparedContactRevision,
                 accountName, rawContactId, post.rawContact.version, requireNotNull(ledger.sourceIdentity), desiredPhoto,
             )) {
-                is AndroidPhotoProviderWriteResult.Committed -> Unit
+                is AndroidPhotoProviderWriteResult.Committed -> committedPhotoVersion = photoResult.rawContactVersion
                 is AndroidPhotoProviderWriteResult.Stale ->
                     return replan(photoResult.category.toProjectionReplanCategory())
                 is AndroidPhotoProviderWriteResult.RepairRequired -> {
@@ -491,6 +492,11 @@ internal class ProductionAndroidProjectionItemExecutor(
             } ?: return replan(AndroidProjectionReplanCategory.POST_PHOTO_OBSERVATION)
         }
         if (post.rawContact.dirty) return replan(AndroidProjectionReplanCategory.POST_WRITE_OBSERVATION)
+        val expectedPostWriteVersion = if (providerWrite is AndroidProviderProjectionResult.Applied)
+            committedPhotoVersion ?: providerWrite.rawContactVersion else null
+        if (expectedPostWriteVersion != null && post.rawContact.version != expectedPostWriteVersion) {
+            return replan(AndroidProjectionReplanCategory.POST_WRITE_OBSERVATION)
+        }
         if (post.rawContact.deleted || post.rawContact.canonicalContactIdClaim != ledger.canonicalContactId ||
             post.rawContact.sourceIdentity != ledger.sourceIdentity
         ) return repair(AndroidProjectionRepairCategory.POST_WRITE_IDENTITY)
@@ -509,9 +515,18 @@ internal class ProductionAndroidProjectionItemExecutor(
         } catch (_: IllegalArgumentException) {
             return repair(AndroidProjectionRepairCategory.POST_WRITE_FINGERPRINT)
         }
-        if (postFingerprint != contactPlan.fingerprint) {
+        val equivalenceProof = if (postFingerprint != contactPlan.fingerprint && providerWrite is AndroidProviderProjectionResult.Applied) {
+            AndroidPostWriteProjectionProof.create(context, canonical.id, canonical.revision, rawContactId,
+                requireNotNull(ledger.sourceIdentity), providerWrite, post.rawContact.version, committedPhotoVersion,
+                contactPlan.desired, postContact, mapper)
+        } else null
+        if (postFingerprint != contactPlan.fingerprint && equivalenceProof == null) {
             return repair(classifyAndroidProjectionMismatch(
-                contactPlan.desired, postContact, mapper, repairObserver::onComponentMismatch,
+                contactPlan.desired, postContact, mapper,
+                allowPostWriteEquivalences = providerWrite is AndroidProviderProjectionResult.Applied &&
+                    providerWrite.rawContactVersion != null && post.rawContact.version ==
+                        (committedPhotoVersion ?: providerWrite.rawContactVersion),
+                onComponentMismatch = repairObserver::onComponentMismatch,
             ))
         }
         val postMembership = try {
@@ -522,6 +537,10 @@ internal class ProductionAndroidProjectionItemExecutor(
         if (postMembership.semanticFingerprint() != desiredMembershipSnapshot.semanticFingerprint()) {
             return repair(AndroidProjectionRepairCategory.POST_WRITE_MEMBERSHIP_VERIFICATION)
         }
+        if (equivalenceProof != null && !writer.isCurrentPostWriteVersion(accountName, rawContactId,
+                requireNotNull(ledger.sourceIdentity), equivalenceProof.providerVersion)) {
+            return replan(AndroidProjectionReplanCategory.POST_WRITE_OBSERVATION)
+        }
         val completion = try {
             writeLedger.complete(
                 context,
@@ -531,6 +550,7 @@ internal class ProductionAndroidProjectionItemExecutor(
                 preparedMembershipRevision,
                 postContact,
                 postMembership,
+                equivalenceProof,
             )
         } catch (_: IllegalArgumentException) {
             return repair(AndroidProjectionRepairCategory.LEDGER_COMPLETION_ARGUMENT)

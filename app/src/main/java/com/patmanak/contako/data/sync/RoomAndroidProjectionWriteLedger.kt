@@ -12,6 +12,7 @@ import com.patmanak.contako.data.android.mapping.CanonicalAndroidContactMapper
 import com.patmanak.contako.data.android.provider.AndroidExpectedSourceIdentity
 import com.patmanak.contako.data.android.provider.AndroidGroupMembershipWriteAuthorizer
 import com.patmanak.contako.data.android.provider.AndroidUnclaimedDataRowAuthorizer
+import com.patmanak.contako.data.android.provider.AndroidProviderProjectionResult
 import com.patmanak.contako.data.local.AndroidGroupMembershipBaselineEntity
 import com.patmanak.contako.data.local.AndroidProjectionBaselineEntity
 import com.patmanak.contako.data.local.ContakoDatabase
@@ -22,6 +23,43 @@ internal sealed interface AndroidProjectionWriteLedgerResult {
     data object Applied : AndroidProjectionWriteLedgerResult
     data object Stale : AndroidProjectionWriteLedgerResult
     data object RepairRequired : AndroidProjectionWriteLedgerResult
+}
+
+/** Ephemeral proof for one successful provider write and its same-version readback. */
+internal class AndroidPostWriteProjectionProof private constructor(
+    private val context: AndroidInteroperabilityContext,
+    private val contactId: String,
+    private val canonicalRevision: Long,
+    private val rawContactLocator: Long,
+    private val sourceIdentity: String,
+    private val desiredFingerprint: String,
+    private val observedFingerprint: String,
+    val providerVersion: Long,
+) {
+    fun matches(context: AndroidInteroperabilityContext, contactId: String, canonicalRevision: Long,
+        rawContactLocator: Long?, sourceIdentity: String?, desiredFingerprint: String?, observedFingerprint: String): Boolean =
+        this.context == context && this.contactId == contactId && this.canonicalRevision == canonicalRevision &&
+            this.rawContactLocator == rawContactLocator && this.sourceIdentity == sourceIdentity &&
+            this.desiredFingerprint == desiredFingerprint && this.observedFingerprint == observedFingerprint
+
+    override fun toString() = "AndroidPostWriteProjectionProof(REDACTED)"
+
+    companion object {
+        fun create(context: AndroidInteroperabilityContext, contactId: String, canonicalRevision: Long,
+            rawContactLocator: Long, sourceIdentity: String, write: AndroidProviderProjectionResult.Applied,
+            observedVersion: Long, photoWriteVersion: Long?, desired: AndroidContactSnapshot,
+            observed: AndroidContactSnapshot, mapper: CanonicalAndroidContactMapper): AndroidPostWriteProjectionProof? {
+            val writtenVersion = write.rawContactVersion ?: return null
+            val expectedVersion = photoWriteVersion ?: writtenVersion
+            if (rawContactLocator <= 0 || canonicalRevision < 0 || sourceIdentity.isBlank() ||
+                expectedVersion < writtenVersion || expectedVersion != observedVersion || observedVersion < 0 ||
+                desired.canonicalContactId != contactId || observed.canonicalContactId != contactId) return null
+            val desiredFingerprint = mapper.fingerprint(desired).sha256Hex
+            if (mapper.fingerprint(mapper.postWriteComparisonSnapshot(observed, desired)).sha256Hex != desiredFingerprint) return null
+            return AndroidPostWriteProjectionProof(context, contactId, canonicalRevision, rawContactLocator, sourceIdentity,
+                desiredFingerprint, mapper.fingerprint(observed).sha256Hex, observedVersion)
+        }
+    }
 }
 
 /** Durable contact/membership write intent and exact post-provider reconciliation. */
@@ -140,6 +178,7 @@ internal class RoomAndroidProjectionWriteLedger(
         expectedPreparedMembershipRevision: Long,
         observedContact: AndroidContactSnapshot,
         observedMembership: AndroidGroupMembershipSnapshot,
+        postWriteProof: AndroidPostWriteProjectionProof? = null,
     ): AndroidProjectionWriteLedgerResult = database.withTransaction {
         val account = database.androidProjectionLedgerDao().getAccount(context.account.value)
             ?: return@withTransaction AndroidProjectionWriteLedgerResult.RepairRequired
@@ -165,7 +204,11 @@ internal class RoomAndroidProjectionWriteLedger(
             ),
         ).sha256Hex
         val membershipFingerprint = observedMembership.semanticFingerprint().sha256Hex
-        if (ledger.pendingProjectionFingerprint != verifiedProjectionFingerprint ||
+        val provenEquivalent = postWriteProof?.matches(context, canonicalContactId, expectedCanonicalRevision,
+            ledger.rawContactLocator, ledger.sourceIdentity, ledger.pendingProjectionFingerprint, contactFingerprint) == true &&
+            mapper.fingerprint(mapper.postWriteComparisonSnapshot(observedContact, mapper.project(contact))).sha256Hex ==
+                ledger.pendingProjectionFingerprint
+        if ((ledger.pendingProjectionFingerprint != verifiedProjectionFingerprint && !provenEquivalent) ||
             membership.pendingProjectionFingerprint != membershipFingerprint
         ) return@withTransaction AndroidProjectionWriteLedgerResult.RepairRequired
         try {

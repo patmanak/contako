@@ -524,7 +524,7 @@ internal class ProtonContactVCardCodec(
             GatewayContactHydrationCategory.VCARD_PARSE_BOUNDS)
         val keyedCards = plainCards.mapIndexed { index, plain ->
             val key = "proton-card-${plain.type.value}-$index"
-            Triple(key, plain, parse(plain.vCard, key))
+            Triple(key, plain, parse(plain.vCard, key, plain.type.value in setOf(2, 3)))
         }
         requireVCardParse(plainCards.distinctBy { it.type to it.vCard }.size == plainCards.size,
             GatewayContactHydrationCategory.VCARD_PARSE_DUPLICATE_CARD)
@@ -601,12 +601,13 @@ internal class ProtonContactVCardCodec(
         }
         val displayName = parsed.firstNotNullOfOrNull { it.displayName.takeIf(String::isNotBlank) }
             ?: remote.name
+        val generatedName = parsed.mapNotNull { it.generatedDisplayName }.distinct().singleOrNull()
         return CanonicalContact(
             accountId = accountId,
             id = remote.id.id,
             firstName = preferred.firstName,
             lastName = preferred.lastName,
-            displayName = displayName,
+            displayName = displayName.takeUnless { it == generatedName }.orEmpty(),
             values = normalizedValues,
             remoteContactId = remote.id.id,
             remoteVCardUid = remoteUids.singleOrNull(),
@@ -704,7 +705,7 @@ internal class ProtonContactVCardCodec(
         }.toSet()
     }
 
-    private fun parse(raw: String, preservationNamespace: String): ParsedCard {
+    private fun parse(raw: String, preservationNamespace: String, authenticated: Boolean = false): ParsedCard {
         // U+FFFD is valid Unicode and may already be stored in an imported contact.
         // Preserve it literally; byte decoding remains strict at the transport/crypto boundary.
         requireVCardParse(raw.none { it in BIDI_CONTROL_CHARACTERS },
@@ -731,6 +732,8 @@ internal class ProtonContactVCardCodec(
                 ?.takeIf { content.property in CUSTOM_LABEL_PROPERTIES }
         }.toSet()
         var displayName = ""
+        val generatedName = if (authenticated) generatedDisplayNameMarker(lines) else null
+        val explicitName = if (authenticated) explicitDisplayNameMarker(lines) else null
         var firstName = ""
         var lastName = ""
         var uid = ""
@@ -768,6 +771,12 @@ internal class ProtonContactVCardCodec(
                 "BEGIN", "END", "VERSION", "PRODID" -> Unit
                 "UID" -> uid = value
                 "FN" -> displayName = value
+                "X-CONTAKO-AUTO-FN" -> if (generatedName == null) {
+                    addParsedValue(ContactValueKind.UNKNOWN_VCARD_PROPERTY, value, content, label = content.property)
+                }
+                "X-CONTAKO-EXPLICIT-FN" -> if (explicitName == null) {
+                    addParsedValue(ContactValueKind.UNKNOWN_VCARD_PROPERTY, value, content, label = content.property)
+                }
                 "N" -> {
                     val parts = splitEscaped(content.value, ';').map(::unescape)
                     lastName = parts.getOrElse(0) { "" }
@@ -874,11 +883,15 @@ internal class ProtonContactVCardCodec(
                 }
             }
         }
-        return ParsedCard(uid, firstName, lastName, displayName, values, unknown)
+        return ParsedCard(uid, firstName, lastName, displayName, values, unknown, generatedName)
     }
 
     private fun buildSignedProperties(contact: CanonicalContact, uid: String): List<String> = buildList {
         add("FN;PREF=1:${escape(contact.remoteDisplayName())}")
+        if (contact.displayName.isBlank() && contact.remoteDisplayName().isNotBlank())
+            add("X-CONTAKO-AUTO-FN:${escape(contact.remoteDisplayName())}")
+        if (contact.displayName.isNotBlank() && hasPreservedAutoNameMarker(contact))
+            add("X-CONTAKO-EXPLICIT-FN:${escape(contact.remoteDisplayName())}")
         var groupIndex = 0
         contact.valuesOf(ContactValueKind.EMAIL).forEachIndexed { index, value ->
             addDecorated(
@@ -1127,7 +1140,7 @@ internal class ProtonContactVCardCodec(
 
     private fun unmanagedFor(cards: Map<String, String>, types: Set<Int>): List<String> = cards.entries
         .filter { entry -> types.any { type -> entry.key.startsWith("proton-card-$type-") } }
-        .flatMap { entry -> unmanaged(entry.value) }
+        .flatMap { entry -> unmanaged(entry.value, entry.key.startsWith("proton-card-2-") || entry.key.startsWith("proton-card-3-")) }
 
     private fun preservedDuplicateStandardDates(
         contact: CanonicalContact,
@@ -1286,9 +1299,11 @@ internal class ProtonContactVCardCodec(
         return PreservationReference(substring(0, separator), lineIndex)
     }
 
-    private fun unmanaged(baseline: String): List<String> {
+    private fun unmanaged(baseline: String, authenticated: Boolean = false): List<String> {
         if (baseline.isBlank()) return emptyList()
         val lines = unfold(baseline)
+        val generatedName = if (authenticated) generatedDisplayNameMarker(lines) else null
+        val explicitName = if (authenticated) explicitDisplayNameMarker(lines) else null
         val groupsWithUnmanagedProperties = lines.mapNotNull { line ->
             val content = contentLine(line) ?: return@mapNotNull null
             content.group?.uppercase(Locale.ROOT)
@@ -1296,11 +1311,37 @@ internal class ProtonContactVCardCodec(
         }.toSet()
         return lines.filter { line ->
             val content = contentLine(line) ?: return@filter false
+            if (content.property == "X-CONTAKO-AUTO-FN" && generatedName != null) return@filter false
+            if (content.property == "X-CONTAKO-EXPLICIT-FN" && explicitName != null) return@filter false
             content.property !in MANAGED_AND_STRUCTURAL_PROPERTIES ||
                 (content.property == "X-ABLABEL" &&
                     content.group?.uppercase(Locale.ROOT) in groupsWithUnmanagedProperties)
         }
     }
+
+    /** Only a single matching marker inside an authenticated card proves a generated FN echo. */
+    private fun generatedDisplayNameMarker(lines: List<String>): String? {
+        if (explicitDisplayNameMarker(lines) != null) return null
+        return matchingDisplayNameMarker(lines, "X-CONTAKO-AUTO-FN")
+    }
+
+    private fun explicitDisplayNameMarker(lines: List<String>): String? =
+        matchingDisplayNameMarker(lines, "X-CONTAKO-EXPLICIT-FN")
+
+    private fun matchingDisplayNameMarker(lines: List<String>, property: String): String? {
+        val contents = lines.mapNotNull(::contentLine)
+        val marker = contents.filter { it.property == property }.singleOrNull() ?: return null
+        if (marker.group != null || marker.parameters.isNotEmpty()) return null
+        val name = contents.filter { it.property == "FN" }.singleOrNull() ?: return null
+        val value = unescape(marker.value)
+        return value.takeIf { it.isNotBlank() && it == unescape(name.value) }
+    }
+
+    private fun hasPreservedAutoNameMarker(contact: CanonicalContact): Boolean =
+        (contact.preservationEnvelope?.rawProperties.orEmpty() + contact.preservationEnvelope?.valueSourceCards().orEmpty())
+            .filterKeys { it.startsWith("proton-card-2-") || it.startsWith("proton-card-3-") }.values.any { raw ->
+                unfold(raw).any { contentLine(it)?.property == "X-CONTAKO-AUTO-FN" }
+            }
 
     private fun addValue(
         target: MutableList<ContactValue>,
@@ -1537,9 +1578,8 @@ internal class ProtonContactVCardCodec(
 
     private fun String.normalizedEmail(): String = trim().lowercase(Locale.ROOT)
 
-    private fun CanonicalContact.remoteDisplayName(): String = displayName.trim().ifEmpty {
-        listOf(firstName.trim(), lastName.trim()).filter(String::isNotEmpty).joinToString(" ")
-    }
+    private fun CanonicalContact.remoteDisplayName(): String =
+        com.patmanak.contako.domain.policy.ContactDisplayNamePolicy.resolve(this)
 
     private data class ContentLine(
         val group: String?,
@@ -1572,6 +1612,7 @@ internal class ProtonContactVCardCodec(
         val displayName: String,
         val values: List<ContactValue>,
         val unknownLines: List<String>,
+        val generatedDisplayName: String? = null,
     )
 
     private companion object {

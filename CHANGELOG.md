@@ -4,10 +4,22 @@ Features and improvements by version.
 
 ## Unreleased
 
+- Resume imports per contact with durable retry deadlines, without rereading healthy
+  cards after a transient failure; keep independent work eligible.
+- Preserve uncertain-delivery evidence through rate limits, avoid identical-create
+  conflicts and bound complete recovery scans per synchronization pass.
+- Retry exhausted transient writes explicitly, including deletions, without resetting
+  their history; recheck or ignore rejected imports until their source changes.
+- Synchronize other fields while retaining an invalid email locally and its last
+  accepted remote value; distinguish partial synchronization from confirmation.
+- Generate missing display names from available fields and tolerate approved Android
+  formatting changes only with guarded post-write evidence.
+- Export current failure summaries and bounded protocol codes in sanitized diagnostics;
+  retain failures and transitions separately from repetitive import progress.
 - Preserve ambiguous contact creations and newer edits/deletions when an earlier
   request finishes; retain the received identity and acknowledged upload baseline.
 - Recheck uncertain creations against verified Proton cards before retrying, while
-  keeping ambiguous matches and unreadable cards blocked safely.
+  retaining ambiguous matches and unreadable dependencies for safe recovery.
 - Keep dependent group assignments from starving pending contact writes.
 - Rebuild the native cryptographic bundle with 16 KiB ELF alignment and validate
   its load segments before packaging.

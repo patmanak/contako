@@ -281,10 +281,17 @@ internal class RoomContactRepository(
             requested.remoteContactId == null && existing?.contact?.remoteContactId == null
         val now = clock()
         val nextRevision = (existing?.contact?.revision ?: 0L) + 1L
+        var validationReasons = ContactValidation.actionRequiredReasons(requested, requiresCreateValidation)
+        val previousContact = existing?.toDomain()
+        if (previousContact?.remoteContactId != null && "INVALID_EMAIL" !in previousContact.actionRequiredReasons &&
+            requested.values.filter { it.kind == ContactValueKind.EMAIL && !ContactValidation.isValidEmail(it.value) }
+                .all { value -> previousContact.values.any { it == value } }) {
+            validationReasons = validationReasons - "INVALID_EMAIL"
+        }
         val committed = markEditedLocalContactLabels(existing?.toDomain(), requested).copy(
             revision = nextRevision,
             updatedAtEpochMillis = now,
-            actionRequiredReasons = ContactValidation.actionRequiredReasons(requested, requiresCreateValidation),
+            actionRequiredReasons = validationReasons,
             pendingMutationRevision = nextRevision,
             isDeleted = false,
         )
@@ -302,6 +309,8 @@ internal class RoomContactRepository(
                 previousValueIds,
             )
         }
+        previousContact?.let { RoomRemoteGroupAssignmentDependencies(database)
+            .captureContactBeforeEdit(com.patmanak.contako.data.gateway.AccountScope(committed.accountId), it) }
         dao.upsert(committed.toEntity())
         val previous = existing?.toDomain()
         if (previous == null || (previous.isDeleted && previous.revision == 0L) ||
@@ -330,6 +339,10 @@ internal class RoomContactRepository(
         }
         checkpoint(LocalMutationCheckpoint.CONTACT_SAVE_AFTER_PAYLOAD)
         checkpoint(LocalMutationCheckpoint.CONTACT_SAVE_BEFORE_OUTBOX)
+        val uploadOverlays = RoomContactUploadOverlays(database)
+        uploadOverlays.saveLocal(previousContact, committed)
+        val uploadBlockingReasons = if (uploadOverlays.has(committed.accountId, committed.id))
+            committed.actionRequiredReasons - "INVALID_EMAIL" else committed.actionRequiredReasons
         enqueue(
             accountId = committed.accountId,
             type = AggregateType.CONTACT,
@@ -337,7 +350,7 @@ internal class RoomContactRepository(
             operation = MutationOperation.UPSERT,
             revision = committed.revision,
             now = now,
-            blockedReason = committed.actionRequiredReasons.sorted().joinToString(",").ifEmpty { null },
+            blockedReason = uploadBlockingReasons.sorted().joinToString(",").ifEmpty { null },
             remoteIdentity = committed.remoteContactId,
             remoteVersion = committed.remoteVersion,
         )
@@ -379,6 +392,8 @@ internal class RoomContactRepository(
 
         val now = clock()
         val previousValueIds = dao.getValueIds(accountId, contactId)
+        RoomRemoteGroupAssignmentDependencies(database).captureContactBeforeEdit(
+            com.patmanak.contako.data.gateway.AccountScope(accountId), existing.toDomain())
         val affectedGroupIds = if (previousValueIds.isEmpty()) emptyList() else {
             database.contactGroupDao().findGroupIdsForEmailValues(accountId, contactId, previousValueIds)
         }
@@ -395,6 +410,7 @@ internal class RoomContactRepository(
         database.contactConflictDao().delete(accountId, contactId)
         checkpoint(LocalMutationCheckpoint.CONTACT_DELETE_AFTER_AGGREGATE)
         dao.deleteValues(accountId, contactId)
+        RoomContactUploadOverlays(database).clear(accountId, contactId)
         checkpoint(LocalMutationCheckpoint.CONTACT_DELETE_AFTER_VALUES)
         checkpoint(LocalMutationCheckpoint.CONTACT_DELETE_BEFORE_OUTBOX)
         enqueue(
@@ -503,6 +519,8 @@ internal class RoomContactRepository(
         val now = clock()
         changedGroupIds.forEach { groupId ->
             val current = requireNotNull(currentGroupsById[groupId])
+            RoomRemoteGroupAssignmentDependencies(database).captureBeforeGroupEdit(
+                com.patmanak.contako.data.gateway.AccountScope(accountId), groupId, current.memberships)
             check(groupDao.compareAndSetRevision(accountId, groupId, current.revision) == 1) {
                 "Canonical group revision changed inside the caller-owned transaction"
             }
@@ -663,6 +681,9 @@ internal class RoomContactRepository(
             isDeleted = false,
         )
         val groupDao = database.contactGroupDao()
+        RoomRemoteGroupAssignmentDependencies(database).captureBeforeGroupEdit(
+            com.patmanak.contako.data.gateway.AccountScope(committed.accountId), committed.id,
+            existing?.memberships?.map { GroupMembership(it.contactId, it.emailValueId) }.orEmpty())
         groupDao.upsert(committed.toEntity())
         checkpoint(LocalMutationCheckpoint.GROUP_SAVE_AFTER_AGGREGATE)
         groupDao.deleteMemberships(committed.accountId, committed.id)
@@ -705,6 +726,9 @@ internal class RoomContactRepository(
                     ?: return@withTransaction false
                 checkpoint(LocalMutationCheckpoint.GROUP_DELETE_BEFORE_MUTATION)
                 val now = clock()
+                RoomRemoteGroupAssignmentDependencies(database).captureBeforeGroupEdit(
+                    com.patmanak.contako.data.gateway.AccountScope(accountId), groupId,
+                    existing.memberships.map { GroupMembership(it.contactId, it.emailValueId) })
                 database.contactGroupDao().upsert(
                     existing.group.copy(
                         revision = existing.group.revision + 1L,

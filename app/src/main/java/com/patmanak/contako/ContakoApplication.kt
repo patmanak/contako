@@ -63,6 +63,9 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val database: ContakoDatabase by lazy { ContakoDatabase.create(this) }
 
+    internal suspend fun currentDiagnosticIssues(): com.patmanak.contako.diagnostics.DiagnosticCurrentIssues =
+        com.patmanak.contako.data.local.RoomDiagnosticIssueCollector(database).collect(protonGateCRuntime.accountScope)
+
     internal fun refreshSyncNotification() {
         applicationScope.launch {
             com.patmanak.contako.android.sync.AndroidSyncActionNotifier(this@ContakoApplication, RoomSyncStatusStore(database))
@@ -135,6 +138,17 @@ class ContakoApplication : Application(), ContakoSyncAdapterRuntime, ContakoAcco
                 syncDiagnostic { SanitizedDiagnosticEvent.CanonicalRejection(reason) }
             },
             passStageObserver = object : SyncPassStageObserver {
+                override fun onGatewayFailure(boundary: com.patmanak.contako.data.sync.GatewayDiagnosticBoundary,
+                    failure: com.patmanak.contako.data.gateway.GatewayOutcome.Failure,
+                    operation: com.patmanak.contako.data.sync.RemoteMutationOperation?) {
+                    syncDiagnostic { com.patmanak.contako.diagnostics.gatewayDiagnosticFailure(boundary, failure, operation) }
+                }
+                override fun onPrerequisite(result: com.patmanak.contako.data.sync.SyncPrerequisiteState) {
+                    syncDiagnostic { SanitizedDiagnosticEvent.Prerequisite(result) }
+                }
+                override fun onAndroidPreflight(reason: com.patmanak.contako.data.sync.AndroidInteroperabilityRepairReason?) {
+                    syncDiagnostic { SanitizedDiagnosticEvent.AndroidPreflight(reason) }
+                }
                 override fun onImportPhase(phase: com.patmanak.contako.data.sync.RemoteImportPhase) {
                     syncDiagnostic { SanitizedDiagnosticEvent.ImportPhase(phase) }
                 }

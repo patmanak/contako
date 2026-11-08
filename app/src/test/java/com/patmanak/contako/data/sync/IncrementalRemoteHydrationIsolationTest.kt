@@ -53,9 +53,9 @@ class IncrementalRemoteHydrationIsolationTest {
         }
     }
 
-    @Test fun accountAuthenticationAndTransientFailuresNeverAdvanceCursorAsPartialSuccess() = runTest {
+    @Test fun accountAuthenticationFailuresNeverAdvanceCursorAsPartialSuccess() = runTest {
         for (category in listOf(GatewayFailureCategory.AUTHENTICATION_REQUIRED,
-            GatewayFailureCategory.NETWORK_UNAVAILABLE, GatewayFailureCategory.RATE_LIMITED)) {
+            GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED)) {
             val fixture = Fixture(26).apply { failure = category }
             val result = fixture.stage().run(ACCOUNT)
             assertFalse(result is RemoteContactStageResult.Success)
@@ -63,6 +63,19 @@ class IncrementalRemoteHydrationIsolationTest {
             assertNull(fixture.checkpoints.current)
             assertTrue(fixture.obligations.pending(ACCOUNT).isEmpty())
             assertEquals(25, fixture.canonical.size)
+        }
+    }
+
+    @Test fun transientFailuresAdvanceOnlyWithDurableCoverageForEveryUnreadOrRejectedCard() = runTest {
+        for (category in listOf(GatewayFailureCategory.NETWORK_UNAVAILABLE, GatewayFailureCategory.RATE_LIMITED)) {
+            val fixture = Fixture(26).apply { failure = category }
+            val result = fixture.stage().run(ACCOUNT) as RemoteContactStageResult.Partial
+            assertEquals(0, result.actionRequiredCount)
+            assertTrue(result.retryWaitingCount > 0)
+            assertNotNull(fixture.checkpoints.current)
+            val deferred = fixture.obligations.pending(ACCOUNT)
+            assertTrue(fixture.bad in deferred)
+            assertEquals((1..51).map(::id).toSet(), fixture.canonical + deferred)
         }
     }
 

@@ -1,5 +1,48 @@
 # Contact field mapping
 
+## Partial email synchronization and generated display names
+
+An invalid locally edited email MUST remain durable by occurrence identity. Other
+valid fields MAY synchronize while that occurrence is withheld. For an existing
+remote email, keep its last verified accepted value and assignments on Proton;
+for a new invalid occurrence, omit only that occurrence from the outgoing card.
+Neither path permits deleting the local input, clearing its error or presenting
+whole-contact confirmation. Remote adoption MUST retain the local withheld value.
+Repeated equal addresses MUST keep independent identities and group assignments.
+Missing or ambiguous remote identity MUST block unsafe replacement, never guess by
+text. Explicitly choosing the complete Proton version discards the local overlay
+only under the existing conflict-choice guards.
+Remote email identities MUST take precedence over parser line identifiers during
+matching. If a reordered property cannot retain its guarded preservation identity,
+adoption or upload MUST remain blocked with local intent intact; dropping unknown
+decorations or weakening codec provenance is not a valid recovery.
+
+Explicit names take precedence. Without one, Contako derives a display name from
+available structured name, phonetic name, nickname, organization, phone or email, following the
+[Android display-name source priorities](https://developer.android.com/reference/android/provider/ContactsContract.DisplayNameSources).
+It MUST NOT fill invented first/last names. A protected `X-CONTAKO-AUTO-FN` marker
+records the generated value; a matching verified round trip preserves its generated
+status, while a different explicit `FN` takes precedence. An explicit-name marker
+disambiguates preserved generated markers during a compatible edit. Clients that remove this
+marker leave an ordinary explicit name; Contako MUST NOT guess that their `FN`
+was generated.
+
+## Guarded Android formatting equivalences
+
+After a version-guarded owned write, a matching post-write receipt MAY establish
+equivalence for whitespace, row order, phone-primary choice and a structured-name
+split with identical complete tokens. Case, accents and repeated tokens remain
+significant. Phone punctuation may differ only with identical digits; national
+and international prefixes are not interchangeable. Type/label synonyms must be
+explicit and organization composites must retain every token. Changed preferred
+email, altered dates/years, missing rows and truncated/changed values MUST fail.
+
+These equivalences MUST NOT weaken ordinary ingestion, initial adoption or strict
+fingerprints. They require unchanged ownership, account/epoch, canonical revision
+and provider version from the actual post-write receipt through completion. Store
+the real provider observation as the ingestion baseline, so the provider's own
+formatting is not uploaded as a later native edit.
+
 ## Unmapped Android fields
 
 Android MIME types outside Contako's contact and group mapping, including Samsung
@@ -528,8 +571,9 @@ Under D-137, Contako editor Save MUST populate a blank display name from the
 current trimmed given/family names joined with a single space, omitting blank
 parts. This is a durable canonical value before upload, not just a visual fallback.
 An explicit display name MUST remain independent of structured names. If both
-name parts are empty, this rule MUST NOT persist a fabricated "Unnamed contact"
-value; ordinary missing-name validation still applies. Consultation/import alone
+name parts are empty, use the generated-source policy above; only a contact with
+no usable source remains missing-name blocked. Never persist a fabricated
+"Unnamed contact" value. Consultation/import alone
 MUST NOT mass-rewrite names.
 
 Explicit given/family-name edits MUST update the effective preserved `N`

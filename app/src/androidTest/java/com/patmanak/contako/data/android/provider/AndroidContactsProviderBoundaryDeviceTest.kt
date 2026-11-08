@@ -414,7 +414,7 @@ class AndroidContactsProviderBoundaryDeviceTest {
             sourceIdentityAfterWrite = SOURCE_ID,
             plan = initial,
         )
-        assertEquals(AndroidProviderProjectionResult.Applied(2), initialResult)
+        assertApplied(AndroidProviderProjectionResult.Applied(2), initialResult)
 
         val rawPage = reader.readRawContactPage(AndroidProviderAccountName(primaryAccount.name))
         assertTrue(rawPage.contacts.any { it.rawContactId == primaryRawId && !it.dirty && !it.deleted })
@@ -477,7 +477,7 @@ class AndroidContactsProviderBoundaryDeviceTest {
             rowsBeforeStaleProjection,
             reader.readDataRows(AndroidProviderAccountName(primaryAccount.name), setOf(primaryRawId)),
         )
-        assertEquals(
+        assertApplied(
             AndroidProviderProjectionResult.Applied(1),
             writer.applyProjectionPlan(
                 AndroidProviderAccountName(primaryAccount.name),
@@ -575,7 +575,7 @@ class AndroidContactsProviderBoundaryDeviceTest {
         val beforeDeleteVersion = reader.readRawContactPage(AndroidProviderAccountName(primaryAccount.name))
             .contacts.single { it.rawContactId == primaryRawId }.version
         assertEquals(1, deletePlan.operations.size)
-        assertEquals(
+        assertApplied(
             AndroidProviderProjectionResult.Applied(1),
             writer.applyProjectionPlan(
                 AndroidProviderAccountName(primaryAccount.name),
@@ -750,7 +750,7 @@ class AndroidContactsProviderBoundaryDeviceTest {
         val before = reader.readRawContactPage(AndroidProviderAccountName(primaryAccount.name))
             .contacts.single { it.rawContactId == rawContactId }
 
-        assertEquals(
+        assertApplied(
             AndroidProviderProjectionResult.Applied(changedDataRows = 0, sourceIdentityChanged = true),
             writer().applyProjectionPlan(
                 AndroidProviderAccountName(primaryAccount.name),
@@ -793,7 +793,7 @@ class AndroidContactsProviderBoundaryDeviceTest {
             ),
         )
 
-        assertEquals(
+        assertApplied(
             AndroidProviderProjectionResult.Applied(changedDataRows = 1, sourceIdentityChanged = true),
             writer().applyProjectionPlan(
                 accountName,
@@ -912,7 +912,7 @@ class AndroidContactsProviderBoundaryDeviceTest {
             ),
         )
 
-        assertEquals(
+        assertApplied(
             AndroidProviderProjectionResult.Applied(4),
             writer.applyProjectionPlan(
                 accountName,
@@ -1312,7 +1312,7 @@ class AndroidContactsProviderBoundaryDeviceTest {
             },
         )
 
-        assertEquals(
+        assertApplied(
             AndroidProviderProjectionResult.Applied(128),
             writer().applyProjectionPlan(
                 accountName,
@@ -1440,7 +1440,7 @@ class AndroidContactsProviderBoundaryDeviceTest {
             membershipWriteAuthorizer = AndroidGroupMembershipWriteAuthorizer { _, _, _, _, _ -> true },
         )
 
-        assertEquals(
+        assertApplied(
             AndroidProviderProjectionResult.Applied(1),
             candidate.applyProjectionPlan(
                 accountName,
@@ -1451,6 +1451,14 @@ class AndroidContactsProviderBoundaryDeviceTest {
                 projectionPlan(listOf(photo)),
             ),
         )
+    }
+
+    private fun assertApplied(expected: AndroidProviderProjectionResult.Applied, actual: AndroidProviderProjectionResult) {
+        assertTrue(actual is AndroidProviderProjectionResult.Applied)
+        val applied = actual as AndroidProviderProjectionResult.Applied
+        assertEquals(expected.changedDataRows, applied.changedDataRows)
+        assertEquals(expected.sourceIdentityChanged, applied.sourceIdentityChanged)
+        assertTrue(requireNotNull(applied.rawContactVersion) >= 0)
     }
 
     private fun writer() = AndroidContactsProviderWriter(

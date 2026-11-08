@@ -308,13 +308,23 @@ internal interface OutboxDao {
         WHERE account_id = :accountId AND state = 'PENDING' AND blocked_reason IS NULL
           AND next_attempt_at_epoch_millis <= :nowEpochMillis
           AND NOT (aggregate_type = 'GROUP' AND operation = 'ASSIGNMENTS' AND EXISTS (
+              SELECT 1 FROM remote_group_dependency_baselines b
+              JOIN contact_groups g ON g.account_id=b.account_id AND g.id=b.group_id
+              WHERE b.account_id=outbox_mutations.account_id AND b.group_id=outbox_mutations.aggregate_id
+                  AND b.complete=1 AND b.remote_label_id=g.remote_label_id
+          ) AND EXISTS (
               SELECT 1 FROM outbox_mutations AS intent
               JOIN contacts AS contact ON contact.account_id = intent.account_id
                   AND contact.id = intent.aggregate_id
               WHERE intent.account_id = :accountId AND intent.aggregate_type = 'CONTACT'
                   AND contact.pending_mutation_revision = intent.revision
+                  AND (EXISTS (SELECT 1 FROM group_memberships m
+                      WHERE m.account_id=:accountId AND m.group_id=outbox_mutations.aggregate_id AND m.contact_id=contact.id)
+                    OR EXISTS (SELECT 1 FROM remote_group_dependency_edges e
+                      WHERE e.account_id=:accountId AND e.group_id=outbox_mutations.aggregate_id AND e.contact_id=contact.id))
           ))
-        ORDER BY created_at_epoch_millis, aggregate_type, aggregate_id
+        ORDER BY CASE WHEN aggregate_type='CONTACT' THEN 0 WHEN operation='ASSIGNMENTS' THEN 2 ELSE 1 END,
+            created_at_epoch_millis, aggregate_type, aggregate_id
         LIMIT :limit
         """,
     )
@@ -343,7 +353,8 @@ internal interface OutboxDao {
         UPDATE outbox_mutations
         SET state = 'PENDING', attempt_count = :attemptCount,
           next_attempt_at_epoch_millis = :nextAttemptAtEpochMillis,
-          error_category = :errorCategory, requires_reconciliation = :requiresReconciliation
+          error_category = :errorCategory,
+          requires_reconciliation = (requires_reconciliation OR :requiresReconciliation)
         WHERE account_id = :accountId AND aggregate_type = :aggregateType
           AND aggregate_id = :aggregateId AND revision = :revision AND state = 'IN_FLIGHT'
         """,
@@ -525,7 +536,8 @@ internal interface ContactInventoryCheckpointDao {
             CASE WHEN EXISTS(SELECT 1 FROM contact_inventory_checkpoints WHERE account_id=:accountId)
                 THEN (SELECT COUNT(*) FROM contact_inventory_entries WHERE account_id=:accountId)
                 ELSE NULL END AS inventoryContactCount,
-            (SELECT COUNT(*) FROM remote_hydration_obligations WHERE account_id=:accountId) AS deferredContactCount,
+            (SELECT COUNT(*) FROM remote_hydration_obligations WHERE account_id=:accountId
+                AND ignored_baseline_version IS NULL) AS deferredContactCount,
             (SELECT COUNT(*) FROM contacts c LEFT JOIN android_projection_ledger l
                 ON l.account_id=c.account_id AND l.canonical_contact_id=c.id
                 WHERE c.account_id=:accountId AND (
@@ -881,6 +893,16 @@ internal interface AndroidProjectionLedgerDao {
 
 @Dao
 internal interface AccountRemovalDao {
+    @Query("DELETE FROM remote_request_backoffs WHERE account_id=:accountId")
+    suspend fun deleteRemoteRequestBackoff(accountId: String)
+    @Query("DELETE FROM mutation_retry_requests WHERE account_id=:accountId")
+    suspend fun deleteMutationRetryRequests(accountId: String)
+    @Query("DELETE FROM contact_email_upload_overlays WHERE account_id=:accountId")
+    suspend fun deleteEmailUploadOverlays(accountId: String)
+    @Query("DELETE FROM remote_group_dependency_edges WHERE account_id=:accountId")
+    suspend fun deleteRemoteGroupDependencyEdges(accountId: String)
+    @Query("DELETE FROM remote_group_dependency_baselines WHERE account_id=:accountId")
+    suspend fun deleteRemoteGroupDependencyBaselines(accountId: String)
     @Query("DELETE FROM contact_sync_evidence WHERE account_id=:accountId")
     suspend fun deleteContactSyncEvidence(accountId: String)
     @Query("DELETE FROM targeted_recovery_requests WHERE account_id=:accountId")
@@ -888,6 +910,9 @@ internal interface AccountRemovalDao {
     @Query("DELETE FROM remote_hydration_obligations WHERE account_id = :accountId")
     suspend fun deleteHydrationObligations(accountId: String)
     @Query("""SELECT (SELECT COUNT(*) FROM outbox_mutations WHERE account_id = :accountId)
+        + (SELECT COUNT(DISTINCT contact_id) FROM contact_email_upload_overlays f WHERE f.account_id=:accountId
+            AND NOT EXISTS (SELECT 1 FROM outbox_mutations o WHERE o.account_id=f.account_id
+                AND o.aggregate_type='CONTACT' AND o.aggregate_id=f.contact_id))
         + (SELECT COUNT(*) FROM deletion_recoveries WHERE account_id=:accountId
             AND (has_draft=1 OR state IN ('QUEUED','CLEANUP_PENDING','BLOCKED','STALE'))
             AND state NOT IN ('RECREATED','DISCARDED'))""")
@@ -924,6 +949,11 @@ internal interface AccountRemovalDao {
     suspend fun deleteAccount(accountId: String) {
         require(accountId.isNotBlank())
         deleteContactSyncEvidence(accountId)
+        deleteRemoteRequestBackoff(accountId)
+        deleteMutationRetryRequests(accountId)
+        deleteEmailUploadOverlays(accountId)
+        deleteRemoteGroupDependencyEdges(accountId)
+        deleteRemoteGroupDependencyBaselines(accountId)
         deleteTargetedRecovery(accountId)
         deleteDeletionRecoveries(accountId)
         deleteOutbox(accountId)

@@ -9,6 +9,45 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DurableMutationOrchestratorTest {
+    @Test fun accountBackoffDoesNotClaimOrSpendAttemptsOnUntouchedIntent() = runTest {
+        val store = FakeMutationStore(command(id = "waiting", attemptCount = 3))
+        var delay = 60_000L
+        val runner = DurableMutationOrchestrator(store,
+            MutationPreparationGateway { success(MutationPreparation.UploadAllowed) },
+            MutationUploadGateway { success(ack()) },
+            remoteBackoffRemainingMillis = { delay })
+        repeat(3) {
+            val result = runner.drain(ACCOUNT, 1_000)
+            assertEquals(0, result.examined)
+            assertEquals(1, result.retryWaiting)
+            assertEquals(3, store.current?.attemptCount)
+            assertFalse(store.current!!.requiresReconciliation)
+            assertFalse(store.recovered)
+        }
+        delay = 0
+        assertEquals(1, runner.drain(ACCOUNT, 61_000).uploaded)
+        assertFalse(store.recovered)
+    }
+
+    @Test fun rateLimitStopsThisDrainWithoutClaimingLaterCommands() = runTest {
+        for (duringPreparation in listOf(false, true)) {
+            val store = FakeMutationStore(command(id = "limited"), command(id = "untouched"))
+            val prepared = mutableListOf<String>()
+            val result = orchestrator(store, prepare = {
+                prepared += it.aggregateId
+                if (duringPreparation) GatewayOutcome.Failure(GatewayFailureCategory.RATE_LIMITED,
+                    retryAfterMillis = 60_000) else success(MutationPreparation.UploadAllowed)
+            }, upload = { GatewayOutcome.Failure(GatewayFailureCategory.RATE_LIMITED,
+                retryAfterMillis = 60_000) }).drain(ACCOUNT, 1_000)
+            assertEquals(listOf("limited"), prepared)
+            assertEquals(1, result.examined)
+            assertEquals(1, result.retryWaiting)
+            assertEquals(0, store.eligible(ACCOUNT, 1_000, 10).single().attemptCount)
+            assertEquals("untouched", store.eligible(ACCOUNT, 1_000, 10).single().aggregateId)
+            assertFalse(store.recovered)
+        }
+    }
+
     @Test fun ineligibleDurableObligationsStillDetermineTheDrainResult() = runTest {
         for (remaining in listOf(MutationRemainingWork(actionsRequired = 2),
             MutationRemainingWork(pending = 3), MutationRemainingWork(),

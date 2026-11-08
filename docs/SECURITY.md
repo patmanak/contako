@@ -42,6 +42,11 @@ Missing evidence MUST NOT be interpreted as an empty partition.
   contact values, private IDs, URLs, raw messages and stack traces MUST NOT enter
   this journal. The retained failure may precede a later successful pass; its
   timestamp MUST NOT be treated as evidence of a current failure.
+- The retention budget separates failures, transitions and repetitive progress.
+  Schema 4 exports grouped current causes with attempt/count bands and explicit
+  unavailable/truncated states, separately from history. Protocol diagnostics
+  accept only bounded HTTP/Proton codes and closed malformed/hydration categories;
+  coarse prerequisite/session results do not enable authentication traces.
 - The journal uses app-private, backup-excluded storage. Each atomic file and
   temporary replacement is capped at 96 KiB; writes are asynchronous and bursts
   are coalesced. Abrupt termination may lose the last unflushed events. A missing,

@@ -187,7 +187,7 @@ internal fun composeProductionSharedSyncRuntime(
 internal fun composeProductionSharedSyncRuntime(
     context: Context,
     database: ContakoDatabase,
-    dependencies: ProductionSyncDependencies,
+    rawDependencies: ProductionSyncDependencies,
     runnerScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     stopScheduling: () -> Unit = {},
     passStageObserver: SyncPassStageObserver = SyncPassStageObserver { },
@@ -220,6 +220,8 @@ internal fun composeProductionSharedSyncRuntime(
     remoteGroupFailureObserver: (GatewayFailureCategory) -> Unit = {},
 ): ProductionSharedSyncRuntime {
     val applicationContext = context.applicationContext
+    val remoteBackoff = com.patmanak.contako.data.local.RoomRemoteRequestBackoff(database)
+    val dependencies = rawDependencies.withRemoteRequestBackoff(remoteBackoff)
     val account = dependencies.account
     val repository = RoomContactRepository(database)
     val checkpointStore: ContactInventoryCheckpointStore = RoomContactInventoryCheckpointStore(database)
@@ -299,6 +301,7 @@ internal fun composeProductionSharedSyncRuntime(
             prepareTargetedProtonRead(database, androidPreflight, androidStage, command, cancelled)
         })
     val groupCatalogAvailable = java.util.concurrent.atomic.AtomicBoolean(false)
+    val recoveryScanAvailable = java.util.concurrent.atomic.AtomicBoolean(true)
     val deletionRecoveryStore = com.patmanak.contako.data.local.RoomDeletionRecoveryStore(database)
     val deletedContactRecovery = DeletedContactRecovery(RoomDeletedContactRecoveryExecutionStore(deletionRecoveryStore),
         dependencies.existence, ProductionDeletedContactNativeCleanup(database, deletionRecoveryStore, androidPreflight,
@@ -307,7 +310,8 @@ internal fun composeProductionSharedSyncRuntime(
         RoomBackedMutationPreparationGateway(account, database, dependencies.membershipReader,
             dependencies.verifiedCards, dependencies.existence,
             com.patmanak.contako.data.local.RoomAmbiguousContactCreateRecovery(
-                account, database, dependencies.inventory, dependencies.verifiedCards)))
+                account, database, dependencies.inventory, dependencies.verifiedCards,
+                scanPermit = { recoveryScanAvailable.getAndSet(false) })))
     val mutationOrchestrator = DurableMutationOrchestrator(
         RoomMutationExecutionStore(database, dependencies.existence,
             recoveryGeneration = dependencies.capabilityInvalidationGeneration),
@@ -325,6 +329,10 @@ internal fun composeProductionSharedSyncRuntime(
             dependencies.emailLabels,
         ),
         actionRequiredObserver = mutationActionRequiredObserver,
+        gatewayFailureObserver = GatewayFailureObserver { boundary, failure, operation ->
+            passStageObserver.onGatewayFailure(boundary, failure, operation)
+        },
+        remoteBackoffRemainingMillis = { remoteBackoff.remainingMillis(account) },
     )
     // Reset per pass by the publisher below, so a recovered pass stops reporting degradation.
     val androidDegradation = java.util.concurrent.atomic.AtomicReference<SyncActionReason?>(null)
@@ -332,6 +340,7 @@ internal fun composeProductionSharedSyncRuntime(
     var completionDetails: com.patmanak.contako.domain.sync.SyncPassCompletionDetailsSource? = null
     val executor = ContakoSyncPassExecutor(
         onPassStarted = { request ->
+            recoveryScanAvailable.set(true)
             androidPreflight.reset()
             androidDegradation.set(null)
             remoteFailure.set(null)
@@ -343,7 +352,11 @@ internal fun composeProductionSharedSyncRuntime(
         onGroupCatalogAvailability = groupCatalogAvailable::set,
         account = account,
         prerequisites = SyncPrerequisiteChecker {
-            when (val restored = dependencies.session.restore(account)) {
+            val restored = dependencies.session.restore(account)
+            if (restored is GatewayOutcome.Failure) runCatching {
+                passStageObserver.onGatewayFailure(GatewayDiagnosticBoundary.SESSION_RESTORE, restored)
+            }
+            when (restored) {
                 is GatewayOutcome.Success -> when (restored.value) {
                     SessionState.READY -> SyncPrerequisiteState.READY
                     SessionState.AUTHENTICATION_REQUIRED,
@@ -359,9 +372,12 @@ internal fun composeProductionSharedSyncRuntime(
                     GatewayFailureCategory.RATE_LIMITED,
                     GatewayFailureCategory.REMOTE_SERVICE_FAILURE,
                     -> SyncPrerequisiteState.OFFLINE
-                    else -> SyncPrerequisiteState.AUTHENTICATION_REQUIRED
+                    GatewayFailureCategory.AUTHENTICATION_REQUIRED, GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED,
+                    GatewayFailureCategory.UNSUPPORTED_AUTHENTICATION, GatewayFailureCategory.CLIENT_IDENTITY_REJECTED,
+                    GatewayFailureCategory.ACCOUNT_ALREADY_CONNECTED -> SyncPrerequisiteState.AUTHENTICATION_REQUIRED
+                    else -> SyncPrerequisiteState.LOCAL_FAILURE
                 }
-            }
+            }.also { result -> runCatching { passStageObserver.onPrerequisite(result) } }
         },
         remoteStage = IncrementalRemoteContactStage(
             dependencies.inventory,
@@ -397,6 +413,9 @@ internal fun composeProductionSharedSyncRuntime(
                 remoteGroupFailureObserver(category)
             },
             exceptionObserver = passStageObserver::onException,
+            gatewayFailureObserver = GatewayFailureObserver { boundary, failure, operation ->
+                passStageObserver.onGatewayFailure(boundary, failure, operation)
+            },
         ),
         statusPublisher = RoomSyncPassStatusPublisher(
             account.value,
@@ -434,7 +453,10 @@ internal fun composeProductionSharedSyncRuntime(
         ),
         androidPreflight = androidPreflight,
         androidStage = androidStage,
-        onAndroidDegraded = { androidDegradation.set(SyncActionReason.ANDROID_INTEROPERABILITY_DEGRADED) },
+        onAndroidDegraded = { reason ->
+            runCatching { passStageObserver.onAndroidPreflight(reason) }
+            androidDegradation.set(SyncActionReason.ANDROID_INTEROPERABILITY_DEGRADED)
+        },
         stageObserver = passStageObserver,
         androidStageResultObserver = androidStageResultObserver,
         androidRepair = AndroidProviderResetRepairCoordinator(

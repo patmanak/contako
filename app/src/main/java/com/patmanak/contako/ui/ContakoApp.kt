@@ -1203,7 +1203,10 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
 }
 
 @StringRes
-private fun syncStateTitle(snapshot: com.patmanak.contako.domain.sync.SyncDashboardSnapshot): Int = when (snapshot.state) {
+private fun syncStateTitle(snapshot: com.patmanak.contako.domain.sync.SyncDashboardSnapshot): Int =
+    if (snapshot.partialContactIds.isNotEmpty() && snapshot.pendingMutationCount == 0 &&
+        snapshot.state in setOf(SyncDashboardState.CURRENT, SyncDashboardState.PENDING)) R.string.sync_email_partial_title
+    else when (snapshot.state) {
     SyncDashboardState.CURRENT -> R.string.sync_state_current
     SyncDashboardState.PENDING -> if (snapshot.pendingMutationCount == 0) R.string.sync_state_waiting else R.string.sync_state_pending
     SyncDashboardState.BLOCKED -> R.string.sync_state_blocked
@@ -1216,7 +1219,12 @@ private fun syncStateTitle(snapshot: com.patmanak.contako.domain.sync.SyncDashbo
 
 @StringRes
 private fun syncProblemBody(snapshot: com.patmanak.contako.domain.sync.SyncDashboardSnapshot): Int =
-    when (snapshot.problem) {
+    if (snapshot.blockedItems.isNotEmpty() && snapshot.blockedItems.all { it.retry != null } &&
+        snapshot.androidContactIssues.isEmpty() && snapshot.importProblems.none { !it.isTransient && !it.ignored } &&
+        snapshot.state != SyncDashboardState.AUTHENTICATION_REQUIRED) {
+        if (snapshot.blockedItems.any { it.retry?.reason == com.patmanak.contako.domain.sync.SyncMutationRetryReason.VERIFICATION })
+            R.string.sync_retry_verification else R.string.sync_item_retry_needed
+    } else when (snapshot.problem) {
         com.patmanak.contako.domain.sync.SyncProblem.VALIDATION_REJECTED -> R.string.sync_problem_validation
         com.patmanak.contako.domain.sync.SyncProblem.CONFLICT_RECOVERY_REQUIRED -> R.string.sync_problem_conflict
         com.patmanak.contako.domain.sync.SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED -> R.string.sync_problem_crypto
@@ -1227,7 +1235,15 @@ private fun syncProblemBody(snapshot: com.patmanak.contako.domain.sync.SyncDashb
     }
 
 @StringRes
-private fun syncStateBody(snapshot: com.patmanak.contako.domain.sync.SyncDashboardSnapshot): Int = when (snapshot.state) {
+private fun syncStateBody(snapshot: com.patmanak.contako.domain.sync.SyncDashboardSnapshot): Int =
+    if (snapshot.state in setOf(SyncDashboardState.CURRENT, SyncDashboardState.PENDING) && snapshot.pendingMutationCount == 0) {
+        when {
+            snapshot.partialContactIds.isNotEmpty() -> R.string.sync_email_partial_body
+            snapshot.importProblems.any { it.isTransient && !it.ignored } -> R.string.sync_import_waiting
+            snapshot.state == SyncDashboardState.CURRENT -> R.string.sync_body_current
+            else -> R.string.sync_body_waiting
+        }
+    } else when (snapshot.state) {
     SyncDashboardState.CURRENT -> R.string.sync_body_current
     SyncDashboardState.PENDING -> if (snapshot.pendingMutationCount == 0) R.string.sync_body_waiting else R.string.sync_body_pending
     SyncDashboardState.BLOCKED -> R.string.sync_body_blocked
@@ -1782,14 +1798,17 @@ private fun ContactValueFamily(
                         )
                     }
                 } else {
+                    val invalidEmail = kind == ContactValueKind.EMAIL && value.value.isNotBlank() &&
+                        !com.patmanak.contako.domain.policy.ContactValidation.isValidEmail(value.value)
                     OutlinedTextField(
                         value = value.value,
                         onValueChange = { viewModel.updateContactValue(value.id, it) },
                         label = { Text(stringResource(contactValueLabel(kind))) },
                         singleLine = kind != ContactValueKind.NOTE && kind != ContactValueKind.PUBLIC_KEY,
                         keyboardOptions = contactKeyboardOptions(kind),
-                        isError = value.id in editor.fieldErrors,
-                        supportingText = editor.fieldErrors[value.id]?.let { error -> ({ Text(uiMessage(error)) }) },
+                        isError = value.id in editor.fieldErrors || invalidEmail,
+                        supportingText = editor.fieldErrors[value.id]?.let { error -> ({ Text(uiMessage(error)) }) }
+                            ?: if (invalidEmail) ({ Text(stringResource(R.string.action_required_invalid_email)) }) else null,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -2677,6 +2696,7 @@ private fun ContactDetailValueRow(
 ) {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
+    val invalidEmail = kind == ContactValueKind.EMAIL && !com.patmanak.contako.domain.policy.ContactValidation.isValidEmail(value.value)
     val displayValue = if (kind in setOf(ContactValueKind.BIRTHDAY, ContactValueKind.ANNIVERSARY, ContactValueKind.CUSTOM_DATE)) {
         remember(value.value, locale) {
             formatContactDate(value.value, locale, android.text.format.DateFormat.getBestDateTimePattern(locale, "MMMMd"))
@@ -2702,7 +2722,7 @@ private fun ContactDetailValueRow(
     } else {
         emptyList()
     }
-    val rowModifier = if (actionable) {
+    val rowModifier = if (actionable && !invalidEmail) {
         Modifier.clickable { context.launchContactValue(kind, value.value) }
     } else {
         Modifier
@@ -2714,8 +2734,8 @@ private fun ContactDetailValueRow(
     ) {
         Icon(
             imageVector = detailIcon(kind),
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            contentDescription = if (invalidEmail) stringResource(R.string.action_required_invalid_email) else null,
+            tint = if (invalidEmail) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(28.dp),
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -2734,7 +2754,7 @@ private fun ContactDetailValueRow(
             Text(
                 displayValue,
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (actionable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                color = if (invalidEmail) MaterialTheme.colorScheme.error else if (actionable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             )
             if (kind == ContactValueKind.EMAIL && assignedGroups.isNotEmpty()) {
                 ContactGroupChips(assignedGroups)

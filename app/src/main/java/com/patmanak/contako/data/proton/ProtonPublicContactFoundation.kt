@@ -277,7 +277,7 @@ internal class ProtonPublicContactGateway(
             is ContactMutation.Update -> {
                 updateStep(ProtonContactUpdateStage.VALIDATE) {
                     if (mutation.expectedVersion != null) throw ProtonUnsupportedVersionPrecondition()
-                    require(mutation.contact.remoteContactId == mutation.id.value)
+                    if (mutation.contact.remoteContactId != mutation.id.value) throw ProtonInvalidContactMutation()
                     requireUploadable(account, mutation.contact, requiresName = false)
                 }
                 val prepared = updateStep(ProtonContactUpdateStage.ENCODE) { vCardCodec.encode(mutation.contact) }
@@ -344,15 +344,14 @@ internal class ProtonPublicContactGateway(
         contact: CanonicalContact,
         requiresName: Boolean,
     ) {
-        require(contact.accountId == account.value)
-        require(!contact.isDeleted)
+        if (contact.accountId != account.value || contact.isDeleted) throw ProtonInvalidContactMutation()
         val blockingReasons = if (requiresName) {
             contact.actionRequiredReasons
         } else {
             contact.actionRequiredReasons - "MISSING_NAME"
         }
-        require(blockingReasons.isEmpty())
-        if (requiresName) require(ContactValidation.canCreate(contact))
+        if (blockingReasons.isNotEmpty() || (requiresName && !ContactValidation.canCreate(contact)))
+            throw ProtonInvalidContactMutation()
     }
 
     private fun toInventoryMetadata(contact: Contact): ContactInventoryMetadata {
@@ -620,6 +619,7 @@ internal fun Throwable.toContactGatewayFailureOutcome(): GatewayOutcome.Failure 
         malformedResponseCategory,
         contactHydrationCategory,
         protonResponseCode,
+        ((this as? ApiException)?.error as? ApiResult.Error.Http)?.httpCode?.takeIf { it in 100..599 },
     )
 }
 
@@ -631,7 +631,9 @@ internal fun Throwable.toContactGatewayFailure(): GatewayFailureCategory = when 
     else -> when (this) {
         is ProtonAuthenticationRequired -> GatewayFailureCategory.AUTHENTICATION_REQUIRED
         is ProtonSessionIdentityMismatch -> GatewayFailureCategory.AUTHENTICATION_REQUIRED
-        is ProtonInvalidInventoryCursor, is IllegalArgumentException -> GatewayFailureCategory.VALIDATION_REJECTED
+        is ProtonInvalidInventoryCursor, is ProtonInvalidContactMutation, is ProtonContactValueValidationException -> GatewayFailureCategory.VALIDATION_REJECTED
+        is ProtonContactEncodingException -> GatewayFailureCategory.VALIDATION_REJECTED
+        is IllegalArgumentException -> GatewayFailureCategory.UNKNOWN
         is ProtonUnsupportedVersionPrecondition -> GatewayFailureCategory.CONFLICT
         is ProtonMalformedContactResponse, is ProtonInconsistentInventorySnapshot ->
             GatewayFailureCategory.MALFORMED_RESPONSE
@@ -670,6 +672,7 @@ private inline fun <reified T : Throwable> Throwable.containsCause(): Boolean {
 
 internal class ProtonAuthenticationRequired : IllegalStateException()
 internal class ProtonInvalidInventoryCursor : IllegalArgumentException()
+internal class ProtonInvalidContactMutation : IllegalArgumentException()
 internal class ProtonUnsupportedVersionPrecondition : IllegalStateException()
 internal open class ProtonMalformedContactResponse : IllegalStateException()
 internal open class ProtonContactVerificationFailure : SecurityException()

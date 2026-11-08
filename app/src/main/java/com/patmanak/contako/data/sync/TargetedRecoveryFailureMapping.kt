@@ -22,5 +22,6 @@ internal fun GatewayFailureCategory.toTargetedRecoveryFailure(): TargetedRecover
     GatewayFailureCategory.CANCELLED,
     GatewayFailureCategory.NOT_FOUND,
     GatewayFailureCategory.CLIENT_IDENTITY_REJECTED,
+    GatewayFailureCategory.RECONCILIATION_INCOMPLETE,
     GatewayFailureCategory.UNKNOWN -> TargetedRecoveryFailure.UNKNOWN
 }

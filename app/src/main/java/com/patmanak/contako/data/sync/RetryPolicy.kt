@@ -20,7 +20,7 @@ sealed interface RetryDecision {
 class MutationRetryPolicy(
     private val baseDelayMillis: Long = 5_000L,
     private val maximumDelayMillis: Long = 6 * 60 * 60 * 1_000L,
-    private val maximumAutomaticAttempts: Int = 8,
+    private val maximumAutomaticAttempts: Int = DEFAULT_MAXIMUM_AUTOMATIC_ATTEMPTS,
     private val jitterFraction: (attempt: Int) -> Double = { 0.0 },
 ) {
     init {
@@ -63,15 +63,17 @@ class MutationRetryPolicy(
         )
     }
 
-    private companion object {
-        val RETRYABLE = setOf(
+    companion object {
+        const val DEFAULT_MAXIMUM_AUTOMATIC_ATTEMPTS = 8
+        private val RETRYABLE = setOf(
+            GatewayFailureCategory.RECONCILIATION_INCOMPLETE,
             GatewayFailureCategory.NETWORK_UNAVAILABLE,
             GatewayFailureCategory.TIMEOUT,
             GatewayFailureCategory.RATE_LIMITED,
             GatewayFailureCategory.REMOTE_SERVICE_FAILURE,
             GatewayFailureCategory.UNKNOWN,
         )
-        val AMBIGUOUS_DELIVERY = setOf(
+        private val AMBIGUOUS_DELIVERY = setOf(
             GatewayFailureCategory.NETWORK_UNAVAILABLE,
             GatewayFailureCategory.TIMEOUT,
             GatewayFailureCategory.REMOTE_SERVICE_FAILURE,

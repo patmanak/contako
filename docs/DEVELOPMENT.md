@@ -128,11 +128,13 @@ replaying the full contact campaign.
 
 ## Targeted synchronization diagnostics
 
-All builds expose the local schema-3 report in Sync. Its bounded, app-private
+All builds expose the local schema-4 report in Sync. Its bounded, app-private
 journal includes UTC/process-relative times, request trigger/disposition,
 execution stages, import phases and closed failure/field categories. The rotating
-128-event history survives restarts, with a separately retained detailed failure
-that subsequent generic banners do not hide. `journal_storage` reports whether persistence is
+128-event history reserves space for failures and transitions separately from
+repetitive progress. It survives restarts, with a separately retained detailed
+failure that subsequent generic banners do not hide. Grouped current durable
+causes remain distinct from that history. `journal_storage` reports whether persistence is
 available. See [Security](SECURITY.md) for exclusions and retention bounds.
 The journal is not Android Logcat and is never uploaded automatically.
 
@@ -217,7 +219,7 @@ lower boundary may still lack a detailed category.
 
 These additional Logcat events live only in Android's bounded log buffer and
 may be evicted or lost on reboot. They do not add a separate on-disk report,
-telemetry or automatic export; the schema-3 local journal described above remains
+telemetry or automatic export; the schema-4 local report described above remains
 available in all builds. Capture only the allowlisted diagnostic fields promptly
 after an authorized
 reproduction; raw buffers MUST NOT be printed, committed or shared. A missing

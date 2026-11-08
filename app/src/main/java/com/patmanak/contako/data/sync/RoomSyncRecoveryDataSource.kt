@@ -41,6 +41,28 @@ internal class RoomSyncRecoveryDataSource(
     private val targeted = com.patmanak.contako.data.local.RoomTargetedRecoveryStore(database)
     private val contactDetails = com.patmanak.contako.data.local.RoomContactSyncDetailStore(database)
     private val deletionRecovery = com.patmanak.contako.data.local.RoomDeletionRecoveryStore(database)
+    private val retryRequests = com.patmanak.contako.data.local.RoomMutationRetryRequestStore(database)
+
+    override suspend fun requestMutationRetry(accountId: String, type: SyncBlockedItemType, id: String, expectedRevision: Long): Boolean {
+        val account = boundAccount(accountId)
+        val queued = retryRequests.queue(account, type.name, id, expectedRevision, clock())
+        if (queued) runner.request(SyncTrigger.MANUAL, SyncScope.INCREMENTAL)
+        return queued
+    }
+
+    override suspend fun ignoreImportProblem(accountId: String, remoteId: String, generation: String): Boolean {
+        val ignored = com.patmanak.contako.data.local.RoomRemoteHydrationObligationStore(database, clock).ignore(boundAccount(accountId),
+            com.patmanak.contako.data.gateway.RemoteContactId(remoteId), generation)
+        if (ignored) runner.request(SyncTrigger.MANUAL, SyncScope.INCREMENTAL)
+        return ignored
+    }
+
+    override suspend fun resumeImportProblem(accountId: String, remoteId: String, generation: String): Boolean {
+        val resumed = com.patmanak.contako.data.local.RoomRemoteHydrationObligationStore(database, clock).resume(boundAccount(accountId),
+            com.patmanak.contako.data.gateway.RemoteContactId(remoteId), generation)
+        if (resumed) runner.request(SyncTrigger.MANUAL, SyncScope.INCREMENTAL)
+        return resumed
+    }
 
     override fun observeDeletionRecoveries(accountId: String) = deletionRecovery.observe(boundAccount(accountId).value)
     override suspend fun loadDeletionRecovery(accountId: String, contactId: String) =
@@ -91,6 +113,8 @@ internal class RoomSyncRecoveryDataSource(
             hydrationDao.observe(boundAccount(accountId).value),
             database.androidContactIssueDao().observeCurrentWithContacts(boundAccount(accountId).value),
         ) { status, pendingIds, blockedIds, importFailures, androidFailures ->
+            val activeImports = importFailures.filterNot { it.ignoredBaselineVersion != null && it.ignoredBaselineVersion == it.baselineVersion }
+            val blockingImports = activeImports.filterNot { it.isTransient }
             val storedSnapshot = status?.toDomain() ?: SyncDashboardSnapshot(SyncDashboardState.CURRENT)
             // Only an explicitly attributed status may be rebuilt from current item sources.
             // Legacy/unscoped account failures remain intact; zero item counters are not proof
@@ -109,28 +133,30 @@ internal class RoomSyncRecoveryDataSource(
             val localProblem = when {
                 projectionFailures.isNotEmpty() -> SyncProblem.ANDROID_CONTACTS_PARTIALLY_PROJECTED
                 issues.isNotEmpty() -> SyncProblem.ANDROID_INTEROPERABILITY_DEGRADED
-                importFailures.any { it.category == "CRYPTOGRAPHIC_VERIFICATION_FAILED" } -> SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED
-                importFailures.isNotEmpty() -> SyncProblem.INTERNAL_FAILURE
+                blockingImports.any { it.category == "CRYPTOGRAPHIC_VERIFICATION_FAILED" } -> SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED
+                blockingImports.isNotEmpty() -> SyncProblem.INTERNAL_FAILURE
                 else -> null
             }
             snapshot.copy(
                 // A completed older pass cannot qualify a newly outstanding native copy.
-                state = if (importFailures.isNotEmpty() && snapshot.state != SyncDashboardState.AUTHENTICATION_REQUIRED)
+                state = if (blockingImports.isNotEmpty() && snapshot.state != SyncDashboardState.AUTHENTICATION_REQUIRED)
                     SyncDashboardState.BLOCKED
                     else if (issues.isNotEmpty() && snapshot.state in setOf(SyncDashboardState.CURRENT, SyncDashboardState.PENDING))
                         if (projectionFailures.isEmpty()) SyncDashboardState.ANDROID_DEGRADED else SyncDashboardState.ANDROID_PARTIAL
-                    else if (snapshot.state == SyncDashboardState.CURRENT && pendingIds.isNotEmpty())
+                    else if (snapshot.state == SyncDashboardState.CURRENT && (pendingIds.isNotEmpty() || activeImports.isNotEmpty()))
                     SyncDashboardState.PENDING else snapshot.state,
                 problem = snapshot.problem ?: localProblem,
                 actionRequiredCount = maxOf(snapshot.actionRequiredCount,
-                    (blockedIds + issues.map { it.contactId }).toSet().size + importFailures.size),
+                    (blockedIds + issues.map { it.contactId }).toSet().size + blockingImports.size),
                 importProblems = importFailures.map {
                     com.patmanak.contako.domain.sync.SyncImportProblem(it.remoteContactId, it.displayName,
                         when (it.category) {
                             "CRYPTOGRAPHIC_VERIFICATION_FAILED" -> SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED
                             "VALIDATION_REJECTED" -> SyncProblem.VALIDATION_REJECTED
                             else -> SyncProblem.INTERNAL_FAILURE
-                        })
+                        }, it.generation, it.isTransient,
+                        it.ignoredBaselineVersion != null && it.ignoredBaselineVersion == it.baselineVersion,
+                        it.nextAttemptAtEpochMillis)
                 },
                 androidPendingContactIds = (pendingIds + projectionFailures).toSet(),
                 blockedMutationContactIds = blockedIds.toSet(), androidContactIssues = issues,
@@ -175,7 +201,11 @@ internal class RoomSyncRecoveryDataSource(
                 problem = if (snapshot.state == SyncDashboardState.AUTHENTICATION_REQUIRED) snapshot.problem
                     else blockedProblem ?: snapshot.problem,
                 actionRequiredCount = maxOf(snapshot.actionRequiredCount,
-                    identities.toSet().size + snapshot.importProblems.size))
+                    identities.toSet().size + snapshot.importProblems.count { !it.isTransient && !it.ignored }))
+        }.combine(database.mutationRetryRequestDao().observe(boundAccount(accountId).value)) { snapshot, _ ->
+            snapshot.copy(blockedItems = snapshot.blockedItems.map { item ->
+                item.copy(retry = retryRequests.availability(boundAccount(accountId), item.type.name, item.id))
+            })
         }.combine(database.contactInventoryCheckpointDao().observeInitialImportProgress(boundAccount(accountId).value)) { snapshot, counts ->
             val progress = InitialImportSnapshot(counts.inventoryEstablished, counts.localContactCount,
                 counts.inventoryContactCount, counts.deferredContactCount, counts.androidPendingContactCount,
@@ -190,6 +220,14 @@ internal class RoomSyncRecoveryDataSource(
         }.combine(outboxDao.observePendingCount(boundAccount(accountId).value)) { snapshot, pending ->
             snapshot.copy(pendingMutationCount = pending,
                 state = if (pending > 0 && snapshot.state == SyncDashboardState.CURRENT) SyncDashboardState.PENDING else snapshot.state)
+        }.combine(database.contactEmailUploadOverlayDao().observeContactIds(boundAccount(accountId).value)) { snapshot, partialIds ->
+            snapshot.copy(partialContactIds = partialIds.toSet(),
+                state = if (partialIds.isNotEmpty() && snapshot.state == SyncDashboardState.CURRENT) SyncDashboardState.PENDING else snapshot.state,
+                actionRequiredCount = maxOf(snapshot.actionRequiredCount,
+                    (snapshot.blockedItems.filter { it.type == SyncBlockedItemType.CONTACT }.map { it.id } +
+                        snapshot.androidContactIssues.map { it.contactId } + partialIds).toSet().size +
+                        snapshot.blockedItems.count { it.type == SyncBlockedItemType.GROUP } +
+                        snapshot.importProblems.count { !it.isTransient && !it.ignored }))
         }
 
     override fun observeRepair(accountId: String): Flow<RepairProgress?> =

@@ -32,9 +32,10 @@ class SyncDiagnosticJournalTest {
         journal.record(SanitizedDiagnosticEvent.SyncStage(SyncPassStage.COMPLETE))
         repeat(400) { journal.record(SanitizedDiagnosticEvent.ImportPhase(RemoteImportPhase.CARD_READ_DONE)) }
         val snapshot = journal.snapshot(JournalStorage.AVAILABLE)
-        assertEquals(128, snapshot.events.size)
+        assertTrue(snapshot.events.size <= 128)
+        assertEquals(16, snapshot.events.count { it.encoded.endsWith("import:CARD_READ_DONE") })
         assertEquals(failure, snapshot.lastFailure)
-        assertFalse(snapshot.events.contains(failure))
+        assertTrue(snapshot.events.contains(failure))
         assertTrue(LocalDiagnosticSafetyScanner.isSafeReport(report(snapshot)))
         assertTrue(report(snapshot).contains("sync_problem=INTERNAL_FAILURE"))
     }

@@ -5,12 +5,12 @@ enum class SyncIssueScope { ACCOUNT, CONTACT, GROUP, PROTON_IMPORT, ANDROID_COPY
 
 enum class SyncIssueCause {
     AUTHENTICATION, NETWORK, CONFLICT, VALIDATION, CRYPTOGRAPHY,
-    GROUP_CAPABILITY, REMOTE_PERMISSION, ANDROID, UNKNOWN,
+    GROUP_CAPABILITY, REMOTE_PERMISSION, ANDROID, VERIFICATION, UNKNOWN,
 }
 
 enum class SyncIssueAction {
     CONTACTS_PERMISSION, SIGN_IN, RETRY_SYNC, COMPARE_VERSIONS, REVIEW_ITEM, VIEW_DIAGNOSTICS, WAIT,
-    PREVIEW_TARGETED_RECOVERY,
+    PREVIEW_TARGETED_RECOVERY, RETRY_ITEM,
 }
 
 /** Only field families established by canonical validation, never inferred from a remote refusal. */
@@ -46,6 +46,7 @@ object SyncIssuePresentationPolicy {
         conflictChoiceQueued: Boolean = false,
         canTarget: Boolean = false,
         knownValidationIssues: Set<SyncValidationIssue> = emptySet(),
+        retryReason: SyncMutationRetryReason? = null,
     ): SyncIssueAdvice {
         fun advice(cause: SyncIssueCause, action: SyncIssueAction) = SyncIssueAdvice(cause, scope,
             if (action == SyncIssueAction.VIEW_DIAGNOSTICS && canTarget &&
@@ -64,6 +65,10 @@ object SyncIssuePresentationPolicy {
             problem == SyncProblem.AUTHENTICATION_REQUIRED ||
             problem == SyncProblem.INTERACTIVE_AUTHENTICATION_REQUIRED) {
             return advice(SyncIssueCause.AUTHENTICATION, SyncIssueAction.SIGN_IN)
+        }
+        if (retryReason != null && scope in setOf(SyncIssueScope.CONTACT, SyncIssueScope.GROUP)) {
+            return advice(if (retryReason == SyncMutationRetryReason.NETWORK) SyncIssueCause.NETWORK else SyncIssueCause.VERIFICATION,
+                SyncIssueAction.RETRY_ITEM)
         }
         return when (problem) {
             SyncProblem.AUTHENTICATION_REQUIRED, SyncProblem.INTERACTIVE_AUTHENTICATION_REQUIRED ->

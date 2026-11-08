@@ -9,6 +9,46 @@ import org.junit.Test
 class SyncIssueItemsTest {
     private val contact = CanonicalContact("synthetic-owner", "one", displayName = "Chloë Groß")
 
+    @Test fun exhaustedTransientWritesOfferOneItemRetryEvenForDeletedContactsAndGroups() {
+        for (type in SyncBlockedItemType.entries) {
+            val retry = SyncMutationRetry(8, SyncMutationRetryReason.NETWORK, 12345)
+            val blocked = SyncBlockedItem("retained", type, "Synthetic pending deletion", true, SyncProblem.INTERNAL_FAILURE, retry)
+            val state = ContactsUiState(syncDashboard = SyncDashboardSnapshot(SyncDashboardState.BLOCKED, blockedItems = listOf(blocked)))
+            val issue = currentSyncIssues(state, emptyList()).single()
+            assertEquals(SyncIssueCause.NETWORK, issue.advice.cause)
+            assertEquals(SyncIssueAction.RETRY_ITEM, issue.advice.action)
+            assertEquals(retry, issue.retry)
+            assertFalse(issue.canReview)
+            assertTrue(issue.isDeleted)
+        }
+    }
+
+    @Test fun incompleteVerificationOffersRecheckRatherThanClaimingANetworkFailureOrShowingAFakeConflictChoice() {
+        val retry = SyncMutationRetry(8, SyncMutationRetryReason.VERIFICATION)
+        val state = ContactsUiState(actionContacts = listOf(contact), syncDashboard = SyncDashboardSnapshot(SyncDashboardState.BLOCKED,
+            blockedItems = listOf(SyncBlockedItem(contact.id, SyncBlockedItemType.CONTACT, contact.displayName, false,
+                SyncProblem.INTERNAL_FAILURE, retry))))
+        val conflict = ContactConflictSummary(contact.id, "generation", 8, "version", null)
+        val issue = currentSyncIssues(state, listOf(conflict)).single()
+        assertEquals(SyncIssueCause.VERIFICATION, issue.advice.cause)
+        assertEquals(SyncIssueAction.RETRY_ITEM, issue.advice.action)
+        assertEquals(listOf(R.string.sync_retry_verification), syncIssueBodyResources(issue.advice))
+    }
+
+    @Test fun transientAndIgnoredImportsAreNotAttentionItemsButBlockedSignatureKeepsItsExactGeneration() {
+        val snapshot = SyncDashboardSnapshot(SyncDashboardState.PENDING, importProblems = listOf(
+            SyncImportProblem("waiting", null, SyncProblem.INTERNAL_FAILURE, "waiting-generation", isTransient = true),
+            SyncImportProblem("ignored", null, SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED, "ignored-generation", ignored = true),
+        ))
+        assertTrue(currentSyncIssues(ContactsUiState(syncDashboard = snapshot), emptyList()).isEmpty())
+        val signature = SyncImportProblem("signature", null, SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED, "exact-generation")
+        val issue = currentSyncIssues(ContactsUiState(syncDashboard = snapshot.copy(state = SyncDashboardState.BLOCKED,
+            importProblems = snapshot.importProblems + signature)), emptyList()).single()
+        assertEquals("exact-generation", issue.importGeneration)
+        assertEquals(SyncIssueCause.CRYPTOGRAPHY, issue.advice.cause)
+        assertFalse(issue.advice.localIntentSaved)
+    }
+
     @Test fun knownLocalValidationFamiliesSurviveBothDirectAndBlockedIssueAggregation() {
         val expected = mapOf(
             setOf("MISSING_NAME") to listOf(R.string.actions_missing_name_body),

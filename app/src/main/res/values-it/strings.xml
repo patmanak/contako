@@ -518,4 +518,11 @@
     <string name="directory_loading">Caricamento dei contatti</string>
     <string name="directory_read_failed">Impossibile leggere i contatti su questo dispositivo.</string>
     <string name="directory_retry_read">Riprova la lettura locale</string>
+    <string name="sync_item_retry">Riprova</string>
+    <string name="sync_item_retry_needed">Queste modifiche richiedono un altro tentativo.</string>
+    <string name="sync_retry_verification">La verifica remota è incompleta.</string>
+    <string name="sync_import_ignore">Ignora fino alla modifica</string>
+    <string name="sync_import_waiting">Alcuni contatti Proton attendono un nuovo tentativo.</string>
+    <string name="sync_email_partial_title">Sincronizzato parzialmente</string>
+    <string name="sync_email_partial_body">Alcuni indirizzi e-mail richiedono una verifica.</string>
 </resources>

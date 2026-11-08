@@ -13,6 +13,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ContactContentChangeEntity::class,
         ContactSyncEvidenceEntity::class,
         RemoteHydrationObligationEntity::class,
+        RemoteGroupDependencyBaselineEntity::class,
+        RemoteGroupDependencyEdgeEntity::class,
+        MutationRetryRequestEntity::class,
+        ContactEmailUploadOverlayEntity::class,
+        RemoteRequestBackoffEntity::class,
         TargetedRecoveryRequestEntity::class,
         ContactConflictEntity::class,
         ContactConflictChunk::class,
@@ -48,7 +53,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AndroidPhotoProjectionReceiptEntity::class,
         AndroidContactIssueEntity::class,
     ],
-    version = 26,
+    version = 27,
     exportSchema = true,
 )
 internal abstract class ContakoDatabase : RoomDatabase() {
@@ -56,6 +61,10 @@ internal abstract class ContakoDatabase : RoomDatabase() {
     abstract fun contactContentChangesDao(): ContactContentChangesDao
     abstract fun contactSyncEvidenceDao(): ContactSyncEvidenceDao
     abstract fun remoteHydrationObligationDao(): RemoteHydrationObligationDao
+    abstract fun remoteGroupAssignmentDependencyDao(): RemoteGroupAssignmentDependencyDao
+    abstract fun mutationRetryRequestDao(): MutationRetryRequestDao
+    abstract fun contactEmailUploadOverlayDao(): ContactEmailUploadOverlayDao
+    abstract fun remoteRequestBackoffDao(): RemoteRequestBackoffDao
     abstract fun targetedRecoveryRequestDao(): TargetedRecoveryRequestDao
     abstract fun contactConflictDao(): ContactConflictDao
     abstract fun deletionRecoveryDao(): DeletionRecoveryDao
@@ -103,8 +112,39 @@ internal abstract class ContakoDatabase : RoomDatabase() {
                     MIGRATION_23_24,
                     MIGRATION_24_25,
                     MIGRATION_25_26,
+                    MIGRATION_26_27,
                 )
                 .build()
+
+        val MIGRATION_26_27: Migration = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS remote_request_backoffs (
+                    account_id TEXT NOT NULL, next_attempt_at_epoch_millis INTEGER NOT NULL,
+                    PRIMARY KEY(account_id))""")
+                db.execSQL("ALTER TABLE remote_hydration_obligations ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE remote_hydration_obligations ADD COLUMN next_attempt_at_epoch_millis INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE remote_hydration_obligations ADD COLUMN retry_after_millis INTEGER")
+                db.execSQL("ALTER TABLE remote_hydration_obligations ADD COLUMN is_transient INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE remote_hydration_obligations ADD COLUMN ignored_baseline_version TEXT")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS remote_group_dependency_baselines (
+                    account_id TEXT NOT NULL, group_id TEXT NOT NULL, remote_label_id TEXT,
+                    complete INTEGER NOT NULL, PRIMARY KEY(account_id, group_id))""")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS remote_group_dependency_edges (
+                    account_id TEXT NOT NULL, group_id TEXT NOT NULL, contact_id TEXT NOT NULL,
+                    email_value_id TEXT NOT NULL, remote_email_id TEXT NOT NULL, captured_revision INTEGER NOT NULL,
+                    PRIMARY KEY(account_id, group_id, contact_id, email_value_id, remote_email_id))""")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS mutation_retry_requests (
+                    account_id TEXT NOT NULL, aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL, requested_at_epoch_millis INTEGER NOT NULL,
+                    next_request_at_epoch_millis INTEGER NOT NULL, consumed_at_epoch_millis INTEGER,
+                    PRIMARY KEY(account_id, aggregate_type, aggregate_id))""")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS contact_email_upload_overlays (
+                    account_id TEXT NOT NULL, contact_id TEXT NOT NULL, value_id TEXT NOT NULL,
+                    local_value BLOB NOT NULL, accepted_value BLOB, source_email_id TEXT,
+                    canonical_revision INTEGER NOT NULL, requires_remote_identity INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(account_id, contact_id, value_id))""")
+            }
+        }
 
         val MIGRATION_25_26: Migration = object : Migration(25, 26) {
             override fun migrate(db: SupportSQLiteDatabase) {

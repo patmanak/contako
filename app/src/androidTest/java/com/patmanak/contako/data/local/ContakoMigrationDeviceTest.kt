@@ -24,6 +24,32 @@ class ContakoMigrationDeviceTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
 
+    @Test fun deferredImportAndPartialIntentMigrationPreservesLegacyDataWithoutInventingProof() {
+        val name = "migration-deferred-and-partial-intents.db"
+        context.deleteDatabase(name)
+        val before = migrations.createDatabase(name, 26).use { old ->
+            MigrationFixture.seed(old)
+            old.execSQL("""INSERT INTO remote_hydration_obligations
+                (account_id,remote_contact_id,display_name,category,hydration_category,generation,baseline_version)
+                VALUES ('synthetic-account','rejected','Synthetic','CRYPTOGRAPHIC_VERIFICATION_FAILED',
+                    'SIGNATURE_VERIFICATION','existing-generation','public-version')""")
+            MigrationFixture.snapshot(old)
+        }
+        try {
+            migrations.runMigrationsAndValidate(name, 27, true, ContakoDatabase.MIGRATION_26_27).use { db ->
+                assertEquals(before, MigrationFixture.snapshot(db))
+                assertEquals("existing-generation", db.scalar("SELECT generation FROM remote_hydration_obligations"))
+                assertEquals("0", db.scalar("SELECT attempt_count FROM remote_hydration_obligations"))
+                assertEquals("0", db.scalar("SELECT is_transient FROM remote_hydration_obligations"))
+                listOf("remote_group_dependency_baselines", "remote_group_dependency_edges",
+                    "mutation_retry_requests", "contact_email_upload_overlays", "remote_request_backoffs").forEach { table ->
+                    assertEquals("0", db.scalar("SELECT COUNT(*) FROM $table"))
+                }
+                db.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
+            }
+        } finally { context.deleteDatabase(name) }
+    }
+
     @Test fun contentChangesMigrationPreservesFieldsAndDoesNotInventHistoricalChanges() {
         val name = "migration-contact-content-changes.db"
         context.deleteDatabase(name)
@@ -289,7 +315,7 @@ class ContakoMigrationDeviceTest {
     private class SimulatedMigrationProcessDeath : RuntimeException()
 
     private companion object {
-        const val CURRENT_VERSION = 26
+        const val CURRENT_VERSION = 27
         val ALL_MIGRATIONS = arrayOf(
             ContakoDatabase.MIGRATION_1_2,
             ContakoDatabase.MIGRATION_2_3,
@@ -316,6 +342,7 @@ class ContakoMigrationDeviceTest {
             ContakoDatabase.MIGRATION_23_24,
             ContakoDatabase.MIGRATION_24_25,
             ContakoDatabase.MIGRATION_25_26,
+            ContakoDatabase.MIGRATION_26_27,
         )
     }
 }

@@ -11,11 +11,11 @@ import org.junit.Test
 
 class ContactPoliciesTest {
     @Test
-    fun createValidation_acceptsAnyNameButNotEmailOnly() {
+    fun createValidationAcceptsNamesAndMeaningfulDisplayFallbackWithoutInventingStructuredNames() {
         assertTrue(ContactValidation.canCreate(contact(firstName = "Ada")))
         assertTrue(ContactValidation.canCreate(contact(lastName = "Lovelace")))
         assertTrue(ContactValidation.canCreate(contact(displayName = "Ada L.")))
-        assertFalse(
+        assertTrue(
             ContactValidation.canCreate(
                 contact(values = listOf(value(ContactValueKind.EMAIL, "ada@example.test"))),
             ),

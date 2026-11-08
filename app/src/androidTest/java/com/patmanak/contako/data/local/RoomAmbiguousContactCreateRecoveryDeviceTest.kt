@@ -36,6 +36,7 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
     private var inventoryVersion = 1
     private var authority = ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY
     private var cardFailure: GatewayFailureCategory? = null
+    private var failInventoryOn = 0
     private var afterCardRead: suspend () -> Unit = {}
 
     @Before fun setUp() {
@@ -97,7 +98,7 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
             recovery().prepare(command()))
         assertEquals(before, intent())
         assertEquals(initial, contact())
-        assertEquals(2, cardReads)
+        assertEquals(3, cardReads)
         assertEquals(2, inventoryReads)
     }
 
@@ -144,7 +145,8 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
         cardFailure = GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED
         val before = intent()
         val result = recovery().prepare(command()) as GatewayOutcome.Failure
-        assertEquals(cardFailure, result.category)
+        assertEquals(GatewayFailureCategory.RECONCILIATION_INCOMPLETE, result.category)
+        assertEquals(cardFailure, result.recoveryBlockerCategory)
         assertEquals(before, intent())
         assertEquals(1, inventoryReads)
     }
@@ -241,7 +243,7 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
     @Test fun cardWithoutVerifiedVersionCannotAuthorizeReplay() = runBlocking {
         seed()
         remote = listOf(card("other", "other").copy(version = null))
-        assertEquals(GatewayFailureCategory.MALFORMED_RESPONSE,
+        assertEquals(GatewayFailureCategory.RECONCILIATION_INCOMPLETE,
             (recovery().prepare(command()) as GatewayOutcome.Failure).category)
         assertTrue(intent().requiresReconciliation)
     }
@@ -270,10 +272,149 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
         assertEquals(before, intent())
     }
 
-    private fun recovery() = RoomAmbiguousContactCreateRecovery(ACCOUNT, database,
+    @Test fun rateLimitDuringCreateOrDeleteRecoveryNeverDropsEarlierDeliveryAmbiguity() = runBlocking {
+        for (deleted in listOf(false, true)) for (boundary in listOf("first-index", "card", "second-index")) {
+            database.clearAllTables()
+            seed(deleted)
+            inventoryReads = 0; cardReads = 0
+            remote = listOf(card("delivered", UID))
+            failInventoryOn = when (boundary) { "first-index" -> 1; "second-index" -> 2; else -> 0 }
+            cardFailure = if (boundary == "card") GatewayFailureCategory.RATE_LIMITED else null
+            var uploads = 0
+            fun runner(): DurableMutationOrchestrator {
+                val helper = recovery()
+                val preparation = com.patmanak.contako.data.sync.RoomBackedMutationPreparationGateway(
+                    ACCOUNT, database,
+                    com.patmanak.contako.data.proton.ProtonEmailGroupMembershipReader { _, _ ->
+                        error("No group read belongs to this contact recovery")
+                    }, createRecovery = helper,
+                )
+                return DurableMutationOrchestrator(RoomMutationExecutionStore(database), preparation,
+                    MutationUploadGateway { uploads++; error("No blind POST or DELETE is allowed") })
+            }
+            assertEquals(1, runner().drain(ACCOUNT.value, 1_000).retryWaiting)
+            assertTrue("$deleted/$boundary", intent().requiresReconciliation)
+            assertEquals(0, uploads)
+            val next = intent().nextAttemptAtEpochMillis
+            assertTrue(next > 1_000)
+            database.close(); database = ContakoDatabase.create(context, DATABASE)
+            runner().drain(ACCOUNT.value, next - 1)
+            assertTrue(intent().requiresReconciliation)
+            failInventoryOn = 0; cardFailure = null
+            runner().drain(ACCOUNT.value, next)
+            assertEquals(0, uploads)
+            assertEquals("delivered", contact().remoteContactId)
+            assertEquals(deleted, contact().isDeleted)
+            assertNotNull(contact().pendingMutationRevision)
+        }
+    }
+
+    @Test fun rateLimitOnRecoveryInventoryPreservesServerDeadline() = runBlocking {
+        seed(); failInventoryOn = 1
+        val helper = recovery()
+        val runner = DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+            MutationPreparationGateway { helper.prepare(it) }, MutationUploadGateway { error("Unexpected upload") })
+        runner.drain(ACCOUNT.value, 1_000)
+        assertEquals(91_000L, intent().nextAttemptAtEpochMillis)
+        assertTrue(intent().requiresReconciliation)
+        runner.drain(ACCOUNT.value, 90_999)
+        assertEquals(1, inventoryReads)
+    }
+
+    @Test fun provedAbsenceThenRefusedPostDoesNotRestoreTheCapturedCommandsOldAmbiguity() = runBlocking {
+        seed()
+        val helper = recovery()
+        val runner = DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+            MutationPreparationGateway { helper.prepare(it) }, MutationUploadGateway {
+                GatewayOutcome.Failure(GatewayFailureCategory.RATE_LIMITED, retryAfterMillis = 90_000)
+            })
+        assertEquals(1, runner.drain(ACCOUNT.value, 1_000).retryWaiting)
+        assertFalse(intent().requiresReconciliation)
+        assertEquals(91_000L, intent().nextAttemptAtEpochMillis)
+        assertNotNull(contact().pendingMutationRevision)
+    }
+
+    @Test fun sameDeliveredCreateConvergesWithoutConflictOrAnotherPost() = runBlocking {
+        val local = seed()
+        remote = listOf(VerifiedContactCard(RemoteContactId("delivered"), RemoteVersion("full-delivered"),
+            local.copy(id = "remote-local", remoteContactId = "delivered", remoteVCardUid = UID,
+                pendingMutationRevision = null, preservationEnvelope = payload())))
+        assertSame(MutationPreparation.ResolvedWithoutUpload, success(recovery().prepare(command())))
+        assertEquals("delivered", contact().remoteContactId)
+        assertNull(contact().pendingMutationRevision)
+        assertNull(contact().conflictState)
+        assertNull(database.outboxDao().get(ACCOUNT.value, AggregateType.CONTACT.name, LOCAL_ID))
+    }
+
+    @Test fun sameDeliveredCreateAlreadyCapturedDuringInventoryCanBeRecheckedWithoutAFalseConflict() = runBlocking {
+        val local = seed()
+        val delivered = VerifiedContactCard(RemoteContactId("delivered"), RemoteVersion("full-delivered"),
+            local.copy(id = "remote-local", remoteContactId = "delivered", remoteVCardUid = UID,
+                pendingMutationRevision = null, preservationEnvelope = payload()))
+        remote = listOf(delivered)
+        // The normal import can find the UID before recovery's unique account scan.
+        RoomRemoteCanonicalReconciliationStore(database).reconcileTargetedVerified(ACCOUNT, delivered)
+        assertNotNull(contact().conflictState)
+        var uploads = 0
+        val helper = recovery()
+        val runner = DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+            com.patmanak.contako.data.sync.RoomBackedMutationPreparationGateway(ACCOUNT, database,
+                com.patmanak.contako.data.proton.ProtonEmailGroupMembershipReader { _, _ -> error("No group read") },
+                createRecovery = helper), MutationUploadGateway { uploads++; error("No duplicate POST") })
+        runner.drain(ACCOUNT.value, 1_000)
+        assertEquals(0, uploads)
+        assertNull(contact().pendingMutationRevision)
+        assertNull(contact().conflictState)
+        assertEquals("delivered", contact().remoteContactId)
+    }
+
+    @Test fun severalAbsentCreatesUseOneScanPerPassWithoutCachingAbsenceOrSpendingWaitingAttempts() = runBlocking {
+        val local = seed()
+        val first = intent()
+        for (i in 1..3) {
+            val other = local.copy(id = "$LOCAL_ID-$i", remoteVCardUid = "$UID-$i", preservationEnvelope = payload())
+            database.contactDao().upsert(other.toEntity())
+            database.contactDao().upsertValues(other.values.map { it.toEntity(other) })
+            other.preservationEnvelope?.let { database.contactPayloadDao().upsert(it.toEntity(ACCOUNT.value, other.id)) }
+            database.outboxDao().upsert(first.copy(aggregateId = other.id,
+                idempotencyKey = "intent-$i", state = DurableMutationState.PENDING.name))
+        }
+        remote = (1..4).map { card("unrelated-$it", "other-uid-$it") }
+        var uploads = 0
+        var scanAvailable = true
+        val helper = recovery { scanAvailable.also { scanAvailable = false } }
+        val runner = DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+            com.patmanak.contako.data.sync.RoomBackedMutationPreparationGateway(ACCOUNT, database,
+                com.patmanak.contako.data.proton.ProtonEmailGroupMembershipReader { _, _ -> error("No group read") },
+                createRecovery = helper), MutationUploadGateway { mutation ->
+                    uploads++
+                    remote = remote + card("remote-${mutation.aggregateId}",
+                        requireNotNull(database.contactDao().getEntity(ACCOUNT.value, mutation.aggregateId)).remoteVCardUid!!)
+                    GatewayOutcome.Success(RemoteMutationAcknowledgement("remote-${mutation.aggregateId}", "version-$uploads"))
+                })
+        repeat(4) { pass ->
+            scanAvailable = true
+            val reads = cardReads
+            val inventorySize = remote.size
+            runner.drain(ACCOUNT.value, 1_000 + pass.toLong())
+            assertEquals(pass + 1, uploads)
+            assertEquals(inventorySize, cardReads - reads)
+            database.outboxDao().getAll(ACCOUNT.value).forEach {
+                assertTrue(it.requiresReconciliation)
+                assertEquals(1, it.attemptCount)
+            }
+        }
+        assertEquals(4, uploads)
+        assertEquals(8, inventoryReads)
+        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+    }
+
+    private fun recovery(permit: () -> Boolean = { true }) = RoomAmbiguousContactCreateRecovery(ACCOUNT, database,
         ProtonContactInventoryGateway { _, cursor ->
             assertNull(cursor)
             inventoryReads++
+            if (inventoryReads == failInventoryOn) return@ProtonContactInventoryGateway GatewayOutcome.Failure(
+                GatewayFailureCategory.RATE_LIMITED, retryAfterMillis = 90_000)
             GatewayOutcome.Success(ContactInventoryPage(remote.map { card -> ContactInventoryMetadata(
                 card.id, null, RemoteVersion("public-${card.id.value}-$inventoryVersion"), null, null,
                 emptyList(), emptyList(), ContactInventoryVersionProvenance.LOCAL_INDEX_FINGERPRINT,
@@ -282,13 +423,14 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
         }, ProtonVerifiedContactCardGateway { _, id ->
             cardReads++
             val failure = cardFailure
-            if (failure != null) GatewayOutcome.Failure(failure)
+            if (failure != null) GatewayOutcome.Failure(failure,
+                retryAfterMillis = if (failure == GatewayFailureCategory.RATE_LIMITED) 90_000 else null)
             else {
                 val card = remote.single { it.id == id }
                 afterCardRead()
                 GatewayOutcome.Success(card)
             }
-        })
+        }, scanPermit = permit)
 
     private suspend fun seed(deleted: Boolean = false): CanonicalContact {
         val contact = CanonicalContact(ACCOUNT.value, LOCAL_ID, displayName = "Newer local name",

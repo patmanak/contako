@@ -57,7 +57,12 @@ internal fun ContactSyncDetailDialog(panel: ContactSyncPanelState, state: Contac
                     Text(stringResource(R.string.contact_sync_local_version, detail.localRevision))
                     if (detail.localOnlyFieldCount > 0) Text(stringResource(R.string.contact_sync_local_only, detail.localOnlyFieldCount))
                     HorizontalDivider()
-                    ContactPeerEvidenceSection(R.string.contact_sync_proton, detail.proton, detail.localRevision)
+                    if (detail.contactId in state.syncDashboard.partialContactIds &&
+                        detail.proton.state !in setOf(ContactPeerSyncState.CONFLICT, ContactPeerSyncState.PENDING)) {
+                        Text(stringResource(R.string.contact_sync_proton), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.sync_email_partial_title))
+                        Text(stringResource(R.string.sync_email_partial_body))
+                    } else ContactPeerEvidenceSection(R.string.contact_sync_proton, detail.proton, detail.localRevision)
                     Text(stringResource(R.string.contact_sync_proton_scope), style = MaterialTheme.typography.bodySmall)
                     if (detail.groupChangesPending) Text(stringResource(R.string.contact_sync_groups_pending))
                     HorizontalDivider()

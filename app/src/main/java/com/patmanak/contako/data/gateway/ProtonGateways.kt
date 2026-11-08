@@ -44,6 +44,7 @@ enum class GatewayFailureCategory {
     PERMISSION_OR_PLAN_DENIED,
     RATE_LIMITED,
     LOCAL_REQUEST_BUDGET_EXHAUSTED,
+    RECONCILIATION_INCOMPLETE,
     NETWORK_UNAVAILABLE,
     TIMEOUT,
     CANCELLED,
@@ -128,10 +129,15 @@ sealed interface GatewayOutcome<out T> {
         val malformedResponseCategory: GatewayMalformedResponseCategory? = null,
         val contactHydrationCategory: GatewayContactHydrationCategory? = null,
         val protonResponseCode: Int? = null,
+        val httpStatusCode: Int? = null,
+        val recoveryBlockerCategory: GatewayFailureCategory? = null,
     ) : GatewayOutcome<Nothing> {
         init {
             require(retryAfterMillis == null || retryAfterMillis >= 0)
-            require(malformedResponseCategory == null || category == GatewayFailureCategory.MALFORMED_RESPONSE)
+            require(httpStatusCode == null || httpStatusCode in 100..599)
+            require(malformedResponseCategory == null || category in setOf(
+                GatewayFailureCategory.MALFORMED_RESPONSE, GatewayFailureCategory.RECONCILIATION_INCOMPLETE))
+            require(recoveryBlockerCategory == null || category == GatewayFailureCategory.RECONCILIATION_INCOMPLETE)
             require(
                 protonResponseCode == null ||
                     protonResponseCode in SAFE_PROTON_RESPONSE_CODE_RANGE,
@@ -139,7 +145,8 @@ sealed interface GatewayOutcome<out T> {
             require(
                 contactHydrationCategory == null ||
                     category == GatewayFailureCategory.MALFORMED_RESPONSE ||
-                    category == GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED,
+                    category == GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED ||
+                    category == GatewayFailureCategory.RECONCILIATION_INCOMPLETE,
             )
         }
 
@@ -148,6 +155,7 @@ sealed interface GatewayOutcome<out T> {
             malformedResponseCategory?.let { append(", malformedResponseCategory=$it") }
             contactHydrationCategory?.let { append(", contactHydrationCategory=$it") }
             protonResponseCode?.let { append(", protonResponseCode=$it") }
+            httpStatusCode?.let { append(", httpStatusCode=$it") }
             append(')')
         }
 

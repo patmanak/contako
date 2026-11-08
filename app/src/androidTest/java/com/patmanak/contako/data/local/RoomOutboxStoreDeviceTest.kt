@@ -197,7 +197,7 @@ class RoomOutboxStoreDeviceTest {
         val otherAccountAssignment = pendingGroup(contact.copy(accountId = "other-account"),
             "other-assignment", 2, MutationOperation.ASSIGNMENTS)
 
-        assertEquals(listOf(independent, contact), store.eligible(ACCOUNT, wallClock, 100))
+        assertEquals(listOf(contact, independent), store.eligible(ACCOUNT, wallClock, 100))
         assertEquals(listOf(otherAccountAssignment), store.eligible("other-account", wallClock, 100))
         assertTrue(store.eligible("unknown-account", wallClock, 100).isEmpty())
         assertEquals(listOf(assignment, independent, contact), database.outboxDao().getAll(ACCOUNT))
@@ -395,6 +395,14 @@ class RoomOutboxStoreDeviceTest {
             remoteLabelId = "remote-$id", remoteVersion = "group-version",
             pendingMutationRevision = template.revision, conflictState = null, isDeleted = false,
         ))
+        if (operation == MutationOperation.ASSIGNMENTS) {
+            // This scheduling fixture has a proved historical dependency; legacy catalogs
+            // without such evidence remain eligible for a verified membership probe.
+            database.remoteGroupAssignmentDependencyDao().upsertBaseline(
+                RemoteGroupDependencyBaselineEntity(template.accountId, id, "remote-$id", true))
+            database.remoteGroupAssignmentDependencyDao().upsertEdges(listOf(RemoteGroupDependencyEdgeEntity(
+                template.accountId, id, template.aggregateId, "historical-email", "historical-remote-email", template.revision)))
+        }
         val row = template.copy(aggregateType = AggregateType.GROUP.name, aggregateId = id,
             operation = operation.name, createdAtEpochMillis = wallClock - 1_000 + index,
             updatedAtEpochMillis = wallClock - 1_000 + index, attemptCount = 2,

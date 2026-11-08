@@ -24,9 +24,7 @@ data class CanonicalContact(
             .joinToString(" ")
 
     val resolvedDisplayName: String
-        get() = displayName.trim().ifEmpty {
-            fullName.ifEmpty { "Unnamed contact" }
-        }
+        get() = com.patmanak.contako.domain.policy.ContactDisplayNamePolicy.resolve(this).ifEmpty { "Unnamed contact" }
 
     fun valuesOf(kind: ContactValueKind): List<ContactValue> =
         values.filter { it.kind == kind }.sortedBy(ContactValue::order)

@@ -24,6 +24,7 @@ internal class IncrementalRemoteGroupStage(
     private val store: RemoteGroupReconciliationStore,
     private val failureObserver: (GatewayFailureCategory) -> Unit = {},
     private val exceptionObserver: (SyncPassExceptionCategory) -> Unit = {},
+    private val gatewayFailureObserver: GatewayFailureObserver = GatewayFailureObserver { _, _, _ -> },
 ) {
     var lastFailureCategory: GatewayFailureCategory? = null
         private set
@@ -41,6 +42,7 @@ internal class IncrementalRemoteGroupStage(
             is GatewayOutcome.Failure -> {
                 lastFailureCategory = result.category
                 runCatching { failureObserver(result.category) }
+                runCatching { gatewayFailureObserver.onFailure(GatewayDiagnosticBoundary.GROUP_READ, result, null) }
                 return result.category.toGroupStageResult()
             }
         }
@@ -48,6 +50,8 @@ internal class IncrementalRemoteGroupStage(
         return try {
             store.commit(account, groups)
             RemoteGroupStageResult.Success(groups.groups.size)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (error: Throwable) {
             lastExceptionCategory = syncPassExceptionCategory(error)
             runCatching { exceptionObserver(syncPassExceptionCategory(error)) }

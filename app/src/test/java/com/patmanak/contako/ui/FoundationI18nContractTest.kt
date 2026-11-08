@@ -56,7 +56,7 @@ class FoundationI18nContractTest {
             "InitialImportOverview.kt" to setOf("initial_import_overview"),
             "SyncIssueCards.kt" to setOf(
                 "SyncIssueItem(REDACTED, scope=\${advice.scope}, cause=\${advice.cause})",
-                "conflict:\${conflict.contactId}", "blocked:\${item.type}:\${item.id}",
+                "conflict:\${conflict.contactId}", "conflict:\${item.id}", "blocked:\${item.type}:\${item.id}",
                 "import:\${item.remoteId}", "android:\${item.kind}:\${item.contactId}",
                 "contact:\${contact.id}", "permission", "account",
             ),

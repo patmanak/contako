@@ -12,10 +12,12 @@ internal fun classifyAndroidProjectionMismatch(
     desiredSnapshot: AndroidContactSnapshot,
     actualSnapshot: AndroidContactSnapshot,
     mapper: CanonicalAndroidContactMapper,
+    allowPostWriteEquivalences: Boolean = false,
     onComponentMismatch: (AndroidRowKind, AndroidComponent, AndroidComponentDifference) -> Unit = { _, _, _ -> },
 ): AndroidProjectionRepairCategory {
     val desired = mapper.projectionComparisonSnapshot(desiredSnapshot)
-    val actual = mapper.projectionComparisonSnapshot(mapper.normalizeGeneratedName(actualSnapshot, desiredSnapshot))
+    val actual = if (allowPostWriteEquivalences) mapper.postWriteComparisonSnapshot(actualSnapshot, desiredSnapshot)
+        else mapper.projectionComparisonSnapshot(mapper.normalizeGeneratedName(actualSnapshot, desiredSnapshot))
     if (desired.canonicalContactId != actual.canonicalContactId) {
         return AndroidProjectionRepairCategory.POST_WRITE_CONTACT_ROW_SET
     }

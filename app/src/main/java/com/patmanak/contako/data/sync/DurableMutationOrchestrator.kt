@@ -152,6 +152,8 @@ class DurableMutationOrchestrator(
     private val retryPolicy: MutationRetryPolicy = MutationRetryPolicy(),
     private val batchLimit: Int = 100,
     private val actionRequiredObserver: MutationActionRequiredObserver = MutationActionRequiredObserver { },
+    private val gatewayFailureObserver: GatewayFailureObserver = GatewayFailureObserver { _, _, _ -> },
+    private val remoteBackoffRemainingMillis: suspend () -> Long = { 0L },
 ) {
     init {
         require(batchLimit in 1..100)
@@ -193,6 +195,13 @@ class DurableMutationOrchestrator(
             if (isCancellationRequested()) {
                 return result(cancelled = true)
             }
+            // A server-wide delay is not an attempt on this item. Leave its claim and
+            // retry budget untouched, including when a previous item triggered the delay.
+            if (remoteBackoffRemainingMillis() > 0L) {
+                retryWaiting++
+                failureCategories += GatewayFailureCategory.RATE_LIMITED
+                return result()
+            }
             if (!store.claim(command, nowEpochMillis)) continue
             examined++
             if (isCancellationRequested()) {
@@ -202,6 +211,8 @@ class DurableMutationOrchestrator(
 
             when (val preparation = preparationGateway.prepare(command)) {
                 is GatewayOutcome.Failure -> {
+                    runCatching { gatewayFailureObserver.onFailure(GatewayDiagnosticBoundary.MUTATION_PREPARATION,
+                        preparation, command.operation) }
                     failureCategories += preparation.category
                     val decision = retryPolicy.decide(
                         preparation.category,
@@ -226,7 +237,8 @@ class DurableMutationOrchestrator(
                     }
                     // Once the account/session is rejected, no later account write is safe.
                     // Its intent remains untouched; the failed command was already persisted.
-                    if (preparation.category in ACCOUNT_REAUTHENTICATION_FAILURES) return result()
+                    if (preparation.category in ACCOUNT_REAUTHENTICATION_FAILURES ||
+                        preparation.category == GatewayFailureCategory.RATE_LIMITED) return result()
                 }
                 is GatewayOutcome.Success -> when (val decision = preparation.value) {
                     MutationPreparation.UploadAllowed -> {
@@ -243,6 +255,8 @@ class DurableMutationOrchestrator(
                                 }
                             }
                             is GatewayOutcome.Failure -> {
+                                runCatching { gatewayFailureObserver.onFailure(GatewayDiagnosticBoundary.MUTATION_UPLOAD,
+                                    upload, command.operation) }
                                 failureCategories += upload.category
                                 val retry = retryPolicy.decide(
                                     upload.category,
@@ -265,7 +279,8 @@ class DurableMutationOrchestrator(
                                     RetryDecision.Cancelled -> return result(cancelled = true)
                                     RetryDecision.DeleteConverged -> reconciled++
                                 }
-                                if (upload.category in ACCOUNT_REAUTHENTICATION_FAILURES) return result()
+                                if (upload.category in ACCOUNT_REAUTHENTICATION_FAILURES ||
+                                    upload.category == GatewayFailureCategory.RATE_LIMITED) return result()
                             }
                         }
                     }

@@ -65,7 +65,8 @@ class RetryPolicyTest {
     @Test
     fun `03-STATUS blocking failures never enter a tight retry`() {
         GatewayFailureCategory.entries
-            .filterNot { it in setOf(NETWORK_UNAVAILABLE, TIMEOUT, RATE_LIMITED, REMOTE_SERVICE_FAILURE, UNKNOWN, CANCELLED) }
+            .filterNot { it in setOf(NETWORK_UNAVAILABLE, TIMEOUT, RATE_LIMITED, REMOTE_SERVICE_FAILURE, UNKNOWN, CANCELLED,
+                GatewayFailureCategory.RECONCILIATION_INCOMPLETE) }
             .filterNot { it == NOT_FOUND }
             .forEach { category ->
                 assertEquals(RetryDecision.ActionRequired, policy.decide(category, UPDATE, 0, 10_000))

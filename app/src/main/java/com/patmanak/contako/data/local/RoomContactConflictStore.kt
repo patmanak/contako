@@ -113,6 +113,7 @@ internal class RoomContactConflictStore(private val database: ContakoDatabase) {
                     capture(local, intent, remote)
                     return@withTransaction blocked()
                 }
+                RoomContactUploadOverlays(database).clear(account, id)
                 // Reuses value/membership/projection reconciliation; transaction rolls back on an unsafe remap.
                 RoomRemoteCanonicalReconciliationStore(database).adoptRemote(local, remote.contact, remote, null)
                 check(database.outboxDao().deleteRevision(account, AggregateType.CONTACT.name, id, revision) == 1)

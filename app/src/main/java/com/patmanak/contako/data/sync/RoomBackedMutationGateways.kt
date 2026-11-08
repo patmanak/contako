@@ -51,7 +51,11 @@ internal class RoomBackedMutationPreparationGateway(
                 MutationPreparation.ActionRequired(MutationPreparationActionRequiredReason.REVISION_MISMATCH),
             )
         }
-        if (command.requiresReconciliation && contact.remoteContactId == null) {
+        val currentIntent = database.outboxDao().get(command.accountId, command.aggregateType, command.aggregateId)
+            ?.takeIf { it.revision == command.revision }
+        if ((currentIntent?.requiresReconciliation ?: command.requiresReconciliation) && (contact.remoteContactId == null ||
+                (contact.remoteVersion == null && contact.conflictState ==
+                    com.patmanak.contako.data.local.RoomContactConflictStore.CONFLICT))) {
             return createRecovery?.prepare(command) ?: GatewayOutcome.Success(
                 MutationPreparation.ActionRequired(
                     MutationPreparationActionRequiredReason.RECONCILIATION_REMOTE_IDENTITY_MISSING,
@@ -87,8 +91,14 @@ internal class RoomBackedMutationPreparationGateway(
                     GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT) else fresh
                 is GatewayOutcome.Success -> {
                     if (fresh.value.id.value != remoteId) GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE)
-                    else GatewayOutcome.Success(com.patmanak.contako.data.local.RoomContactConflictStore(database)
-                        .prepare(expectedAccount.value, contact.id, command.revision, fresh.value))
+                    else {
+                        val decision = com.patmanak.contako.data.local.RoomContactConflictStore(database)
+                            .prepare(expectedAccount.value, contact.id, command.revision, fresh.value)
+                        if (decision == MutationPreparation.UploadAllowed &&
+                            !com.patmanak.contako.data.local.RoomContactUploadOverlays(database).refreshAccepted(contact, fresh.value.contact))
+                            GatewayOutcome.Failure(GatewayFailureCategory.RECONCILIATION_INCOMPLETE)
+                        else GatewayOutcome.Success(decision)
+                    }
                 }
             }
         }
@@ -147,7 +157,19 @@ internal class RoomBackedMutationPreparationGateway(
         // predate independent group edits. Without a durable negative-edge baseline, wait
         // for all account contact writes before reconciling assignments (including empty
         // groups). A blocked contact retains group intent instead of acknowledging it early.
-        if (database.outboxDao().hasPendingContactWrite(group.accountId)) {
+        val dependencies = com.patmanak.contako.data.local.RoomRemoteGroupAssignmentDependencies(database)
+        if (dependencies.requiresVerifiedMembership(expectedAccount, group.id)) {
+            when (val members = membershipReader.members(expectedAccount, groupId)) {
+                is GatewayOutcome.Failure -> return members
+                is GatewayOutcome.Success -> {
+                    if (members.value.account != expectedAccount || members.value.groupId != groupId)
+                        return GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE)
+                    if (!dependencies.recordVerifiedMembership(expectedAccount, group.id, group.revision, groupId, members.value.emailIds.toSet()))
+                        return GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT)
+                }
+            }
+        }
+        if (dependencies.hasPendingContactWriteForGroup(expectedAccount, group.id)) {
             return GatewayOutcome.Success(MutationPreparation.WaitingForDependencies)
         }
         var missingIdentityReason = MutationPreparationActionRequiredReason.GROUP_MEMBER_REMOTE_EMAIL_IDENTITY_MISSING
@@ -235,7 +257,10 @@ internal class RoomBackedMutationUploadGateway(
             return GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT)
         }
         val payload = database.contactPayloadDao().get(stored.contact.ownerKey)?.toDomain()
-        val contact = stored.toDomain().copy(preservationEnvelope = payload)
+        val local = stored.toDomain().copy(preservationEnvelope = payload)
+        val contact = if (command.operation == RemoteMutationOperation.DELETE) local else
+            com.patmanak.contako.data.local.RoomContactUploadOverlays(database).wireProjection(local)
+                ?: return GatewayOutcome.Failure(GatewayFailureCategory.RECONCILIATION_INCOMPLETE)
         val mutation = when (command.operation) {
             RemoteMutationOperation.CREATE -> ContactMutation.Create(contact)
             RemoteMutationOperation.UPDATE -> ContactMutation.Update(
@@ -321,6 +346,10 @@ internal class RoomBackedMutationUploadGateway(
         val missing = desired.filterNot(current.toSet()::contains)
         val extra = current.filterNot(desired.toSet()::contains)
         if (missing.isEmpty() && extra.isEmpty()) {
+            if (!com.patmanak.contako.data.local.RoomRemoteGroupAssignmentDependencies(database).acknowledgeVerifiedMembership(
+                    expectedAccount, group.id, group.revision, remoteGroupId, current.toSet()))
+                return GatewayOutcome.Success(RemoteMutationAcknowledgement(group.remoteLabelId, group.remoteVersion,
+                    fullyConverged = false, nextOperation = RemoteMutationOperation.ASSIGNMENTS))
             return GatewayOutcome.Success(RemoteMutationAcknowledgement(group.remoteLabelId, group.remoteVersion))
         }
         val mutation = if (missing.isNotEmpty()) {
@@ -335,6 +364,18 @@ internal class RoomBackedMutationUploadGateway(
                     missing.size > EmailLabelMutation.MAX_EMAIL_IDS_PER_MUTATION || extra.isNotEmpty()
                 } else {
                     extra.size > EmailLabelMutation.MAX_EMAIL_IDS_PER_MUTATION
+                }
+                if (!remaining) {
+                    val confirmed = when (val read = membershipReader.members(expectedAccount, remoteGroupId)) {
+                        is GatewayOutcome.Failure -> return read
+                        is GatewayOutcome.Success -> read.value
+                    }
+                    if (confirmed.account != expectedAccount || confirmed.groupId != remoteGroupId || confirmed.emailIds.toSet() != desired.toSet())
+                        return GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT)
+                    if (!com.patmanak.contako.data.local.RoomRemoteGroupAssignmentDependencies(database).acknowledgeVerifiedMembership(
+                            expectedAccount, group.id, group.revision, remoteGroupId, confirmed.emailIds.toSet()))
+                        return GatewayOutcome.Success(RemoteMutationAcknowledgement(group.remoteLabelId, group.remoteVersion,
+                            fullyConverged = false, nextOperation = RemoteMutationOperation.ASSIGNMENTS))
                 }
                 GatewayOutcome.Success(
                     RemoteMutationAcknowledgement(

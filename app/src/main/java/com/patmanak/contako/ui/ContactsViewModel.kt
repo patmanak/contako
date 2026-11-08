@@ -787,6 +787,18 @@ class ContactsViewModel(
         launchMutation { syncRecoveryDataSource.requestSync(accountId) }
     }
 
+    fun retrySyncItem(type: com.patmanak.contako.domain.sync.SyncBlockedItemType, id: String, revision: Long) {
+        launchMutation { syncRecoveryDataSource.requestMutationRetry(accountId, type, id, revision) }
+    }
+
+    fun ignoreImportProblem(remoteId: String, generation: String) {
+        launchMutation { syncRecoveryDataSource.ignoreImportProblem(accountId, remoteId, generation) }
+    }
+
+    fun resumeImportProblem(remoteId: String, generation: String) {
+        launchMutation { syncRecoveryDataSource.resumeImportProblem(accountId, remoteId, generation) }
+    }
+
     fun startRepair() {
         launchMutation {
             val result = syncRecoveryDataSource.beginRepair(

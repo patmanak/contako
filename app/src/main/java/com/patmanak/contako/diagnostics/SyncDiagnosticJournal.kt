@@ -22,6 +22,11 @@ internal enum class JournalStorage { INITIALIZING, AVAILABLE, UNAVAILABLE }
 /** Closed event vocabulary shared with the legacy investigation report, never arbitrary text. */
 internal object SyncJournalCodes {
     fun from(event: SanitizedDiagnosticEvent): String? = when (event) {
+        is SanitizedDiagnosticEvent.GatewayFailure -> "gateway:${event.boundary.name}.${event.category.name}." +
+            "${event.operation?.name ?: "NONE"}.${event.malformed?.name ?: "NONE"}.${event.hydration?.name ?: "NONE"}." +
+            "${event.httpStatusCode ?: "NONE"}.${event.protonResponseCode ?: "NONE"}.${event.retryDelay.name}.${event.recoveryBlockerCategory?.name ?: "NONE"}"
+        is SanitizedDiagnosticEvent.Prerequisite -> "prerequisite:${event.result.name}"
+        is SanitizedDiagnosticEvent.AndroidPreflight -> "preflight:${event.reason?.name ?: "NONE"}"
         is SanitizedDiagnosticEvent.SyncRequest ->
             "request:${event.trigger.name}.${event.scope.name}.${event.disposition.name}"
         is SanitizedDiagnosticEvent.PassStarted -> "started:${event.scope.name}"
@@ -39,7 +44,18 @@ internal object SyncJournalCodes {
         val parts = code.split(':')
         if (parts.size == 2) {
             val details = parts[1].split('.')
+            if (parts[0] == "gateway") return details.size == 9 &&
+                details[0] in names(com.patmanak.contako.data.sync.GatewayDiagnosticBoundary.entries) &&
+                details[1] in names(GatewayFailureCategory.entries) &&
+                details[2] in names(com.patmanak.contako.data.sync.RemoteMutationOperation.entries) + "NONE" &&
+                details[3] in names(com.patmanak.contako.data.gateway.GatewayMalformedResponseCategory.entries) + "NONE" &&
+                details[4] in names(com.patmanak.contako.data.gateway.GatewayContactHydrationCategory.entries) + "NONE" &&
+                numericOrNone(details[5], 100..599) && numericOrNone(details[6], 1_000..9_999) &&
+                details[7] in names(DiagnosticRetryDelay.entries) &&
+                details[8] in names(GatewayFailureCategory.entries) + "NONE"
             val vocabulary = when (parts[0]) {
+                "prerequisite" -> listOf(names(com.patmanak.contako.data.sync.SyncPrerequisiteState.entries))
+                "preflight" -> listOf(names(com.patmanak.contako.data.sync.AndroidInteroperabilityRepairReason.entries) + "NONE")
                 "request" -> listOf(names(SyncTrigger.entries), names(SyncScope.entries), names(SyncRequestDisposition.entries))
                 "started" -> listOf(names(SyncScope.entries))
                 "finished" -> listOf(names(SyncPassOutcome.entries))
@@ -56,7 +72,9 @@ internal object SyncJournalCodes {
         return InvestigationTrace.isAllowedCode(code)
     }
 
-    fun failure(code: String): Boolean = code.substringBefore(':') in setOf(
+    fun failure(code: String): Boolean = (code.startsWith("gateway:") && code.substringAfter(':').split('.').getOrNull(1) != "CANCELLED") ||
+        (code.startsWith("prerequisite:") && code != "prerequisite:READY") ||
+        (code.startsWith("preflight:") && code != "preflight:NONE") || code.substringBefore(':') in setOf(
         "failure", "remote", "mutation", "update", "ingest_failure", "existing_plan",
         "ingest_codec", "ingest_baseline", "projection_repair", "projection_row", "binding", "photo_write", "canonical",
     ) || (code.startsWith("groups:") && code.substringAfter(':') !in setOf("CANCELLED", "PERMISSION_OR_PLAN_DENIED")) ||
@@ -66,6 +84,11 @@ internal object SyncJournalCodes {
             code.substringAfter(':') in setOf("ACTION_REQUIRED", "FAILED"))
 
     private fun names(values: List<Enum<*>>) = values.map { it.name }.toSet()
+    private fun numericOrNone(value: String, range: IntRange) = value == "NONE" ||
+        (value.matches(Regex("[1-9][0-9]{2,3}")) && value.toIntOrNull()?.let { it in range } == true)
+
+    fun progress(code: String): Boolean = code in setOf("import:CARD_READ_START", "import:CARD_READ_DONE",
+        "import:LOCAL_COMMIT_START", "import:LOCAL_COMMIT_DONE")
 }
 
 /** Wall time is UTC; elapsed time is relative to this process, never device uptime or an identifier. */
@@ -189,7 +212,16 @@ internal class SyncDiagnosticBuffer(
     @Synchronized fun snapshot(storage: JournalStorage) = SyncJournalSnapshot(events.toList(), lastFailure, storage)
 
     private fun add(entry: SyncJournalEntry) {
-        if (events.size == MAX_EVENTS) events.removeFirst()
+        // Repetitive per-card success cannot evict the preceding request, phase or failures.
+        fun lane(value: SyncJournalEntry): Int {
+            val code = value.encoded.substringAfterLast(',')
+            return if (SyncJournalCodes.failure(code)) 0 else if (SyncJournalCodes.progress(code)) 2 else 1
+        }
+        val entryLane = lane(entry)
+        val quota = when (entryLane) { 0 -> 64; 1 -> 48; else -> 16 }
+        if (events.count { lane(it) == entryLane } >= quota) {
+            events.remove(events.first { lane(it) == entryLane })
+        }
         events.addLast(entry)
     }
 

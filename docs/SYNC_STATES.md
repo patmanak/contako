@@ -116,13 +116,42 @@ its proven identity and advance the upload baseline, but MUST NOT acknowledge
 the newer local values or discard their outbox intent. Identity and provider
 receipt guards still apply.
 
+Retry decisions MUST preserve an existing ambiguous-delivery marker, including
+when a read-only recovery request is rate-limited. Only explicit guarded proof
+may clear it; a retry policy's default is not absence evidence.
+
 An unresolved creation MAY retry only after a fresh complete inventory, verified
 card UID inspection and a second stable inventory establish no matching identity,
-with the exact local intent revalidated transactionally. A single possible match
-retains the existing conflict choice; multiple matches or unreadable cards MUST
-NOT authorize another create. This exceptional reconciliation can read full cards;
+with the exact currently claimed local intent revalidated transactionally. A
+unique verified match with complete equivalent submitted content MAY converge
+without another POST or a conflict choice. Different content retains the existing
+choice; multiple matches or unreadable dependencies MUST NOT authorize another
+create. Positive identity proofs may cover a bounded set of pending intentions;
+absence MUST NOT clear ambiguity on another still-pending intention. This
+exceptional reconciliation can read full cards, with one complete scan per pass;
 ordinary no-change synchronization MUST NOT do so. Earlier blocked unbound
 creations MAY reopen this verification once per fresh recovery generation.
+
+Per-card import failures MUST become durable obligations before the inventory/event
+checkpoint advances. Transient obligations retain deadlines and Retry-After and
+MUST NOT refetch before eligibility; already healthy cards remain checkpointed.
+An account-scoped server cooldown also survives event, inventory and deletion
+read failures. Manual requests and restart MUST NOT bypass that cooldown or
+consume untouched mutation attempts. Local/native work may still advance.
+A known per-contact membership-remap refusal MAY be isolated after transaction
+rollback, but corruption, ownership, persistence and other invariant failures
+MUST stop the unsafe traversal. Cancellation MUST propagate.
+
+An explicit revision-bound retry credit MAY reopen an exhausted transient write
+once, including a pending deletion. It MUST retain idempotency, attempts, remote
+baseline, ambiguous-delivery evidence and server delay. Duplicate requests are
+idempotent and new requests have a durable cooling period. The severity of one
+blocked item MUST NOT suppress independent eligible work or transient scheduling.
+
+Rejected cryptographic imports remain outside verified canonical data and Android.
+Users MAY request a guarded recheck or ignore that exact obligation generation
+until its remote source changes. Ignoring MUST NOT mark the card verified, erase
+the local failure history or permit editing/re-signing unverified content.
 
 Dependency-ineligible group assignments MUST NOT consume every slot of a bounded
 outbox batch ahead of the contact writes they await. Filtering those assignments

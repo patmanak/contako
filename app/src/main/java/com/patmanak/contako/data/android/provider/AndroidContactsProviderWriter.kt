@@ -44,11 +44,16 @@ internal sealed interface AndroidProviderProjectionResult {
     data class Applied(
         val changedDataRows: Int,
         val sourceIdentityChanged: Boolean = false,
+        /** Observed after this successful version-guarded batch, before any callback. */
+        val rawContactVersion: Long? = null,
     ) : AndroidProviderProjectionResult {
         init {
             require(changedDataRows >= 0)
             require(changedDataRows > 0 || sourceIdentityChanged)
+            require(rawContactVersion == null || rawContactVersion >= 0)
         }
+
+        override fun toString() = "AndroidProviderProjectionResult.Applied(REDACTED, hasVersionProof=${rawContactVersion != null})"
     }
 
     /** The exact account, source identity, and raw-contact version were observed without a write. */
@@ -430,11 +435,15 @@ internal class AndroidContactsProviderWriter(
         ) {
             return replan(AndroidProviderProjectionReplanReason.WRITE_AUTHORIZATION)
         }
+        val postWriteVersion: Long
         try {
             val results = contentResolver.applyBatch(ContakoAndroidAccountContract.CONTACTS_AUTHORITY, operations)
             if (results.size != operations.size || insertOperationIndexes.any { results[it].uri == null }) {
                 malformedFailure()
             }
+            val writtenSource = sourceIdentityAfterWrite?.let(AndroidExpectedSourceIdentity::Present) ?: expectedSourceIdentity
+            postWriteVersion = cleanRawContactVersion(accountName, rawContactId, writtenSource)
+                ?: return replan(AndroidProviderProjectionReplanReason.RAW_CONTACT_VERSION)
             afterApplyBatch()
         } catch (_: SecurityException) {
             throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PERMISSION_DENIED)
@@ -450,7 +459,38 @@ internal class AndroidContactsProviderWriter(
         return AndroidProviderProjectionResult.Applied(
             changedDataRows = plan.operations.size + membershipOperations.size,
             sourceIdentityChanged = sourceChangeRequired,
+            rawContactVersion = postWriteVersion,
         )
+    }
+
+    /** The same owner/source/version must still be clean when accepting a post-write equivalence. */
+    fun isCurrentPostWriteVersion(
+        accountName: AndroidProviderAccountName,
+        rawContactId: Long,
+        sourceIdentity: String,
+        expectedVersion: Long,
+    ): Boolean = cleanRawContactVersion(accountName, rawContactId, AndroidExpectedSourceIdentity.Present(sourceIdentity)) == expectedVersion
+
+    private fun cleanRawContactVersion(
+        accountName: AndroidProviderAccountName,
+        rawContactId: Long,
+        source: AndroidExpectedSourceIdentity,
+    ): Long? = try {
+        contentResolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(ContactsContract.RawContacts.VERSION),
+            rawContactIdentitySelection(source) + " AND ${ContactsContract.RawContacts.DELETED} = 0 AND ${ContactsContract.RawContacts.DIRTY} = 0",
+            rawContactIdentitySelectionArgs(accountName, rawContactId, source), null,
+        )?.use { cursor ->
+            if (cursor.count > 1) throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.ACCOUNT_SCOPE_MISMATCH)
+            if (!cursor.moveToFirst() || cursor.isNull(0)) null else cursor.getLong(0).takeIf { it >= 0 }
+        }
+    } catch (_: SecurityException) {
+        throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.PERMISSION_DENIED)
+    } catch (failure: AndroidProviderBoundaryException) {
+        throw failure
+    } catch (_: RuntimeException) {
+        throw AndroidProviderBoundaryException(AndroidProviderFailureCategory.MALFORMED_PROVIDER_DATA)
     }
 
     private fun replan(reason: AndroidProviderProjectionReplanReason): AndroidProviderProjectionResult {

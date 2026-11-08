@@ -11,6 +11,7 @@ enum class SyncPrerequisiteState {
     OFFLINE,
     AUTHENTICATION_REQUIRED,
     INTERACTIVE_ACTION_REQUIRED,
+    LOCAL_FAILURE,
 }
 
 fun interface SyncPrerequisiteChecker {
@@ -45,6 +46,11 @@ internal fun interface SyncPassStageObserver {
     fun onException(category: SyncPassExceptionCategory) {}
     fun onOutcome(outcome: SyncPassOutcome) {}
     fun onImportPhase(phase: RemoteImportPhase) {}
+    fun onGatewayFailure(boundary: GatewayDiagnosticBoundary,
+        failure: com.patmanak.contako.data.gateway.GatewayOutcome.Failure,
+        operation: RemoteMutationOperation? = null) {}
+    fun onPrerequisite(result: SyncPrerequisiteState) {}
+    fun onAndroidPreflight(reason: AndroidInteroperabilityRepairReason?) {}
 }
 
 /** MUST NOT retain exception messages, class names, causes or stack traces. */
@@ -359,6 +365,7 @@ internal class ContakoSyncPassExecutor(
         observe(SyncPassStage.PREREQUISITES)
         when (checkRemotePrerequisites()) {
             SyncPrerequisiteState.READY -> Unit
+            SyncPrerequisiteState.LOCAL_FAILURE -> return SyncPassOutcome.FAILED
             SyncPrerequisiteState.OFFLINE -> return SyncPassOutcome.RETRY_WAITING
             SyncPrerequisiteState.AUTHENTICATION_REQUIRED,
             SyncPrerequisiteState.INTERACTIVE_ACTION_REQUIRED,
@@ -376,14 +383,18 @@ internal class ContakoSyncPassExecutor(
         // have reached Proton without a local acknowledgement. An earlier failed resume may
         // already have recovered the intent, so the recovery count is not a freshness proof.
         observe(SyncPassStage.REMOTE_CONTACTS)
-        when (remoteStage.run(account,
+        when (val remote = remoteStage.run(account,
             forceHydration = !repair.progress.completed(FullRepairPhase.REMOTE_ENUMERATION),
             isCancellationRequested = ::cancelled)) {
             is RemoteContactStageResult.Success -> Unit
             is RemoteContactStageResult.Partial -> {
-                independentOutcome = SyncPassOutcome.ACTION_REQUIRED
-                completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.VALIDATION
-                remoteCardsPending = true
+                independentOutcome = if (remote.actionRequiredCount > 0) SyncPassOutcome.ACTION_REQUIRED
+                    else if (remote.retryWaitingCount > 0) SyncPassOutcome.RETRY_WAITING else SyncPassOutcome.SUCCESS
+                completionCause = if (remote.actionRequiredCount > 0)
+                    com.patmanak.contako.domain.sync.SyncCompletionCause.VALIDATION
+                    else if (remote.retryWaitingCount > 0) com.patmanak.contako.domain.sync.SyncCompletionCause.TRANSIENT_IO
+                    else completionCause
+                remoteCardsPending = remote.actionRequiredCount > 0 || remote.retryWaitingCount > 0
             }
             is RemoteContactStageResult.RetryWaiting, RemoteContactStageResult.StalePlan -> {
                 hasUnscopedFailure = true
@@ -465,14 +476,16 @@ internal class ContakoSyncPassExecutor(
             if (result.cancelled || isCancelled()) return result.copy(cancelled = true)
             // A completed contact acknowledgement can make previously blocked dependent
             // assignments eligible. Re-read the durable queue after successful uploads too.
-            if (result.actionRequired > 0 || result.retryWaiting > 0 ||
+            // A blocked item does not cancel independent eligible work in later batches.
+            // The store still enforces every deadline and dependency on each fresh claim.
+            if ((result.examined == 0 && result.uploaded == 0) ||
                 (result.progressPending == 0 && result.uploaded == 0)) return result
             val next = mutationOrchestrator.drain(account.value, wallClock(), isCancelled)
             result = MutationDrainResult(
                 examined = result.examined + next.examined,
                 uploaded = result.uploaded + next.uploaded,
                 reconciledWithoutUpload = result.reconciledWithoutUpload + next.reconciledWithoutUpload,
-                retryWaiting = next.retryWaiting,
+                retryWaiting = maxOf(result.retryWaiting, next.retryWaiting),
                 actionRequired = next.actionRequired,
                 progressPending = next.progressPending,
                 cancelled = next.cancelled,
@@ -495,6 +508,10 @@ internal class ContakoSyncPassExecutor(
             completionCause = if (com.patmanak.contako.data.gateway.GatewayFailureCategory.CONFLICT in result.failureCategories)
                 com.patmanak.contako.domain.sync.SyncCompletionCause.CONFLICT
             else com.patmanak.contako.domain.sync.SyncCompletionCause.VALIDATION
+        if (result.retryWaiting > 0 && completionCause !in setOf(
+                com.patmanak.contako.domain.sync.SyncCompletionCause.AUTHENTICATION,
+                com.patmanak.contako.domain.sync.SyncCompletionCause.STORAGE))
+            completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.TRANSIENT_IO
         return when {
             result.cancelled -> SyncPassOutcome.CANCELLED
             result.actionRequired > 0 -> SyncPassOutcome.ACTION_REQUIRED
@@ -644,6 +661,7 @@ internal class ContakoSyncPassExecutor(
         observe(SyncPassStage.PREREQUISITES)
         when (checkRemotePrerequisites()) {
             SyncPrerequisiteState.READY -> Unit
+            SyncPrerequisiteState.LOCAL_FAILURE -> return withDeferredAndroid(SyncPassOutcome.FAILED)
             SyncPrerequisiteState.OFFLINE -> return withDeferredAndroid(SyncPassOutcome.RETRY_WAITING)
             SyncPrerequisiteState.AUTHENTICATION_REQUIRED,
             SyncPrerequisiteState.INTERACTIVE_ACTION_REQUIRED,
@@ -665,8 +683,15 @@ internal class ContakoSyncPassExecutor(
         when (remote) {
             is RemoteContactStageResult.Success -> Unit
             is RemoteContactStageResult.Partial -> {
-                independentOutcome = SyncPassOutcome.ACTION_REQUIRED
-                completionCause = com.patmanak.contako.domain.sync.SyncCompletionCause.VALIDATION
+                independentOutcome = when {
+                    remote.actionRequiredCount > 0 -> SyncPassOutcome.ACTION_REQUIRED
+                    remote.retryWaitingCount > 0 -> SyncPassOutcome.RETRY_WAITING
+                    else -> SyncPassOutcome.SUCCESS
+                }
+                completionCause = if (remote.actionRequiredCount > 0)
+                    com.patmanak.contako.domain.sync.SyncCompletionCause.VALIDATION
+                    else if (remote.retryWaitingCount > 0) com.patmanak.contako.domain.sync.SyncCompletionCause.TRANSIENT_IO
+                    else completionCause
             }
             is RemoteContactStageResult.RetryWaiting,
             RemoteContactStageResult.StalePlan,

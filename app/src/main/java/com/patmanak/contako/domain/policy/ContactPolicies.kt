@@ -7,8 +7,7 @@ import java.util.Locale
 
 object ContactValidation {
     fun canCreate(contact: CanonicalContact): Boolean =
-        sequenceOf(contact.firstName, contact.lastName, contact.displayName)
-            .any { it.isNotBlank() }
+        ContactDisplayNamePolicy.resolve(contact).isNotBlank()
 
     fun actionRequiredReason(contact: CanonicalContact, isNewContact: Boolean): String? {
         val reasons = actionRequiredReasons(contact, isNewContact)
@@ -17,7 +16,9 @@ object ContactValidation {
 
     fun actionRequiredReasons(contact: CanonicalContact, requiresCreateValidation: Boolean): Set<String> =
         buildSet {
-            if (requiresCreateValidation && !canCreate(contact)) add("MISSING_NAME")
+            if (requiresCreateValidation && !canCreate(contact.copy(values = contact.values.filterNot {
+                    it.kind == com.patmanak.contako.domain.model.ContactValueKind.EMAIL && !isValidEmail(it.value)
+                }))) add("MISSING_NAME")
             if (contact.values.any { it.kind == com.patmanak.contako.domain.model.ContactValueKind.EMAIL && !isValidEmail(it.value) }) {
                 add("INVALID_EMAIL")
             }
@@ -38,7 +39,7 @@ object ContactValidation {
         }
     }
 
-    private fun isValidEmail(value: String): Boolean {
+    fun isValidEmail(value: String): Boolean {
         val trimmed = value.trim()
         val at = trimmed.indexOf('@')
         return at > 0 && at == trimmed.lastIndexOf('@') && at < trimmed.lastIndex

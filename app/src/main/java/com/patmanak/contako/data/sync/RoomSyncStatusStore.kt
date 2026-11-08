@@ -208,6 +208,8 @@ internal class RoomSyncPassStatusPublisher(
         val all = database.outboxDao().getAll(accountId)
         val blocked = database.outboxDao().getActionRequired(accountId)
         val failedImports = database.remoteHydrationObligationDao().getAll(accountId)
+            .filter { !it.isTransient && it.ignoredBaselineVersion == null }
+        val partialEmails = database.contactEmailUploadOverlayDao().getAll(accountId).map { it.contactId }.toSet()
         val androidIssues = database.androidContactIssueDao().getCurrent(accountId)
         val external = externalActionReason()
         val retainedAndroidReason = when {
@@ -220,7 +222,8 @@ internal class RoomSyncPassStatusPublisher(
             outcome = outcome,
             outboxReason = blocked.outboxActionReason(),
             externalReason = external ?: retainedAndroidReason,
-            failedImportReason = if (failedImports.isEmpty()) retainedAndroidReason
+            failedImportReason = if (failedImports.isEmpty())
+                retainedAndroidReason ?: SyncActionReason.VALIDATION_REJECTED.takeIf { partialEmails.isNotEmpty() }
                 else if (failedImports.any { it.category == "CRYPTOGRAPHIC_VERIFICATION_FAILED" })
                     SyncActionReason.CRYPTOGRAPHIC_VERIFICATION_FAILED else SyncActionReason.INTERNAL_FAILURE,
         )
@@ -232,11 +235,12 @@ internal class RoomSyncPassStatusPublisher(
                 pendingMutationCount = all.size,
                 actionRequiredCount = if (reason == null) 0 else maxOf(1,
                     (blocked.map { it.aggregateType to it.aggregateId } +
-                        androidIssues.map { "CONTACT" to it.canonicalContactId }).toSet().size + failedImports.size),
+                        androidIssues.map { "CONTACT" to it.canonicalContactId } +
+                        partialEmails.map { "CONTACT" to it }).toSet().size + failedImports.size),
                 actionReason = reason,
                 offline = outcome == SyncPassOutcome.RETRY_WAITING && isOffline(),
-                scopedIssuesOnly = outcome == SyncPassOutcome.ACTION_REQUIRED && !hasUnscopedFailure() &&
-                    (blocked.isNotEmpty() || failedImports.isNotEmpty() || androidIssues.isNotEmpty()) &&
+                scopedIssuesOnly = outcome in setOf(SyncPassOutcome.ACTION_REQUIRED, SyncPassOutcome.SUCCESS) && !hasUnscopedFailure() &&
+                    (blocked.isNotEmpty() || failedImports.isNotEmpty() || androidIssues.isNotEmpty() || partialEmails.isNotEmpty()) &&
                     reason !in setOf(SyncActionReason.AUTHENTICATION_REQUIRED, SyncActionReason.INTERACTIVE_AUTHENTICATION_REQUIRED),
             ),
         )

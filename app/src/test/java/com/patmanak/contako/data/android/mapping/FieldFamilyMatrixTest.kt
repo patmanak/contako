@@ -86,7 +86,8 @@ class FieldFamilyMatrixTest {
             cards = listOf(ContactCardType.Signed to resource("fx-c-004-invalid-signed.vcf")),
         )).copy(firstName = "", lastName = "", displayName = "", remoteContactId = null)
 
-        assertEquals(setOf("MISSING_NAME"), ContactValidation.actionRequiredReasons(emailOnly, true))
+        assertTrue(ContactValidation.actionRequiredReasons(emailOnly, true).isEmpty())
+        assertTrue(ContactValidation.actionRequiredReasons(emailOnly.copy(values = emptyList()), true).contains("MISSING_NAME"))
         assertEquals(
             setOf("MISSING_NAME", "INVALID_EMAIL"),
             ContactValidation.actionRequiredReasons(invalidEmailOnly, true),

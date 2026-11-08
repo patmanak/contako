@@ -17,7 +17,9 @@ enum class SyncDashboardState {
 enum class SyncActivity { IDLE, SCHEDULED, RUNNING }
 
 /** Private local presentation data, excluded from diagnostic serialization. */
-data class SyncImportProblem(val remoteId: String, val displayName: String?, val problem: SyncProblem) {
+data class SyncImportProblem(val remoteId: String, val displayName: String?, val problem: SyncProblem,
+    val generation: String = "", val isTransient: Boolean = false, val ignored: Boolean = false,
+    val nextEligibleAtEpochMillis: Long = 0) {
     override fun toString() = "SyncImportProblem(REDACTED, problem=$problem)"
 }
 
@@ -31,6 +33,11 @@ data class SyncAndroidContactIssue(val contactId: String, val kind: SyncAndroidC
 
 enum class SyncBlockedItemType { CONTACT, GROUP }
 
+enum class SyncMutationRetryReason { NETWORK, VERIFICATION }
+
+data class SyncMutationRetry(val revision: Long, val reason: SyncMutationRetryReason,
+    val nextEligibleAtEpochMillis: Long = 0, val queued: Boolean = false)
+
 /** Includes retained deletion intent, whose entity is intentionally absent from the directory. */
 data class SyncBlockedItem(
     val id: String,
@@ -38,6 +45,7 @@ data class SyncBlockedItem(
     val displayName: String?,
     val isDeleted: Boolean,
     val problem: SyncProblem,
+    val retry: SyncMutationRetry? = null,
 ) {
     override fun toString() = "SyncBlockedItem(REDACTED, type=$type, isDeleted=$isDeleted, problem=$problem)"
 }
@@ -63,6 +71,8 @@ data class SyncDashboardSnapshot(
     val targetedRecoveries: List<TargetedRecoveryStatus> = emptyList(),
     /** Live prerequisites only. Neither permission nor backlog establishes provider readiness. */
     val androidAvailability: AndroidAvailability = AndroidAvailability.UNKNOWN,
+    /** Local-only occurrences whose non-email fields can already be confirmed remotely. */
+    val partialContactIds: Set<String> = emptySet(),
 ) {
     override fun toString(): String = "SyncDashboardSnapshot(state=$state, pendingMutationCount=$pendingMutationCount, " +
         "actionRequiredCount=$actionRequiredCount, problem=$problem, androidPendingCount=${androidPendingContactIds.size}, " +
@@ -90,6 +100,9 @@ enum class RepairStartResult { CONFIRMATION_REQUIRED, STARTED, RESUMED }
 
 /** Presentation-neutral recovery port implemented by the synchronization data adapter. */
 interface SyncRecoveryDataSource {
+    suspend fun requestMutationRetry(accountId: String, type: SyncBlockedItemType, id: String, expectedRevision: Long): Boolean = false
+    suspend fun ignoreImportProblem(accountId: String, remoteId: String, generation: String): Boolean = false
+    suspend fun resumeImportProblem(accountId: String, remoteId: String, generation: String): Boolean = false
     fun observeDeletionRecoveries(accountId: String): Flow<List<DeletionRecoverySummary>> = flowOf(emptyList())
     suspend fun loadDeletionRecovery(accountId: String, contactId: String): DeletionRecoveryDetail? = null
     suspend fun chooseDeletionRecovery(accountId: String, expected: DeletionRecoverySummary,

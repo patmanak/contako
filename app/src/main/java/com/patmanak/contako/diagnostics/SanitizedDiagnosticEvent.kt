@@ -28,6 +28,24 @@ import com.patmanak.contako.data.sync.AndroidExistingContactPlanRepairReason
 
 /** D-130 metadata only. No free text, payload, throwable, account object or identifier. */
 internal sealed interface SanitizedDiagnosticEvent {
+    data class GatewayFailure(
+        val boundary: com.patmanak.contako.data.sync.GatewayDiagnosticBoundary,
+        val category: GatewayFailureCategory,
+        val operation: RemoteMutationOperation? = null,
+        val malformed: com.patmanak.contako.data.gateway.GatewayMalformedResponseCategory? = null,
+        val hydration: GatewayContactHydrationCategory? = null,
+        val httpStatusCode: Int? = null,
+        val protonResponseCode: Int? = null,
+        val retryDelay: DiagnosticRetryDelay = DiagnosticRetryDelay.NONE,
+        val recoveryBlockerCategory: GatewayFailureCategory? = null,
+    ) : SanitizedDiagnosticEvent {
+        init {
+            require(httpStatusCode == null || httpStatusCode in 100..599)
+            require(protonResponseCode == null || protonResponseCode in 1_000..9_999)
+        }
+    }
+    data class Prerequisite(val result: com.patmanak.contako.data.sync.SyncPrerequisiteState) : SanitizedDiagnosticEvent
+    data class AndroidPreflight(val reason: com.patmanak.contako.data.sync.AndroidInteroperabilityRepairReason?) : SanitizedDiagnosticEvent
     data class AuthPhase(val phase: GateCAuthPhase) : SanitizedDiagnosticEvent
     data class AuthFailure(val event: GateCAuthDiagnosticEvent) : SanitizedDiagnosticEvent
     data class SyncStage(val stage: SyncPassStage) : SanitizedDiagnosticEvent
@@ -114,6 +132,22 @@ internal sealed interface SanitizedDiagnosticEvent {
     ) : SanitizedDiagnosticEvent
 }
 
+internal enum class DiagnosticRetryDelay { NONE, UNDER_MINUTE, MINUTES, HOURS, LONGER }
+
+internal fun gatewayDiagnosticFailure(
+    boundary: com.patmanak.contako.data.sync.GatewayDiagnosticBoundary,
+    failure: com.patmanak.contako.data.gateway.GatewayOutcome.Failure,
+    operation: RemoteMutationOperation? = null,
+) = SanitizedDiagnosticEvent.GatewayFailure(boundary, failure.category, operation,
+    failure.malformedResponseCategory, failure.contactHydrationCategory, failure.httpStatusCode,
+    failure.protonResponseCode, when (failure.retryAfterMillis) {
+        null -> DiagnosticRetryDelay.NONE
+        in 0L..59_999L -> DiagnosticRetryDelay.UNDER_MINUTE
+        in 60_000L..3_599_999L -> DiagnosticRetryDelay.MINUTES
+        in 3_600_000L..86_399_999L -> DiagnosticRetryDelay.HOURS
+        else -> DiagnosticRetryDelay.LONGER
+    }, failure.recoveryBlockerCategory)
+
 internal enum class DiagnosticAndroidResult {
     SUCCESS, RETRY_WAITING, ACTION_REQUIRED, CANCELLED, LOCAL_PERSISTENCE_FAILURE;
 
@@ -144,6 +178,12 @@ internal enum class DiagnosticCardType(val wireValue: Int) {
 
 /** Preserve the approved operator protocol; counts are D-130 exact aggregates, not identifiers. */
 internal fun renderDiagnostic(event: SanitizedDiagnosticEvent): String = when (event) {
+    is SanitizedDiagnosticEvent.GatewayFailure ->
+        "GATEWAY_FAILURE=${event.boundary.name} CATEGORY=${event.category.name} OPERATION=${event.operation?.name} " +
+            "HTTP=${event.httpStatusCode} CODE=${event.protonResponseCode} MALFORMED=${event.malformed?.name} " +
+            "HYDRATION=${event.hydration?.name} RETRY=${event.retryDelay.name} BLOCKER=${event.recoveryBlockerCategory?.name}"
+    is SanitizedDiagnosticEvent.Prerequisite -> "PREREQUISITE=${event.result.name}"
+    is SanitizedDiagnosticEvent.AndroidPreflight -> "ANDROID_PREFLIGHT=${event.reason?.name ?: "READY_OR_UNAVAILABLE"}"
     is SanitizedDiagnosticEvent.AuthPhase -> "AUTH_STAGE=${event.phase.name}"
     is SanitizedDiagnosticEvent.AuthFailure ->
         "AUTH_ERROR=${event.event.diagnosticClass.name} HTTP=${event.event.httpCode} CODE=${event.event.protonCode}"

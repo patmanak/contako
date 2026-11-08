@@ -84,34 +84,48 @@ internal fun DiagnosticSettings(state: ContactsUiState) {
         Button(
             enabled = !exporting,
             onClick = {
-                report = try { LocalDiagnosticReportGenerator.generate(
-                    LocalDiagnosticInput(
-                        appVersion = BuildConfig.VERSION_NAME,
-                        apiLevel = Build.VERSION.SDK_INT,
-                        debugBuild = BuildConfig.DEBUG,
-                        contactCount = state.totalContactCount,
-                        groupCount = state.totalGroupCount,
-                        pendingMutationCount = state.pendingMutationCount,
-                        actionRequiredCount = maxOf(state.actionContacts.size, state.syncDashboard.actionRequiredCount),
-                        syncState = DiagnosticSyncState.fromDashboard(state.syncDashboard.state),
-                        contactsPermissionGranted = state.contactsPermissionGranted,
-                        importInvestigation = BuildConfig.IMPORT_INVESTIGATION,
-                        investigationEvents = if (BuildConfig.IMPORT_INVESTIGATION)
-                            com.patmanak.contako.diagnostics.InvestigationTrace.snapshot() else emptyList(),
-                        journal = com.patmanak.contako.diagnostics.SyncDiagnosticJournal.snapshot(),
-                        problem = state.syncDashboard.problem,
-                        androidPendingContactCount = state.syncDashboard.androidPendingContactIds.size,
-                    ),
-                )
-                .also { generationFailed = false } } catch (_: IllegalStateException) {
-                    generationFailed = true
-                    null
-                } catch (_: IllegalArgumentException) {
-                    generationFailed = true
-                    null
+                exporting = true
+                scope.launch {
+                    try {
+                        val currentIssues = try {
+                            withContext(Dispatchers.IO) {
+                                (context.applicationContext as com.patmanak.contako.ContakoApplication).currentDiagnosticIssues()
+                            }
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { com.patmanak.contako.diagnostics.DiagnosticCurrentIssues.unavailable() }
+                        report = try {
+                            LocalDiagnosticReportGenerator.generate(
+                                LocalDiagnosticInput(
+                                    appVersion = BuildConfig.VERSION_NAME,
+                                    apiLevel = Build.VERSION.SDK_INT,
+                                    debugBuild = BuildConfig.DEBUG,
+                                    contactCount = state.totalContactCount,
+                                    groupCount = state.totalGroupCount,
+                                    pendingMutationCount = state.pendingMutationCount,
+                                    actionRequiredCount = maxOf(state.actionContacts.size, state.syncDashboard.actionRequiredCount),
+                                    syncState = DiagnosticSyncState.fromDashboard(state.syncDashboard.state),
+                                    contactsPermissionGranted = state.contactsPermissionGranted,
+                                    importInvestigation = BuildConfig.IMPORT_INVESTIGATION,
+                                    investigationEvents = if (BuildConfig.IMPORT_INVESTIGATION)
+                                        com.patmanak.contako.diagnostics.InvestigationTrace.snapshot() else emptyList(),
+                                    journal = com.patmanak.contako.diagnostics.SyncDiagnosticJournal.snapshot(),
+                                    problem = state.syncDashboard.problem,
+                                    androidPendingContactCount = state.syncDashboard.androidPendingContactIds.size,
+                                    currentIssues = currentIssues,
+                                    deviceFamily = com.patmanak.contako.diagnostics.DiagnosticDeviceFamily.fromManufacturer(Build.MANUFACTURER),
+                                ),
+                            ).also { generationFailed = false }
+                        } catch (_: IllegalStateException) {
+                            generationFailed = true
+                            null
+                        } catch (_: IllegalArgumentException) {
+                            generationFailed = true
+                            null
+                        }
+                        showTechnicalReport = false
+                        exportSucceeded = null
+                    } finally { exporting = false }
                 }
-                showTechnicalReport = false
-                exportSucceeded = null
             },
         ) { Text(stringResource(R.string.diagnostics_generate)) }
         if (generationFailed) Text(stringResource(R.string.diagnostics_export_failed))

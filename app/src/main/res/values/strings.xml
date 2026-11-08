@@ -510,4 +510,11 @@
     <string name="directory_loading">Loading contacts</string>
     <string name="directory_read_failed">Contacts could not be read from this device.</string>
     <string name="directory_retry_read">Retry local read</string>
+    <string name="sync_item_retry">Retry</string>
+    <string name="sync_item_retry_needed">These changes need another attempt.</string>
+    <string name="sync_retry_verification">Remote verification is incomplete.</string>
+    <string name="sync_import_ignore">Ignore until changed</string>
+    <string name="sync_import_waiting">Some Proton contacts are waiting to retry.</string>
+    <string name="sync_email_partial_title">Partially synchronized</string>
+    <string name="sync_email_partial_body">Email addresses need review.</string>
 </resources>

@@ -58,6 +58,8 @@ internal class TargetedContactRecovery(
                         beforeRemote(); mutationsRecovered = true
                     }
                     val prerequisite = when (remote) {
+                        SyncPrerequisiteState.LOCAL_FAILURE -> TargetedRecoveryWorkResult.Failed(GatewayFailureCategory.UNKNOWN,
+                            TargetedRecoveryPrerequisite.UNAVAILABLE)
                         SyncPrerequisiteState.READY -> prepareProton(command, isCancelled)
                         SyncPrerequisiteState.OFFLINE -> TargetedRecoveryWorkResult.Failed(GatewayFailureCategory.NETWORK_UNAVAILABLE,
                             TargetedRecoveryPrerequisite.UNAVAILABLE)

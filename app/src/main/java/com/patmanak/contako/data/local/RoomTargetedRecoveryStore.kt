@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.map
 internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
     private val retryPolicy: MutationRetryPolicy = MutationRetryPolicy(),
     private val canonicalMapper: CanonicalAndroidContactMapper = offlineAndroidProjectionMapper(),
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : TargetedRecoveryExecutionStore {
     private val dao get() = database.targetedRecoveryRequestDao()
 
@@ -124,6 +125,14 @@ internal class RoomTargetedRecoveryStore(private val database: ContakoDatabase,
 
     override suspend fun validate(request: TargetedRecoveryRequestEntity): TargetedRecoveryWorkResult? = database.withTransaction {
         if (!claimed(request)) return@withTransaction TargetedRecoveryWorkResult.Cancelled
+        if (request.kind == TargetedRecoveryKind.PROTON_CARD.name) {
+            val obligation = database.remoteHydrationObligationDao().get(request.accountId, request.targetId)
+            val now = clock()
+            if (obligation?.isTransient == true && obligation.nextAttemptAtEpochMillis > now)
+                return@withTransaction TargetedRecoveryWorkResult.Failed(GatewayFailureCategory.RATE_LIMITED,
+                    TargetedRecoveryPrerequisite.UNAVAILABLE,
+                    retryAfterMillis = obligation.nextAttemptAtEpochMillis - now)
+        }
         val preview = previewCurrent(request.accountId, TargetedRecoveryKind.valueOf(request.kind), request.targetId)
         when {
             request.kind == TargetedRecoveryKind.ANDROID_COPY.name && preview.providerEpoch != request.expectedEpoch ->

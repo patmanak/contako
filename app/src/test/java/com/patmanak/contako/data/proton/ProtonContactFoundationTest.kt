@@ -1400,8 +1400,8 @@ class ProtonContactUpdateDiagnosticTest {
         remote.mutationFailure = IllegalArgumentException("untrusted remote text")
         val valid = contact.copy(values = listOf(contact.values.single().copy(value = "Edited note")))
         val remoteFailure = gateway.apply(ACCOUNT, ContactMutation.Update(RemoteContactId("contact-0"), null, valid))
-        assertEquals(GatewayOutcome.Failure(GatewayFailureCategory.VALIDATION_REJECTED), remoteFailure)
-        assertEquals(listOf(ProtonContactUpdateStage.REMOTE_UPDATE, GatewayFailureCategory.VALIDATION_REJECTED,
+        assertEquals(GatewayOutcome.Failure(GatewayFailureCategory.UNKNOWN), remoteFailure)
+        assertEquals(listOf(ProtonContactUpdateStage.REMOTE_UPDATE, GatewayFailureCategory.UNKNOWN,
             null, null), observed.single())
         assertEquals(1, remote.updateCalls)
 

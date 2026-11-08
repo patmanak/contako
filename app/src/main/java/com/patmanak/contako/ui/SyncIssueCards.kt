@@ -7,6 +7,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.patmanak.contako.R
@@ -22,6 +24,8 @@ internal data class SyncIssueItem(
     val advice: SyncIssueAdvice,
     val canReview: Boolean = false,
     val isDeleted: Boolean = false,
+    val retry: SyncMutationRetry? = null,
+    val importGeneration: String? = null,
 ) {
     override fun toString() = "SyncIssueItem(REDACTED, scope=${advice.scope}, cause=${advice.cause})"
 }
@@ -33,16 +37,20 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
     val result = mutableListOf<SyncIssueItem>()
     fun add(key: String, id: String?, name: String?, problem: SyncProblem?, scope: SyncIssueScope,
         durable: Boolean = false, review: Boolean = false, deleted: Boolean = false,
-        compare: Boolean = false, queuedChoice: Boolean = false) {
+        compare: Boolean = false, queuedChoice: Boolean = false, retry: SyncMutationRetry? = null,
+        importGeneration: String? = null) {
         result += SyncIssueItem(key, id, name, problem,
             SyncIssuePresentationPolicy.present(problem, scope, snapshot.state, durable, compare, review,
                 contactsPermissionMissing = !state.contactsPermissionGranted,
                 conflictChoiceQueued = queuedChoice,
                 canTarget = id != null && scope in setOf(SyncIssueScope.PROTON_IMPORT, SyncIssueScope.ANDROID_COPY),
                 knownValidationIssues = if (scope == SyncIssueScope.CONTACT) SyncValidationIssue.entries
-                    .filter { it.name in contacts[id]?.actionRequiredReasons.orEmpty() }.toSet() else emptySet()), review, deleted)
+                    .filter { it.name in contacts[id]?.actionRequiredReasons.orEmpty() }.toSet() else emptySet(),
+                retryReason = retry?.reason), review, deleted, retry, importGeneration)
     }
     conflicts.forEach { conflict ->
+        if (snapshot.blockedItems.any { it.id == conflict.contactId && it.type == SyncBlockedItemType.CONTACT &&
+                it.retry?.reason == SyncMutationRetryReason.VERIFICATION }) return@forEach
         val contact = contacts[conflict.contactId]
         add("conflict:${conflict.contactId}", conflict.contactId, contact?.resolvedDisplayName,
             SyncProblem.CONFLICT_RECOVERY_REQUIRED, SyncIssueScope.CONTACT,
@@ -50,15 +58,16 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
             compare = !conflict.remoteDeleted, queuedChoice = conflict.choice != null && !conflict.remoteDeleted)
     }
     snapshot.blockedItems.forEach { item ->
-        if (item.type == SyncBlockedItemType.CONTACT && conflicts.any { it.contactId == item.id }) return@forEach
+        if (item.type == SyncBlockedItemType.CONTACT && result.any { it.key == "conflict:${item.id}" }) return@forEach
         val group = item.type == SyncBlockedItemType.GROUP
         val review = !item.isDeleted && if (group) state.actionGroups.any { it.id == item.id } else contacts.containsKey(item.id)
         add("blocked:${item.type}:${item.id}", item.id, item.displayName, item.problem,
             if (group) SyncIssueScope.GROUP else SyncIssueScope.CONTACT,
-            durable = true, review = review, deleted = item.isDeleted)
+            durable = true, review = review, deleted = item.isDeleted, retry = item.retry)
     }
     snapshot.importProblems.forEach { item ->
-        add("import:${item.remoteId}", item.remoteId, item.displayName, item.problem, SyncIssueScope.PROTON_IMPORT)
+        if (!item.isTransient && !item.ignored) add("import:${item.remoteId}", item.remoteId, item.displayName, item.problem,
+            SyncIssueScope.PROTON_IMPORT, importGeneration = item.generation.takeIf(String::isNotBlank))
     }
     snapshot.androidContactIssues.forEach { item ->
         add("android:${item.kind}:${item.contactId}", item.contactId,
@@ -114,6 +123,7 @@ internal fun syncIssueBodyResources(advice: SyncIssueAdvice): List<Int> {
         SyncIssueCause.GROUP_CAPABILITY -> R.string.sync_issue_groups
         SyncIssueCause.REMOTE_PERMISSION -> R.string.sync_issue_remote_permission
         SyncIssueCause.ANDROID -> R.string.sync_issue_android_body
+        SyncIssueCause.VERIFICATION -> R.string.sync_retry_verification
         SyncIssueCause.UNKNOWN -> R.string.sync_issue_unknown
     })
 }
@@ -122,6 +132,12 @@ internal fun syncIssueBodyResources(advice: SyncIssueAdvice): List<Int> {
 internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewModel: ContactsViewModel,
     onReauthenticate: () -> Unit) {
     val advice = item.advice
+    val retry = item.retry
+    val retryEligible by produceState(false, retry?.nextEligibleAtEpochMillis, retry?.queued) {
+        val remaining = ((retry?.nextEligibleAtEpochMillis ?: 0L) - System.currentTimeMillis()).coerceAtLeast(0)
+        if (remaining > 0) kotlinx.coroutines.delay(remaining)
+        value = retry?.queued != true
+    }
     val targetedKind = when (advice.scope) {
         SyncIssueScope.PROTON_IMPORT -> TargetedRecoveryKind.PROTON_CARD
         SyncIssueScope.ANDROID_COPY -> item.targetId?.let { TargetedRecoveryKind.ANDROID_COPY }
@@ -154,7 +170,12 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
             style = MaterialTheme.typography.bodySmall)
         if (item.isDeleted) Text(stringResource(R.string.sync_deletion_pending))
         targetedStatus?.let { TargetedRecoveryStatusText(it) }
-        if (targetIsPrimary) {
+        if (item.importGeneration != null && item.targetId != null) {
+            Button(onClick = { viewModel.resumeImportProblem(item.targetId, item.importGeneration) },
+                enabled = state.syncActivity == SyncActivity.IDLE) {
+                Text(stringResource(R.string.targeted_proton_title))
+            }
+        } else if (targetIsPrimary) {
             Button(onClick = { viewModel.openTargetedRecovery(requireNotNull(targetedKind), requireNotNull(item.targetId)) },
                 enabled = targetedStatus?.state !in setOf(TargetedRecoveryState.REQUESTED, TargetedRecoveryState.RUNNING)) {
                 Text(stringResource(if (targetedKind == TargetedRecoveryKind.PROTON_CARD) R.string.targeted_proton_title
@@ -163,12 +184,16 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
         } else if (actionAdvice.action == SyncIssueAction.WAIT) {
             if (targetedStatus == null) Text(stringResource(R.string.conflict_queued))
         }
-        else Button(enabled = actionAdvice.action != SyncIssueAction.RETRY_SYNC || state.syncActivity == SyncActivity.IDLE,
+        else Button(enabled = (actionAdvice.action !in setOf(SyncIssueAction.RETRY_SYNC, SyncIssueAction.RETRY_ITEM) ||
+                state.syncActivity == SyncActivity.IDLE) && (actionAdvice.action != SyncIssueAction.RETRY_ITEM || retryEligible),
             onClick = {
                 when (actionAdvice.action) {
                     SyncIssueAction.CONTACTS_PERMISSION -> viewModel.requestContactsPermission()
                     SyncIssueAction.SIGN_IN -> onReauthenticate()
                     SyncIssueAction.RETRY_SYNC -> viewModel.syncNow()
+                    SyncIssueAction.RETRY_ITEM -> if (retry != null && item.targetId != null) viewModel.retrySyncItem(
+                        if (advice.scope == SyncIssueScope.GROUP) SyncBlockedItemType.GROUP else SyncBlockedItemType.CONTACT,
+                        item.targetId, retry.revision)
                     SyncIssueAction.COMPARE_VERSIONS -> item.targetId?.let(viewModel::openConflict)
                     SyncIssueAction.REVIEW_ITEM -> review()
                     SyncIssueAction.VIEW_DIAGNOSTICS -> diagnostics()
@@ -183,6 +208,7 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
                     R.string.contacts_permission_open_settings else R.string.contacts_permission_action
                 SyncIssueAction.SIGN_IN -> R.string.auth_sign_in
                 SyncIssueAction.RETRY_SYNC -> R.string.sync_now
+                SyncIssueAction.RETRY_ITEM -> R.string.sync_item_retry
                 SyncIssueAction.COMPARE_VERSIONS -> R.string.conflict_review
                 SyncIssueAction.REVIEW_ITEM -> R.string.sync_issue_review
                 SyncIssueAction.VIEW_DIAGNOSTICS -> R.string.sync_issue_diagnostics
@@ -192,6 +218,12 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
             }))
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (item.importGeneration != null && item.targetId != null && advice.cause == SyncIssueCause.CRYPTOGRAPHY) {
+                TextButton(onClick = { viewModel.ignoreImportProblem(item.targetId, item.importGeneration) },
+                    enabled = state.syncActivity == SyncActivity.IDLE) {
+                    Text(stringResource(R.string.sync_import_ignore))
+                }
+            }
             // Import-only remote targets have no committed local contact to inspect yet.
             if (item.targetId != null && item.advice.scope in setOf(SyncIssueScope.CONTACT, SyncIssueScope.ANDROID_COPY)) {
                 TextButton(onClick = { viewModel.openContactSyncDetail(item.targetId) }) {

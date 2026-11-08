@@ -195,7 +195,7 @@ otherwise, apply the common setup, exact field comparison and cleanup above.
 | FT-23 | Separately planned dedicated lifecycle: dirty native contact/group/tombstone with empty Room outbox, offline/unavailable provider, edit racing cleanup; Cancel then successful sync then sign-out again. | Fresh warning state, Sync/Cancel/confirmed Discard as appropriate; unsafe cleanup refuses and retains session. Normal sign-out/account removal removes scoped local copies, never remote contacts. |
 | FT-24 | C02/C03/C04/C14: alias vs structured names, first/family edits, clear display name, generated names, separate/aggregated sources and first-photo baseline. Include an email-only display alias with empty given/family names; inspect native generated parts, sync unchanged, then edit only the native note. | Names persist without replacing alias or importing generated parts as edits; actual source-owned values compared. The email alias retains its punctuation and canonical given/family names remain empty after unchanged sync and the unrelated note edit. A genuine native name edit remains detectable. Similar aggregate labels never authorize forced baseline adoption or merging. |
 | FT-25 | Rich contact with Call/Message/Email actions, normal and narrow screen, long locale labels and large text. | Three actions share a row when measured labels fit; deliberate large-text reflow allowed; primary badges align with values. |
-| FT-26 | On ordinary and diagnostic variants, generate/export/dismiss diagnostics after manual/native/local-change triggers and an authorized failure; rotate more than 128 events, restart, clear history and exercise picker cancel/storage error. | Schema 3 includes UTC/process-relative times, trigger/disposition, failure stage/phase and known field category, broad Android-copy backlog and sync reason. The latest detailed failure survives rotation and subsequent generic banners; process restarts are marked. No values/credentials/private IDs/raw errors/authentication traces; unknown fields remain unknown. Journal storage failure cannot change sync behavior; failed clearing is visible and never claims durable deletion. Clearing history/dismissing the report leaves exported documents intact. |
+| FT-26 | On ordinary and diagnostic variants, generate/export/dismiss diagnostics after manual/native/local-change triggers and transient/terminal failures; rotate progress for a large import, restart, clear history and exercise picker cancel/storage error. | Schema 4 includes UTC/process-relative times, trigger/disposition, failure boundaries, bounded protocol codes, current grouped causes and explicit unavailable/truncated states. Error/transition retention survives repetitive progress; history stays distinct from current facts. No values/credentials/private IDs/raw errors/authentication traces; unknown fields remain unknown. Journal storage failure cannot change sync behavior; failed clearing never claims durable deletion. Clearing/dismissing leaves already exported documents intact. |
 
 ## Remote-deletion recovery
 
@@ -585,3 +585,57 @@ untouched values independently on each peer:
   values and durable linked identities after each save in all peers, restart and
   repeat a no-change pass. No divergent binding, pending Android copy or false
   acknowledgement may remain; ownership/version guards MUST stay effective.
+
+## Recovery and partial-delivery acceptance
+
+- During uncertain CREATE recovery, inject 429 into each inventory/card boundary,
+  including a deletion of that uncertain creation. Restart before the retry.
+  Preserve ambiguity and server deadlines; never POST twice or acknowledge a
+  deletion without absence/identity proof. Also prove absence first, then reject
+  a new POST with 429: a captured older command MUST NOT restore obsolete ambiguity.
+- With many uncertain creations, bound full-card scans per pass. Crash after
+  preparing the first but before claiming another; introduce the second UID on
+  Proton, then resume. Pending intents MUST retain ambiguity, and waiting for the
+  scan budget MUST NOT spend automatic failure attempts. A verified identical
+  creation converges without a second POST or a version-choice prompt. Duplicate
+  UIDs, private-field differences and lost opaque properties MUST remain uncertain.
+- On a large first import, fail a card transiently late in acquisition, then retry.
+  Healthy committed cards MUST remain checkpointed; failed/unread cards become
+  durable obligations before cursor acknowledgement. Respect Retry-After across
+  restart/manual/targeted requests. Isolate only the specified per-contact remap
+  failure; a real storage/ownership failure stops unsafe work. Cancel during both
+  canonical and checkpoint transactions without reporting a storage fault.
+- Exhaust a transient contact/group upload and a deletion. The identified Sync
+  item offers one explicit cooled retry; repeated taps do not reset attempts,
+  identity, ambiguity or deadlines. A separately blocked item MUST NOT suppress
+  healthy eligible work in later bounded batches or transient framework scheduling.
+- Edit one email to an invalid value while changing a phone/note. Verify the
+  other fields on Proton, preserve the previous accepted email and every group,
+  and retain the invalid input and partial state locally after restart/no-change.
+  Repeat with a new invalid email, repeated equal addresses with distinct
+  preferences/groups, correction to a valid address, deletion and explicit Proton
+  conflict choice. Sign-out MUST account for retained partial intent.
+  Reorder or remove one email on Proton so a different occurrence takes its old
+  vCard line position: never replace that other email or inherit its groups.
+  Change remote groups while the invalid input is retained; repeat hydration
+  without restoring old groups. Also edit during an in-flight upload, then receive
+  its older acknowledgement with new email identities. Only proven identities
+  transfer; the newer content remains pending. A remote whole-contact deletion
+  MUST retain an accessible draft and require an explicit recovery choice.
+- Create organization-, nickname-, phonetic-, phone- and email-only contacts.
+  Verify the generated display name without fabricated structured parts; change
+  its source after a Proton round trip and restart, then set an explicit name.
+  Unsigned/altered marker data MUST NOT replace an explicit name.
+- Keep an unrelated contact blocked while changing a group, including removed
+  email edges, an empty group and repeated addresses. Only proved dependencies
+  may defer that group; legacy incomplete catalogs require verified membership
+  acquisition. Lost acknowledgement must retain removed edges until exact proof.
+- Exercise each allowed Android formatting equivalence after an owned write,
+  then perform a genuine native edit using the real saved provider baseline.
+  Reject concurrent version changes, changed preferred email, missing/truncated
+  values and altered dates. Initial/legacy copies without write evidence remain
+  strict; no provider-generated normalization may be uploaded as an edit.
+- For an invalid signature/decryption, show the exact closed failure category and
+  offer recheck or explicit ignore of that obligation generation. A later private-
+  only remote event reopens ignored work. No unverified content may be edited,
+  re-signed, treated as canonical or projected as an effect of these actions.

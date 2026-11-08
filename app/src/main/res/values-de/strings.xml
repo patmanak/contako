@@ -510,4 +510,11 @@
     <string name="directory_loading">Kontakte werden geladen</string>
     <string name="directory_read_failed">Die Kontakte auf diesem Gerät konnten nicht gelesen werden.</string>
     <string name="directory_retry_read">Lokales Lesen wiederholen</string>
+    <string name="sync_item_retry">Erneut versuchen</string>
+    <string name="sync_item_retry_needed">Diese Änderungen benötigen einen weiteren Versuch.</string>
+    <string name="sync_retry_verification">Die Remote-Prüfung ist unvollständig.</string>
+    <string name="sync_import_ignore">Bis zur Änderung ignorieren</string>
+    <string name="sync_import_waiting">Einige Proton-Kontakte warten auf einen neuen Versuch.</string>
+    <string name="sync_email_partial_title">Teilweise synchronisiert</string>
+    <string name="sync_email_partial_body">E-Mail-Adressen müssen überprüft werden.</string>
 </resources>

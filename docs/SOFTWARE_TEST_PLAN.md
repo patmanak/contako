@@ -296,6 +296,49 @@ real notification taps and authenticated navigation remain FT-17 variants.
 
 ## Recovery and negative variants
 
+Exercise exhausted transient writes with one explicit retry credit at the exact
+revision. Repeated taps, stale requests, cooldown, restart and another failure
+MUST preserve idempotency and the reconciliation flag. A blocked item MUST NOT
+prevent independent eligible work in later bounded drains. Assignments MUST
+wait only on proven current/removed group edges; legacy incomplete dependencies
+require verified membership before this narrower scheduling is used.
+
+Inject HTTP 429 before event, inventory, card and deletion reads, and during
+mutation preparation/upload. Restart and manually synchronize before the server
+deadline: no remote request or untouched mutation attempt may be consumed.
+An unknown unreadable remote card MUST NOT prove an ambiguous creation absent.
+Reconcile identical delivered creations through the real signed-card codec,
+including duplicate UIDs and a crash between processing two queued creations.
+
+Invalid local email edits MUST retain the exact local occurrence while other
+fields upload. Compare the last accepted remote email and all of its group
+edges, a newly invalid occurrence, duplicate addresses with distinct identities,
+acknowledgement, remote reimport and database reopen. Missing/ambiguous identity
+proof MUST block replacement rather than guess by position. Correcting or
+removing the invalid occurrence MUST clear its partial state.
+Remote deletion of only the accepted email MUST retain the invalid local input
+without resurrecting that email or its old groups. Remote deletion of the whole
+contact MUST retain an accessible draft and require an explicit recovery choice.
+An acknowledgement for an older in-flight revision MAY transfer proven occurrence
+identities, never acknowledge the newer content. Remote group changes MUST remain
+authoritative when no local group intent opposes them. Generated fallback
+names MUST follow their source after echo without inventing structured names or
+turning an explicit display name into a generated one.
+
+Post-write Android equivalence MUST use a bound write receipt and unchanged
+provider version. Cover whitespace/order, same-digit phone formatting, phone
+preference, token-preserving structured names/organizations and explicit equivalent
+types. Changed accents/case, missing tokens/rows, email preference, dates and
+concurrent edits MUST remain detectable. Store the actual provider observation;
+a subsequent no-change ingest MUST NOT upload its normalization.
+
+Diagnostics MUST retain errors and transitions despite a long successful import.
+Verify transient failures, closed HTTP/service codes, current persisted causes,
+unknown exceptions and schema compatibility. Export MUST exclude contact values,
+private identities, paths, raw errors and credentials. Ignored signature failures
+MUST leave unverified content outside canonical storage, upload and projection;
+source changes MUST reopen the exact obligation.
+
 Room upgrade coverage MUST include the additive hydration-obligation schema.
 Seed an obligation, reopen the database, verify the retry and remove the account;
 neither upgrade nor failed sign-out may discard unresolved intent.

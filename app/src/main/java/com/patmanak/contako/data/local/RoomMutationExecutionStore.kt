@@ -29,7 +29,9 @@ internal class RoomMutationExecutionStore(
     }
 
     override suspend fun recoverInterrupted(accountId: String, nowEpochMillis: Long): Int {
-        var recovered = store.recoverInterrupted(accountId, nowEpochMillis)
+        var recovered = RoomMutationRetryRequestStore(database).consume(
+            com.patmanak.contako.data.gateway.AccountScope(accountId), nowEpochMillis)
+        recovered += store.recoverInterrupted(accountId, nowEpochMillis)
         recovered += recoverSessionAndCapabilityBlocks(accountId, nowEpochMillis)
         val reader = existence ?: return recovered
         // Older blocked deletes remain durable but are not eligible for a normal retry.
@@ -75,7 +77,7 @@ internal class RoomMutationExecutionStore(
                             AggregateType.CONTACT.name -> database.contactDao().get(accountId, intent.aggregateId)?.contact?.let {
                                 it.revision == intent.revision && it.pendingMutationRevision == intent.revision &&
                                     it.remoteContactId == intent.remoteIdentity && it.remoteVersion == intent.remoteVersion &&
-                                    it.conflictState == null &&
+                                    (it.conflictState == null || intent.isBoundAmbiguousCreateConflict()) &&
                                     ((intent.operation == MutationOperation.DELETE.name && it.isDeleted) ||
                                         (intent.operation == MutationOperation.UPSERT.name && !it.isDeleted))
                             } == true
@@ -147,6 +149,8 @@ internal class RoomMutationExecutionStore(
         // Persist service identities in the same transaction as acknowledgement/cleanup, before
         // any queued group assignment can read them. Canonical value IDs/memberships stay stable.
         val identities = acknowledgement.emailIdsByValueId
+        if (stored != null && identities != null) RoomContactUploadOverlays(database)
+            .acknowledged(command.accountId, command.aggregateId, command.revision, identities)
         if (stored != null && identities != null) {
             val replacedEmailIds = stored.values.filter { it.kind == "EMAIL" }.filter { value ->
                 val oldIdentity = StringMapCodec.decode(value.metadataEncoding)[com.patmanak.contako.data.proton.PROTON_EMAIL_ID_KEY]
@@ -181,7 +185,8 @@ internal class RoomMutationExecutionStore(
         val acknowledged = entity(command) ?: return@withTransaction false
         val finished = store.finishAcknowledged(acknowledged)
         if (finished && stored != null && acknowledgement.remoteIdentity != null &&
-            command.operation != com.patmanak.contako.data.sync.RemoteMutationOperation.ASSIGNMENTS) {
+            command.operation != com.patmanak.contako.data.sync.RemoteMutationOperation.ASSIGNMENTS &&
+            !RoomContactUploadOverlays(database).has(command.accountId, command.aggregateId)) {
             val kind = if (command.operation == com.patmanak.contako.data.sync.RemoteMutationOperation.DELETE)
                 com.patmanak.contako.domain.sync.ContactSyncEvidenceKind.CONFIRMED_ABSENCE
                 else com.patmanak.contako.domain.sync.ContactSyncEvidenceKind.WRITE_ACKNOWLEDGEMENT
@@ -293,11 +298,16 @@ internal class RoomMutationExecutionStore(
                 pending.remoteVersion != command.expectedRemoteVersion) return false
         } else if (current.remoteContactId != null || pending.remoteIdentity != null || !pending.requiresReconciliation) return false
         if (database.contactDao().getEntitiesByRemoteContactId(command.accountId, identity).any { it.id != current.id }) return false
+        val ledger = database.androidProjectionLedgerDao().get(command.accountId, command.aggregateId)
+        if (ledger != null && ledger.sourceIdentity != identity && (ledger.sourceIdentity != null ||
+                ledger.adoptionState != com.patmanak.contako.data.android.AndroidAdoptionState.AWAITING_REMOTE_ID.name)) return false
+        val latest = database.contactDao().get(command.accountId, command.aggregateId)?.toDomain() ?: return false
+        if (!RoomContactUploadOverlays(database).retainAcknowledgedIdentities(latest, acknowledgement.emailIdsByValueId.orEmpty())) return false
         if (!store.attachContactIdentity(command.accountId, command.aggregateId, identity, current.isDeleted)) return false
         database.contactDao().upsert(current.copy(remoteContactId = identity, remoteVersion = acknowledgement.remoteVersion))
         database.outboxDao().upsert(pending.copy(remoteIdentity = identity, remoteVersion = acknowledgement.remoteVersion,
             requiresReconciliation = acknowledgement.remoteVersion == null))
-        // Email identity maps cover the older submitted values; the next write refreshes them.
+        // Only stable surviving occurrences inherited service identities; newer content remains pending.
         // Keeping the newer outbox row also keeps dependent assignments gated.
         return true
     }
@@ -305,6 +315,7 @@ internal class RoomMutationExecutionStore(
 
 private fun OutboxMutationEntity.isSessionOrCapabilityBlock(): Boolean {
     if (state != DurableMutationState.ACTION_REQUIRED.name) return false
+    if (isBoundAmbiguousCreateConflict()) return true
     // Earlier versions blocked an ambiguous creation before an authoritative recheck
     // was available. A fresh request generation reopens the check, never a blind POST.
     if (aggregateType == AggregateType.CONTACT.name && remoteIdentity == null && requiresReconciliation &&
@@ -322,6 +333,11 @@ private fun OutboxMutationEntity.isSessionOrCapabilityBlock(): Boolean {
         else -> false
     }
 }
+
+private fun OutboxMutationEntity.isBoundAmbiguousCreateConflict(): Boolean =
+    aggregateType == AggregateType.CONTACT.name && remoteIdentity != null && remoteVersion == null &&
+        requiresReconciliation && errorCategory == "CONFLICT" && blockedReason == RoomContactConflictStore.CONFLICT &&
+        operation in setOf(MutationOperation.UPSERT.name, MutationOperation.DELETE.name)
 
 private class ChangedRecoveryGeneration : RuntimeException(null, null, false, false)
 

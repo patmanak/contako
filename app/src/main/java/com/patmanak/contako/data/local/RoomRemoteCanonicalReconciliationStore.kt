@@ -76,8 +76,9 @@ internal class RoomRemoteCanonicalReconciliationStore(
     }
 
     /** Caller MUST hold the targeted transaction and its owner/revision/source-generation guards. */
-    internal suspend fun reconcileTargetedVerified(account: AccountScope, verified: VerifiedContactCard) {
-        reconcileHydrated(account, verified, null)
+    internal suspend fun reconcileTargetedVerified(account: AccountScope, verified: VerifiedContactCard,
+        verifiedUniqueCreation: Boolean = false) {
+        reconcileHydrated(account, verified, null, verifiedUniqueCreation)
     }
 
     override suspend fun commit(
@@ -113,6 +114,7 @@ internal class RoomRemoteCanonicalReconciliationStore(
         account: AccountScope,
         verified: VerifiedContactCard,
         remoteModifiedAtEpochSeconds: Long?,
+        verifiedUniqueCreation: Boolean = false,
     ) {
         val dao = database.contactDao()
         val remote = verified.contact
@@ -158,6 +160,17 @@ internal class RoomRemoteCanonicalReconciliationStore(
         checkLocalReconciliationInvariant(outbox != null && outbox.revision == local.pendingMutationRevision,
             LocalReconciliationInvariant.INTENT_REVISION)
         checkNotNull(outbox)
+        if (verifiedUniqueCreation && outbox.requiresReconciliation && outbox.remoteVersion == null &&
+            outbox.operation == MutationOperation.UPSERT.name && !local.isDeleted &&
+            com.patmanak.contako.data.proton.equivalentContactSubmission(local, remote) &&
+            canAdoptRemote(remote.copy(accountId = local.accountId, id = local.id))) {
+            adoptRemote(local, remote, verified, remoteModifiedAtEpochSeconds)
+            checkLocalReconciliationInvariant(database.outboxDao().deleteRevision(
+                account.value, AggregateType.CONTACT.name, local.id, outbox.revision) == 1,
+                LocalReconciliationInvariant.INTENT_REVISION)
+            database.contactConflictDao().delete(account.value, local.id)
+            return
+        }
         if (local.remoteContactId == null) {
             // Recover only the stable vCard UID of an ambiguous creation, never a name match.
             checkLocalReconciliationInvariant(remote.remoteVCardUid != null &&
@@ -222,6 +235,21 @@ internal class RoomRemoteCanonicalReconciliationStore(
             blockConflict(local, outbox, "REMOTE_DELETION_RECOVERY_REQUIRED")
             return
         }
+        val overlays = RoomContactUploadOverlays(database)
+        if (overlays.has(account.value, local.id)) {
+            // Withheld input remains durable user intent even after its wire projection was acknowledged.
+            val revision = Math.incrementExact(local.revision)
+            val retained = local.copy(revision = revision, pendingMutationRevision = revision, isDeleted = false)
+            val now = evidenceClock()
+            val retainedIntent = OutboxMutationEntity(account.value, AggregateType.CONTACT.name, local.id,
+                MutationOperation.UPSERT.name, revision, now, now,
+                remoteIdentity = local.remoteContactId, remoteVersion = local.remoteVersion,
+                idempotencyKey = java.util.UUID.randomUUID().toString(), requiresReconciliation = true)
+            overlays.advanceRevision(account.value, local.id, revision)
+            blockConflict(retained, retainedIntent, "REMOTE_DELETION_RECOVERY_REQUIRED")
+            RoomDeletionRecoveryStore(database).discover(account.value)
+            return
+        }
         database.contactDao().upsert(
             stored.contact.copy(
                 revision = stored.contact.revision + 1,
@@ -242,7 +270,8 @@ internal class RoomRemoteCanonicalReconciliationStore(
         verified: VerifiedContactCard,
         modifiedAtEpochSeconds: Long?,
     ) = database.withTransaction {
-        val adopted = retainLocalContactComplements(local, remote).copy(
+        val overlays = RoomContactUploadOverlays(database)
+        val adopted = overlays.overlayRemote(local, retainLocalContactComplements(local, remote)).copy(
                 accountId = local.accountId,
                 id = local.id,
                 revision = local.revision + 1,
@@ -255,6 +284,7 @@ internal class RoomRemoteCanonicalReconciliationStore(
                 isDeleted = false,
             )
         replaceContact(adopted)
+        overlays.advanceRevision(adopted.accountId, adopted.id, adopted.revision, adopted)
         // An acknowledged full-card fingerprint already proves an unchanged readback, even
         // when the codec materializes generated N/ORG/date forms absent from the local editor.
         // Unknown legacy baselines cannot prove a new remote field change; establish the
@@ -273,12 +303,17 @@ internal class RoomRemoteCanonicalReconciliationStore(
     }
 
     private suspend fun recordProtonEvidence(contact: CanonicalContact, kind: com.patmanak.contako.domain.sync.ContactSyncEvidenceKind) {
+        // The read/ack covers the wire projection, not the withheld local e-mail values.
+        if (RoomContactUploadOverlays(database).has(contact.accountId, contact.id)) return
         val source = contact.remoteContactId ?: return
         RoomContactSyncEvidenceStore(database).recordProton(contact.accountId, contact.id, contact.revision, source,
             contact.remoteVersion, kind, evidenceClock())
     }
 
-    internal suspend fun canAdoptRemote(contact: CanonicalContact): Boolean = pendingMembershipsFor(contact) != null
+    internal suspend fun canAdoptRemote(contact: CanonicalContact): Boolean {
+        val local = database.contactDao().get(contact.accountId, contact.id)?.toDomain() ?: return pendingMembershipsFor(contact) != null
+        return pendingMembershipsFor(RoomContactUploadOverlays(database).overlayRemote(local, contact)) != null
+    }
 
     private suspend fun pendingMembershipsFor(contact: CanonicalContact): List<GroupMembershipEntity>? {
         val oldEmails = database.contactDao().get(contact.accountId, contact.id)?.toDomain()

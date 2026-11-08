@@ -108,6 +108,52 @@ class AndroidContactSyncEvidenceDeviceTest {
         assertEquals("WRITE_PENDING", database.androidProjectionLedgerDao().get(scope.value, canonical.id)?.projectionState)
     }
 
+    @Test fun postWriteEquivalenceRequiresBoundProofAndKeepsTheRealObservationAsBaseline() = runBlocking {
+        prepare()
+        val observed = snapshot.copy(rows = snapshot.rows.map { row ->
+            if (row.identity.canonicalValueId == "note") row.copy(value = " Synthetic   note ", order = 3) else row
+        })
+        val writes = RoomAndroidProjectionWriteLedger(database)
+        assertEquals(AndroidProjectionWriteLedgerResult.RepairRequired,
+            writes.complete(context, canonical.id, canonical.revision, 1, 1, observed, memberships))
+        assertNull(evidence())
+        val proof = requireNotNull(AndroidPostWriteProjectionProof.create(context, canonical.id, canonical.revision,
+            RAW, requireNotNull(canonical.remoteContactId),
+            com.patmanak.contako.data.android.provider.AndroidProviderProjectionResult.Applied(1, rawContactVersion = 17),
+            17, null, snapshot, observed, mapper))
+        assertEquals(AndroidProjectionWriteLedgerResult.Applied,
+            writes.complete(context, canonical.id, canonical.revision, 1, 1, observed, memberships, proof))
+        val baseline = requireNotNull(database.androidProjectionLedgerDao().getBaseline(scope.value, canonical.id))
+        val decoded = com.patmanak.contako.data.android.mapping.AndroidContactSnapshotBinaryCodec.decode(baseline.encodedSnapshot)
+        assertEquals(observed, decoded)
+        assertEquals(mapper.fingerprint(observed).sha256Hex, baseline.fingerprint)
+        assertEquals(canonical, mapper.applyControlledDelta(canonical, decoded, decoded).contact)
+        assertEquals(canonical.values.toSet(), database.contactDao().get(scope.value, canonical.id)?.toDomain()?.values?.toSet())
+        assertNotNull(evidence())
+    }
+
+    @Test fun postWriteProofCannotAuthorizeAnotherObservedPayloadOrAReboundSource() = runBlocking {
+        prepare()
+        val observed = snapshot.copy(rows = snapshot.rows.map { row ->
+            if (row.identity.canonicalValueId == "note") row.copy(value = " Synthetic note ") else row
+        })
+        val proof = requireNotNull(AndroidPostWriteProjectionProof.create(context, canonical.id, canonical.revision,
+            RAW, requireNotNull(canonical.remoteContactId),
+            com.patmanak.contako.data.android.provider.AndroidProviderProjectionResult.Applied(1, rawContactVersion = 17),
+            17, null, snapshot, observed, mapper))
+        val changed = observed.copy(rows = observed.rows.map { row ->
+            if (row.identity.canonicalValueId == "note") row.copy(value = "Native replacement") else row
+        })
+        assertEquals(AndroidProjectionWriteLedgerResult.RepairRequired,
+            RoomAndroidProjectionWriteLedger(database).complete(context, canonical.id, canonical.revision, 1, 1, changed, memberships, proof))
+        assertNull(evidence())
+        val entry = currentLedger()
+        database.androidProjectionLedgerDao().update(entry.copy(sourceIdentity = "different-source"))
+        assertEquals(AndroidProjectionWriteLedgerResult.RepairRequired,
+            RoomAndroidProjectionWriteLedger(database).complete(context, canonical.id, canonical.revision, 1, 1, observed, memberships, proof))
+        assertEquals("WRITE_PENDING", currentLedger().projectionState)
+    }
+
     @Test fun evidenceInsertFailureRollsBackBothBaselinesAndCleanStates() = runBlocking {
         prepare()
         database.openHelper.writableDatabase.execSQL("""
