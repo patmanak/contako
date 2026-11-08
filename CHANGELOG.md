@@ -2,6 +2,18 @@
 
 Features and improvements by version.
 
+## Unreleased
+
+- Preserve ambiguous contact creations and newer edits/deletions when an earlier
+  request finishes; retain the received identity and acknowledged upload baseline.
+- Recheck uncertain creations against verified Proton cards before retrying, while
+  keeping ambiguous matches and unreadable cards blocked safely.
+- Keep dependent group assignments from starving pending contact writes.
+- Rebuild the native cryptographic bundle with 16 KiB ELF alignment and validate
+  its load segments before packaging.
+- Isolate security-test installations and cleanup from existing application data.
+- Complete recent-change plurals and document the investigation build variant.
+
 ## 0.20.0
 
 - Shorten the diagnostic report description to its contents and privacy exclusions.

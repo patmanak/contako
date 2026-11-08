@@ -3,12 +3,14 @@ param(
     [Parameter(Mandatory = $true)][string]$AndroidSdk,
     [Parameter(Mandatory = $true)][string]$AndroidNdk,
     [string]$JavaHome = $env:JAVA_HOME,
-    [string]$Python = 'python'
+    [string]$Python = 'python',
+    [string]$WorkDirectory = (Join-Path $PSScriptRoot 'build'),
+    [string]$MavenRepository = (Join-Path $PSScriptRoot '../build/maven')
 )
 
 $ErrorActionPreference = 'Stop'
 $source = $PSScriptRoot
-$work = Join-Path $source 'build'
+$work = [IO.Path]::GetFullPath($WorkDirectory)
 $go = Join-Path $GoHome 'bin/go.exe'
 if (-not (Test-Path -LiteralPath $go)) { $go = Join-Path $GoHome 'bin/go' }
 if (-not (Test-Path -LiteralPath $go)) { throw 'GO_HOME_INVALID' }
@@ -57,7 +59,8 @@ try {
         ForEach-Object { 'github.com/ProtonMail/gopenpgp/v2/' + $_ }
     $packages += 'github.com/ProtonMail/go-srp'
     Invoke-NativeTool "$work/bin/gomobile$suffix" (@('bind', '-tags', 'mobile', '-target', 'android',
-        '-androidapi', '31', '-javapkg', 'com.proton.gopenpgp', '-trimpath', '-ldflags=-s -w',
+        '-androidapi', '31', '-javapkg', 'com.proton.gopenpgp', '-trimpath',
+        '-ldflags=-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384',
         '-o', "$work/raw.aar") + $packages) 'bind.log'
     $after = @('go.mod', 'go.sum', 'dependencies.go') | ForEach-Object {
         (Get-FileHash -LiteralPath (Join-Path $source $_) -Algorithm SHA256).Hash
@@ -73,6 +76,7 @@ try {
         throw 'OFFICIAL_REFERENCE_HASH_MISMATCH'
     }
     Invoke-NativeTool $Python @((Join-Path $source 'package-aar.py'), '--go', $go,
-        '--java-home', $JavaHome) 'package.log'
+        '--java-home', $JavaHome, '--work', $work,
+        '--repository', ([IO.Path]::GetFullPath($MavenRepository))) 'package.log'
     Write-Output 'NATIVE_GOLIB_BUILD_COMPLETE; verify the resulting hashes against Gradle verification metadata'
 } finally { Pop-Location }

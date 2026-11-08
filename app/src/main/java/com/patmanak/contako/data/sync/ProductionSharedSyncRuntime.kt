@@ -305,7 +305,9 @@ internal fun composeProductionSharedSyncRuntime(
             androidStage, contactsReader, com.patmanak.contako.data.android.provider.AndroidRawContactLifecycleGateway(contentResolver)))
     val mutationPreparation = DeletedContactRecreationPreparationGuard(account, deletionRecoveryStore, dependencies.existence,
         RoomBackedMutationPreparationGateway(account, database, dependencies.membershipReader,
-            dependencies.verifiedCards, dependencies.existence))
+            dependencies.verifiedCards, dependencies.existence,
+            com.patmanak.contako.data.local.RoomAmbiguousContactCreateRecovery(
+                account, database, dependencies.inventory, dependencies.verifiedCards)))
     val mutationOrchestrator = DurableMutationOrchestrator(
         RoomMutationExecutionStore(database, dependencies.existence,
             recoveryGeneration = dependencies.capabilityInvalidationGeneration),

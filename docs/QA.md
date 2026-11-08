@@ -199,7 +199,8 @@ require their own physical evidence and remain NOT RUN when not exercised.
 | audit-runtime-security.py | Hash-locked Maven/native advisory collection; official Go tools supplied separately |
 | check-release.ps1 | APK/AAB, manifest, notices, checksum and optional offline advisory inspection |
 | test-release-check.ps1 | Negative checks of the release checker using built artifacts |
-| check-security-boundaries.ps1 | Selected local TLS/Android checks; inspect physical prerequisites |
+| check-security-boundaries.ps1 | API-35 TLS/Android checks on an explicit device and fresh isolated securitycandidate; clears/removes only run-created fixtures |
+| test-security-boundaries.ps1 | Device-free negative checks for target selection, pre-existing packages, failed installs and cleanup ownership |
 | fixtures/LocalTlsFixture.java | Local TLS fixture used by the security checker |
 | gate-c-broker/GateCBroker.cs | Credential-transport support for retained opt-in probes; never routine login/reset |
 | verify-offline-rebuild.ps1 | Existing checksum/offline rebuild utility; requires expected HEAD |

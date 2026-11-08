@@ -104,29 +104,7 @@ internal class RoomOutboxStore(private val database: ContakoDatabase) {
         val stored = database.contactDao().get(mutation.accountId, mutation.aggregateId) ?: return false
         if (stored.contact.revision != mutation.revision) return false
         if (stored.contact.remoteContactId == null && mutation.remoteIdentity != null) {
-            val currentLedger = database.androidProjectionLedgerDao().get(
-                mutation.accountId,
-                mutation.aggregateId,
-            )
-            if (currentLedger == null && !stored.contact.isDeleted) {
-                // A Contako-created contact has no native row yet. Register its verified
-                // remote identity in this same acknowledgement transaction, before dequeue.
-                RoomAndroidProjectionLedger(database).attachCanonicalContact(
-                    AccountScope(mutation.accountId), mutation.aggregateId, mutation.remoteIdentity,
-                )
-            } else if (currentLedger != null) {
-                when {
-                    currentLedger.sourceIdentity == mutation.remoteIdentity -> Unit
-                    currentLedger.sourceIdentity != null ||
-                        currentLedger.adoptionState != AndroidAdoptionState.AWAITING_REMOTE_ID.name -> return false
-                    RoomAndroidProjectionLedger(database).attachSourceIdentity(
-                        AccountScope(mutation.accountId),
-                        mutation.aggregateId,
-                        currentLedger.revision,
-                        mutation.remoteIdentity,
-                    ) !is AndroidLedgerCasResult.Updated -> return false
-                }
-            }
+            if (!attachContactIdentity(mutation.accountId, mutation.aggregateId, mutation.remoteIdentity, stored.contact.isDeleted)) return false
         }
         database.contactDao().upsert(
             stored.contact.copy(
@@ -136,6 +114,22 @@ internal class RoomOutboxStore(private val database: ContakoDatabase) {
                 conflictState = null,
             ),
         )
+        return true
+    }
+
+    /** Caller owns the canonical transaction. Never rebind an existing foreign source. */
+    internal suspend fun attachContactIdentity(accountId: String, contactId: String, identity: String, deleted: Boolean): Boolean {
+        val ledger = database.androidProjectionLedgerDao().get(accountId, contactId)
+        if (ledger == null && !deleted) {
+            RoomAndroidProjectionLedger(database).attachCanonicalContact(AccountScope(accountId), contactId, identity)
+        } else if (ledger != null) {
+            when {
+                ledger.sourceIdentity == identity -> Unit
+                ledger.sourceIdentity != null || ledger.adoptionState != AndroidAdoptionState.AWAITING_REMOTE_ID.name -> return false
+                RoomAndroidProjectionLedger(database).attachSourceIdentity(AccountScope(accountId), contactId,
+                    ledger.revision, identity) !is AndroidLedgerCasResult.Updated -> return false
+            }
+        }
         return true
     }
 

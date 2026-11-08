@@ -514,6 +514,8 @@
     <string name="directory_invalid_days">Nieprawidłowa liczba</string>
     <plurals name="directory_recent_window">
         <item quantity="one">Zmienione · %1$d dzień</item>
+        <item quantity="few">Zmienione · %1$d dni</item>
+        <item quantity="many">Zmienione · %1$d dni</item>
         <item quantity="other">Zmienione · %1$d dni</item>
     </plurals>
     <string name="directory_apply_filters">Zastosuj</string>

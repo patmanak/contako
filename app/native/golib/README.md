@@ -34,14 +34,33 @@ public Java declaration against the SHA-256-locked official 2.10.0-2 AAR, verifi
 runtime and Proton module versions in each native library, retains linked-module
 license texts, normalizes archive timestamps and records source hashes.
 
+The NDK r27c external linker receives both `max-page-size=16384` and
+`common-page-size=16384`, as required by the
+[Android 16 KB guidance](https://developer.android.com/guide/practices/page-sizes).
+The packaging guard parses each ABI's ELF headers and rejects a LOAD alignment
+below 16 KB, an incorrect architecture, or RELRO sharing a trailing page with
+writable data. These checks are separate from APK ZIP alignment; verify the
+assembled APK with `zipalign -c -P 16 4` and run the cryptographic journey on a
+physical 16 KB device before claiming runtime qualification for that page size.
+
 Outputs are in ignored `app/native/build/maven/`. Gradle uses this repository
-exclusively for `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1`
+exclusively for `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k`
 and substitutes Core's transitive upstream golib request. It MUST NOT fall back
 to the upstream binary. The Gradle pre-build guard checks the generated AAR/POM
 against the reviewed verification metadata because local Maven files are otherwise trusted;
 a mismatch MUST be investigated, not accepted by regenerating checksums blindly.
 The initial binary qualification uses Windows x64/JBR 21/NDK r27c; other host
 toolchains may require separately reviewed hashes and physical qualification.
+
+For an isolated native review, `-WorkDirectory` and `-MavenRepository` select
+ignored staging directories without replacing Gradle's current local artifact.
+After reviewing the output, update the coordinate and exact checksum pins
+together; neither a staging build nor successful packaging updates those pins.
+The host ELF/RELRO regressions can run without the Android SDK:
+
+```text
+python native/golib/test-package-aar.py
+```
 
 For redistribution, include these build inputs with the corresponding source,
 retain generated native notices and validate the actual minified APK. Public Java

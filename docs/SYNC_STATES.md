@@ -110,6 +110,24 @@ state observed at the start of the pass.
 | create without remote ID | possible lost-ack match | Reconcile using request/stable card evidence; never create blindly twice |
 | any | missing/ambiguous version or reset checkpoint | Bounded hydration/full reconciliation or action-required; never assume unchanged |
 
+A newer local revision MUST retain an unbound creation's ambiguous-delivery
+marker, including after deletion. A late CREATE/UPDATE acknowledgement MAY bind
+its proven identity and advance the upload baseline, but MUST NOT acknowledge
+the newer local values or discard their outbox intent. Identity and provider
+receipt guards still apply.
+
+An unresolved creation MAY retry only after a fresh complete inventory, verified
+card UID inspection and a second stable inventory establish no matching identity,
+with the exact local intent revalidated transactionally. A single possible match
+retains the existing conflict choice; multiple matches or unreadable cards MUST
+NOT authorize another create. This exceptional reconciliation can read full cards;
+ordinary no-change synchronization MUST NOT do so. Earlier blocked unbound
+creations MAY reopen this verification once per fresh recovery generation.
+
+Dependency-ineligible group assignments MUST NOT consume every slot of a bounded
+outbox batch ahead of the contact writes they await. Filtering those assignments
+MUST retain their intent, retry history and account isolation.
+
 Unknown preserved properties do not count as a local replacement boundary when
 the editing source could not represent them. Conflict comparison operates on
 canonical field deltas plus the preservation envelope, not on Android's

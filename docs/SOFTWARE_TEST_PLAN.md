@@ -1,5 +1,34 @@
 # Software integration test plan
 
+## Superseded writes and creation reconciliation
+
+Use real Room transactions and reopen the database after an ambiguous CREATE,
+then edit or delete the contact. The exact newer intent, tombstone, UID and last
+attempt MUST survive. A late CREATE acknowledgement MUST bind the same aggregate
+and leave its newer UPDATE/DELETE pending. A late UPDATE acknowledgement MUST
+advance only the acknowledged remote baseline, without replacing newer local
+fields or manufacturing a conflict. Foreign identities and incompatible provider
+bindings MUST reject atomically.
+
+For unbound creation verification, cover zero, one and multiple matching UIDs,
+an empty attested inventory, unreadable/unverified cards, inventory changes,
+cancellation, foreign owners and local changes during inspection. Only a complete
+stable absence proof may permit retry. Count uploads through the production
+orchestrator: delivered creations MUST NOT be posted twice; an absent creation
+uploads the latest revision once. Legacy blocked intents may reopen verification
+once per recovery generation without losing their attempt history.
+
+Queue more than 100 older dependent group assignments before a contact write.
+The contact MUST remain eligible; the assignments MUST resume afterwards without
+changing their retry history while waiting. Repeat with delayed/blocked contacts,
+another account and independent group operations.
+
+Security-harness host tests MUST reject missing device selection, incorrect APK
+identities and pre-existing candidate packages before destructive actions. Failed
+installation MUST NOT authorize clearing/uninstalling that package. Native bundle
+packaging MUST reject undersized ELF LOAD alignment and incompatible RELRO; check
+the generated bundle across all ABIs and retain API/module/license equality.
+
 ## Contextual field compatibility
 
 Compare compatibility descriptions against the actual pure Android mapper for

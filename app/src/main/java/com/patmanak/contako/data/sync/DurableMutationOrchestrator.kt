@@ -12,6 +12,8 @@ class DurableMutationCommand(
     val attemptCount: Int,
     val nextEligibleEpochMillis: Long,
     val requiresReconciliation: Boolean,
+    internal val expectedRemoteIdentity: String? = null,
+    internal val expectedRemoteVersion: String? = null,
 ) {
     init {
         require(accountId.isNotBlank())

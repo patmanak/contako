@@ -16,7 +16,7 @@ import android.util.Log;
 /** Deliberately separate-UID fixture. It emits status names only, never payloads. */
 public final class HostileProbeReceiver extends BroadcastReceiver {
     private static final String TAG = "ContakoHostileProbe";
-    private static final String TARGET = "com.patmanak.contako";
+    private static final String TARGET = BuildConfig.TARGET_APPLICATION_ID;
     private static final ServiceConnection CONNECTION = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder service) {}
         @Override public void onServiceDisconnected(ComponentName name) {}
@@ -35,7 +35,7 @@ public final class HostileProbeReceiver extends BroadcastReceiver {
                         "android.accounts.AccountAuthenticator")));
         passed += expectSecurity("SYNC_SETTINGS", () -> {
             ContentResolver.setSyncAutomatically(
-                    new Account("synthetic-account", "com.patmanak.contako.account"),
+                    new Account("synthetic-account", TARGET),
                     "com.android.contacts", true);
             return true;
         });
@@ -74,7 +74,7 @@ public final class HostileProbeReceiver extends BroadcastReceiver {
 
     private static int expectProviderRejected(Context context) {
         try (Cursor cursor = context.getContentResolver().query(
-                Uri.parse("content://com.patmanak.contako.private/canary"), null, null, null, null)) {
+                Uri.parse("content://" + TARGET + ".private/canary"), null, null, null, null)) {
             Log.e(TAG, "PRIVATE_PROVIDER=UNEXPECTED_SUCCESS");
             return 0;
         } catch (IllegalArgumentException | SecurityException expected) {

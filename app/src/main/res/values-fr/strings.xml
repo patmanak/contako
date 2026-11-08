@@ -507,6 +507,7 @@
     <string name="directory_invalid_days">Nombre invalide</string>
     <plurals name="directory_recent_window">
         <item quantity="one">Modifiés · %1$d jour</item>
+        <item quantity="many">Modifiés · %1$d jours</item>
         <item quantity="other">Modifiés · %1$d jours</item>
     </plurals>
     <string name="directory_apply_filters">Appliquer</string>

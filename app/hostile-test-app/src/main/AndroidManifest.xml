@@ -8,7 +8,7 @@
             android:name=".HostileProbeReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.patmanak.contako.hostile.RUN" />
+                <action android:name="${hostileAction}" />
             </intent-filter>
         </receiver>
     </application>

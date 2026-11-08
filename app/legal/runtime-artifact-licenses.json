@@ -5,7 +5,7 @@
   "dependencyDescriptors": [
     {
       "file": "app/build.gradle.kts",
-      "sha256": "C60276EE51AD497D46BC82B1FAB44206020B286C9ABD3358A22CD2E36B160AA8"
+      "sha256": "CC52A857EE5227B2E5DF4312B89DD9E388020461393E6E08C0CFB04EC00505C3"
     },
     {
       "file": "app/settings.gradle.kts",
@@ -17,7 +17,7 @@
     },
     {
       "file": "app/gradle/libs.versions.toml",
-      "sha256": "10A6CC01959B632A734CE909DC0938DABC34647087CE201F57F3F51484B0B06E"
+      "sha256": "8F17AD3976454C4426EECBADD32245C164C75227B898D540A5CE53D668472FB3"
     },
     {
       "file": "app/gradle/wrapper/gradle-wrapper.properties",
@@ -25,7 +25,7 @@
     },
     {
       "file": "app/gradle/verification-metadata.xml",
-      "sha256": "E89BC6210C5FAF128FA35FEB6D5B56A63BFE5536F4F66E37C9781631AA332DC7"
+      "sha256": "9DC1DE987DC3840E84350C0E915B39734AC48BBFFDDCA82EDCB3868AC9DF0A58"
     },
     {
       "file": "app/native/golib/go.mod",
@@ -41,15 +41,15 @@
     },
     {
       "file": "app/native/golib/build.ps1",
-      "sha256": "C2188168DE68419FD3D80F0B8D97EBF5F0FA666708082B0EBC246620457139EA"
+      "sha256": "8140A0CCF9CEDBE888FFDCF0987BB689360785319F741EB3BAED8A2FB1C1D945"
     },
     {
       "file": "app/native/golib/package-aar.py",
-      "sha256": "570B5F41AEBB9CF3EAE3479C770C7B92985CC747109D2DCFE83B948807EA7C9F"
+      "sha256": "36937A0BCC40B2E222B8B5C506A49D2D83B75F78A7F822DCB0554655C9E9FD98"
     },
     {
       "file": "app/native/golib/golib.pom",
-      "sha256": "083980596FBB61072080260E44CEFACC2B66E324B74D5026FCF182FD245BB9E2"
+      "sha256": "ED51B1EB6729C427F4680C9CA250F0148ABF217F448CC0107DCADECFD9ADDAB4"
     }
   ],
   "artifactCount": 179,
@@ -5843,12 +5843,12 @@
       "embeddedLegalEntries": []
     },
     {
-      "coordinates": "com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1",
-      "fileName": "android-golib-2.10.0-2-go1.27.1.aar",
+      "coordinates": "com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k",
+      "fileName": "android-golib-2.10.0-2-go1.27.1-16k.aar",
       "extension": "aar",
       "classifier": "",
-      "size": 14582542,
-      "sha256": "986C817F2C6A47315BC71B9397F917A177CB8B574D937F61B31D59F19A376842",
+      "size": 14582575,
+      "sha256": "544085A2C3E28458AC5C4952F8F9EE141CD0990EEA5E047213D9AA2839B7656D",
       "packaged": true,
       "licenses": [
         {
@@ -5859,13 +5859,13 @@
       ],
       "provenance": {
         "type": "exact-pom",
-        "licenseSourceCoordinates": "com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1",
-        "licenseSourcePomSha256": "083980596FBB61072080260E44CEFACC2B66E324B74D5026FCF182FD245BB9E2",
+        "licenseSourceCoordinates": "com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k",
+        "licenseSourcePomSha256": "ED51B1EB6729C427F4680C9CA250F0148ABF217F448CC0107DCADECFD9ADDAB4",
         "inheritanceDepth": 0,
         "pomChain": [
           {
-            "coordinates": "com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1",
-            "sha256": "083980596FBB61072080260E44CEFACC2B66E324B74D5026FCF182FD245BB9E2"
+            "coordinates": "com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k",
+            "sha256": "ED51B1EB6729C427F4680C9CA250F0148ABF217F448CC0107DCADECFD9ADDAB4"
           }
         ],
         "exactPomAttribution": {

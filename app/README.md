@@ -23,11 +23,15 @@ Android Studio JBR 21.0.10; the bytecode target is not the host runtime version.
 | preview | Release-derived, minified, debug-signed local test build; not a public release |
 | diagnostic | Debug-derived, explicitly enables the reviewed sanitized diagnostic sink |
 | syncDiagnostic | Preview-derived, minified, non-debuggable and debug-signed; only closed sync diagnostics enabled |
+| investigation | Release-derived, minified and non-debuggable; closed sync/import tracing enabled, unsigned without release signing configuration |
 | benchmark | Release-derived instrumentation/performance variant |
 
 The default instrumentation test build type is benchmark. The commands below
 explicitly select debug so that JVM and device test task selection is unambiguous.
 A candidate suffix isolates the package/account type from a main-phone installation.
+`investigation` keeps the normal package ID unless `contakoCandidatePackageSuffix`
+is explicitly set. Use a candidate for isolated tests; an in-place diagnostic
+update needs the existing signing identity and authorization to update that installation.
 
 ## Development checks
 
@@ -66,6 +70,9 @@ contains `release`. Record installed artifact identity and tested scope in the i
 Proton Core is pinned to 36.8.0. A separate strict constraint selects the
 Contako source rebuild of android-golib with Go 1.27.1; Core's transitive
 upstream binary request is substituted with that same local artifact.
+The current rebuild validates 16 KiB ELF LOAD alignment and compatible RELRO on
+all four ABIs. APK ZIP alignment is a separate packaging check; actual 16 KiB
+runtime qualification requires a suitable device.
 See [Dependencies](../docs/DEPENDENCIES.md) for checksum, license and validation
 evidence; a version update alone does not close security findings.
 
@@ -82,6 +89,12 @@ under src/androidTest require opt-in arguments and an existing dedicated session
 Do not run the entire instrumented suite blindly: some tests change account or
 contact state. The [QA guide](../docs/QA.md) describes retained test categories;
 the [functional plan](../docs/FUNCTIONAL_TEST_PLAN.md) defines independent phone/Web oracles.
+
+`qa/check-security-boundaries.ps1` requires an explicit `-DeviceSerial` and API 35.
+It uses the isolated `securitycandidate` package, refuses pre-existing fixtures
+and removes only installations created successfully by that run. Its backup
+checks clear synthetic candidate data; they MUST NOT target an authenticated
+installation. `qa/test-security-boundaries.ps1` checks these guards without a device.
 
 ## Dependency and release tools
 

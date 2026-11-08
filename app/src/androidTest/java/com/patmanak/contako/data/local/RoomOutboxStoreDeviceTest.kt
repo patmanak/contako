@@ -18,6 +18,8 @@ import com.patmanak.contako.data.sync.MutationPreparation
 import com.patmanak.contako.data.sync.MutationPreparationGateway
 import com.patmanak.contako.data.sync.MutationUploadGateway
 import com.patmanak.contako.data.sync.RemoteMutationAcknowledgement
+import com.patmanak.contako.data.sync.RoomBackedMutationPreparationGateway
+import com.patmanak.contako.data.proton.ProtonEmailGroupMembershipReader
 import com.patmanak.contako.data.gateway.GatewayOutcome
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
@@ -102,6 +104,103 @@ class RoomOutboxStoreDeviceTest {
         assertEquals(2L, replacement.revision)
         assertEquals(DurableMutationState.PENDING.name, replacement.state)
         assertEquals(0, replacement.attemptCount)
+    }
+
+    @Test
+    fun moreThanOneBatchOfOlderAssignmentsCannotHideTheirPendingContactDependency() = runBlocking {
+        save("dependency", "Fixture")
+        val contact = database.outboxDao().getAll(ACCOUNT).single()
+        val assignments = (0..100).map { index ->
+            pendingGroup(contact, "assignment-$index", index, MutationOperation.ASSIGNMENTS)
+        }
+        assertTrue(assignments.all { it.createdAtEpochMillis < contact.createdAtEpochMillis })
+        val uploaded = mutableListOf<String>()
+        fun runner() = DurableMutationOrchestrator(
+            RoomMutationExecutionStore(database),
+            RoomBackedMutationPreparationGateway(
+                AccountScope(ACCOUNT), database, ProtonEmailGroupMembershipReader { _, _ ->
+                    error("UNEXPECTED_REMOTE_MEMBERSHIP_READ")
+                },
+            ),
+            MutationUploadGateway { command ->
+                uploaded += command.aggregateId
+                GatewayOutcome.Success(RemoteMutationAcknowledgement(
+                    if (command.aggregateType == "CONTACT") "remote-dependency" else "remote-${command.aggregateId}",
+                    "verified-version",
+                ))
+            },
+        )
+
+        assertEquals(listOf("dependency"), store.eligible(ACCOUNT, wallClock, 100).map { it.aggregateId })
+        val first = runner().drain(ACCOUNT, wallClock)
+        assertEquals(1, first.examined)
+        assertEquals(1, first.uploaded)
+        assertEquals(listOf("dependency"), uploaded)
+        // Dependency waiting does not claim a group, consume retries, alter intent or issue a write.
+        assertEquals(assignments, database.outboxDao().getAll(ACCOUNT))
+        assertEquals(101, first.progressPending)
+        reopenDatabase()
+
+        val second = runner().drain(ACCOUNT, wallClock)
+        assertEquals(100, second.examined)
+        assertEquals(100, second.uploaded)
+        assertEquals(1, second.progressPending)
+        val third = runner().drain(ACCOUNT, wallClock)
+        assertEquals(1, third.examined)
+        assertEquals(1, third.uploaded)
+        assertEquals(102, uploaded.size)
+        assertEquals(102, uploaded.distinct().size)
+        assertTrue(database.outboxDao().getAll(ACCOUNT).isEmpty())
+    }
+
+    @Test
+    fun waitingAssignmentsDoNotBypassContactBackoffOrTurnARepeatedDrainIntoRetryWork() = runBlocking {
+        save("dependency", "Fixture")
+        val original = database.outboxDao().getAll(ACCOUNT).single()
+        val delayed = original.copy(nextAttemptAtEpochMillis = wallClock + 5_000, attemptCount = 2)
+        database.outboxDao().upsert(delayed)
+        val assignments = (0..100).map { index ->
+            pendingGroup(original, "assignment-$index", index, MutationOperation.ASSIGNMENTS)
+        }
+        val before = database.outboxDao().getAll(ACCOUNT)
+        val runner = DurableMutationOrchestrator(
+            RoomMutationExecutionStore(database),
+            MutationPreparationGateway { error("NO_ELIGIBLE_COMMAND") },
+            MutationUploadGateway { error("NO_ELIGIBLE_COMMAND") },
+        )
+
+        repeat(3) {
+            val result = runner.drain(ACCOUNT, wallClock + 4_999)
+            assertEquals(0, result.examined)
+            assertEquals(0, result.retryWaiting)
+            assertEquals(0, result.actionRequired)
+            assertEquals(102, result.progressPending)
+            assertEquals(before, database.outboxDao().getAll(ACCOUNT))
+        }
+        assertEquals(listOf(delayed), store.eligible(ACCOUNT, wallClock + 5_000, 100))
+        // A blocked dependency retains all assignment work, without repeated claims or uploads.
+        database.outboxDao().upsert(delayed.copy(state = DurableMutationState.ACTION_REQUIRED.name,
+            blockedReason = "VALIDATION_REJECTED", errorCategory = GatewayFailureCategory.VALIDATION_REJECTED.name))
+        val blocked = runner.drain(ACCOUNT, wallClock + 5_000)
+        assertEquals(0, blocked.examined)
+        assertEquals(1, blocked.actionRequired)
+        assertEquals(101, blocked.progressPending)
+        assertEquals(assignments, database.outboxDao().getAll(ACCOUNT).filter { it.aggregateType == "GROUP" })
+    }
+
+    @Test
+    fun dependencyFilteringIsAccountScopedAndDoesNotDelayIndependentGroupWrites() = runBlocking {
+        save("dependency", "Fixture")
+        val contact = database.outboxDao().getAll(ACCOUNT).single()
+        val assignment = pendingGroup(contact, "dependent", 0, MutationOperation.ASSIGNMENTS)
+        val independent = pendingGroup(contact, "independent", 1, MutationOperation.UPSERT)
+        val otherAccountAssignment = pendingGroup(contact.copy(accountId = "other-account"),
+            "other-assignment", 2, MutationOperation.ASSIGNMENTS)
+
+        assertEquals(listOf(independent, contact), store.eligible(ACCOUNT, wallClock, 100))
+        assertEquals(listOf(otherAccountAssignment), store.eligible("other-account", wallClock, 100))
+        assertTrue(store.eligible("unknown-account", wallClock, 100).isEmpty())
+        assertEquals(listOf(assignment, independent, contact), database.outboxDao().getAll(ACCOUNT))
     }
 
     @Test
@@ -281,6 +380,28 @@ class RoomOutboxStoreDeviceTest {
         assertEquals(email.value, actual.value)
         assertEquals(mapOf("protonEmailId" to "new-service-email", "preserved" to "retained"), actual.metadata)
         assertTrue(database.outboxDao().getAll(ACCOUNT).isEmpty())
+    }
+
+    private suspend fun pendingGroup(
+        template: OutboxMutationEntity,
+        id: String,
+        index: Int,
+        operation: MutationOperation,
+    ): OutboxMutationEntity {
+        database.contactGroupDao().upsert(ContactGroupEntity(
+            accountId = template.accountId, id = id, ownerKey = "${template.accountId}:$id",
+            name = "Fixture group $index", color = "#5E35B1", displayOrder = index,
+            isVisible = true, revision = template.revision, updatedAtEpochMillis = wallClock - 1_000 + index,
+            remoteLabelId = "remote-$id", remoteVersion = "group-version",
+            pendingMutationRevision = template.revision, conflictState = null, isDeleted = false,
+        ))
+        val row = template.copy(aggregateType = AggregateType.GROUP.name, aggregateId = id,
+            operation = operation.name, createdAtEpochMillis = wallClock - 1_000 + index,
+            updatedAtEpochMillis = wallClock - 1_000 + index, attemptCount = 2,
+            remoteIdentity = "remote-$id", remoteVersion = "group-version",
+            idempotencyKey = "fixture-$id")
+        database.outboxDao().upsert(row)
+        return row
     }
 
     private suspend fun save(id: String, firstName: String): CanonicalContact {

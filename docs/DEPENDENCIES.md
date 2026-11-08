@@ -8,7 +8,7 @@ milestones. Full notices and source attribution MUST remain with distributed bui
 ## Proton integration
 
 The catalog pins Proton Core 36.8.0 and explicitly constrains
-`com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1`, the
+`com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k`, the
 [source-built Proton bundle](../app/native/golib/README.md). Core's
 [published crypto POM](https://repo.maven.apache.org/maven2/me/proton/core/crypto-android/36.8.0/crypto-android-36.8.0.pom)
 requests golib 2.9.0-2; the build substitutes that request with the same
@@ -44,6 +44,12 @@ verifies the runtime/module identity of all four native architectures. The unuse
 key-transparency JNI module and its unrelated dependencies are omitted; the
 selected Core sources and Contako do not reference it. The recipe retains linked
 module notices and source provenance. Future Core upgrades MUST recheck that boundary.
+
+The current rebuild uses external NDK linking with a 16 KiB maximum/common page
+size and rejects incompatible ELF LOAD/RELRO segments before packaging. Java/JNI
+API, pinned Go modules and license contents remain unchanged by this alignment
+change. This structural evidence does not establish execution on a 16 KiB-page
+device. See Android's [page-size guidance](https://developer.android.com/guide/practices/page-sizes).
 
 The [ASN.1 memory-exhaustion advisory](https://pkg.go.dev/vuln/GO-2025-4011)
 affects the upstream runtime generation; a supported compiler rebuild addresses

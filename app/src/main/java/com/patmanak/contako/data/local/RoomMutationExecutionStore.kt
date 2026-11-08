@@ -137,7 +137,7 @@ internal class RoomMutationExecutionStore(
         command: DurableMutationCommand,
         acknowledgement: RemoteMutationAcknowledgement,
     ): Boolean = database.withTransaction {
-        val inFlight = entity(command) ?: return@withTransaction false
+        val inFlight = entity(command) ?: return@withTransaction retainSupersededContactAcknowledgement(command, acknowledgement)
         val stored = if (command.aggregateType == AggregateType.CONTACT.name) {
             database.contactDao().get(command.accountId, command.aggregateId)
                 ?.takeIf { it.contact.revision == command.revision }
@@ -271,10 +271,45 @@ internal class RoomMutationExecutionStore(
     private suspend fun entity(command: DurableMutationCommand): OutboxMutationEntity? =
         database.outboxDao().get(command.accountId, command.aggregateType, command.aggregateId)
             ?.takeIf { it.revision == command.revision }
+
+    /** The response covers the submitted revision, never the newer local values. */
+    private suspend fun retainSupersededContactAcknowledgement(
+        command: DurableMutationCommand,
+        acknowledgement: RemoteMutationAcknowledgement,
+    ): Boolean {
+        if (command.aggregateType != AggregateType.CONTACT.name || command.operation !in setOf(
+                com.patmanak.contako.data.sync.RemoteMutationOperation.CREATE,
+                com.patmanak.contako.data.sync.RemoteMutationOperation.UPDATE,
+            )) return false
+        val identity = acknowledgement.remoteIdentity?.takeIf(String::isNotBlank) ?: return false
+        val current = database.contactDao().getEntity(command.accountId, command.aggregateId) ?: return false
+        val pending = database.outboxDao().get(command.accountId, command.aggregateType, command.aggregateId) ?: return false
+        if (current.revision <= command.revision || current.pendingMutationRevision != current.revision ||
+            pending.revision != current.revision || current.conflictState != null || pending.blockedReason != null ||
+            pending.state != DurableMutationState.PENDING.name) return false
+        if (command.operation == com.patmanak.contako.data.sync.RemoteMutationOperation.UPDATE) {
+            if (command.expectedRemoteIdentity != identity || current.remoteContactId != identity ||
+                pending.remoteIdentity != identity || current.remoteVersion != command.expectedRemoteVersion ||
+                pending.remoteVersion != command.expectedRemoteVersion) return false
+        } else if (current.remoteContactId != null || pending.remoteIdentity != null || !pending.requiresReconciliation) return false
+        if (database.contactDao().getEntitiesByRemoteContactId(command.accountId, identity).any { it.id != current.id }) return false
+        if (!store.attachContactIdentity(command.accountId, command.aggregateId, identity, current.isDeleted)) return false
+        database.contactDao().upsert(current.copy(remoteContactId = identity, remoteVersion = acknowledgement.remoteVersion))
+        database.outboxDao().upsert(pending.copy(remoteIdentity = identity, remoteVersion = acknowledgement.remoteVersion,
+            requiresReconciliation = acknowledgement.remoteVersion == null))
+        // Email identity maps cover the older submitted values; the next write refreshes them.
+        // Keeping the newer outbox row also keeps dependent assignments gated.
+        return true
+    }
 }
 
 private fun OutboxMutationEntity.isSessionOrCapabilityBlock(): Boolean {
     if (state != DurableMutationState.ACTION_REQUIRED.name) return false
+    // Earlier versions blocked an ambiguous creation before an authoritative recheck
+    // was available. A fresh request generation reopens the check, never a blind POST.
+    if (aggregateType == AggregateType.CONTACT.name && remoteIdentity == null && requiresReconciliation &&
+        operation in setOf(MutationOperation.UPSERT.name, MutationOperation.DELETE.name) &&
+        errorCategory == GatewayFailureCategory.CONFLICT.name && blockedReason == "CONFLICT_RECOVERY_REQUIRED") return true
     return when (errorCategory) {
         GatewayFailureCategory.AUTHENTICATION_REQUIRED.name -> blockedReason == "AUTHENTICATION_REQUIRED"
         GatewayFailureCategory.HUMAN_VERIFICATION_REQUIRED.name -> blockedReason == "INTERACTIVE_AUTHENTICATION_REQUIRED"
@@ -299,4 +334,6 @@ private fun OutboxMutationEntity.toCommand() = DurableMutationCommand(
     attemptCount = attemptCount,
     nextEligibleEpochMillis = nextAttemptAtEpochMillis,
     requiresReconciliation = requiresReconciliation,
+    expectedRemoteIdentity = remoteIdentity,
+    expectedRemoteVersion = remoteVersion,
 )

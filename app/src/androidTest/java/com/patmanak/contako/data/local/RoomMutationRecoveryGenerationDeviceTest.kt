@@ -90,6 +90,24 @@ class RoomMutationRecoveryGenerationDeviceTest {
         assertEquals(0, store.recoverInterrupted(ACCOUNT, 3_000))
     }
 
+    @Test fun legacyAmbiguousUnboundCreationReopensOnlyItsVerificationOncePerGeneration() = runBlocking {
+        assertTrue(repository.saveContact(CanonicalContact(ACCOUNT, "unbound", displayName = "Retained draft")) is SaveResult.Saved)
+        block("CONTACT", "unbound", "CONFLICT", "CONFLICT_RECOVERY_REQUIRED")
+        val before = requireNotNull(database.outboxDao().get(ACCOUNT, "CONTACT", "unbound"))
+        val local = database.contactDao().get(ACCOUNT, "unbound")
+        var generation = 4L
+        val store = RoomMutationExecutionStore(database, recoveryGeneration = { generation })
+        assertEquals(1, store.recoverInterrupted(ACCOUNT, 1_000))
+        assertEquals(before.copy(state = "PENDING", blockedReason = null, errorCategory = null,
+            nextAttemptAtEpochMillis = 1_000), database.outboxDao().get(ACCOUNT, "CONTACT", "unbound"))
+        assertEquals(local, database.contactDao().get(ACCOUNT, "unbound"))
+        block("CONTACT", "unbound", "CONFLICT", "CONFLICT_RECOVERY_REQUIRED")
+        assertEquals(0, store.recoverInterrupted(ACCOUNT, 2_000))
+        generation++
+        assertEquals(1, store.recoverInterrupted(ACCOUNT, 3_000))
+        assertTrue(requireNotNull(database.outboxDao().get(ACCOUNT, "CONTACT", "unbound")).requiresReconciliation)
+    }
+
     private suspend fun contact(id: String, category: String, reason: String) {
         assertTrue(repository.saveContact(CanonicalContact(ACCOUNT, id, displayName = "Fixture $id",
             remoteContactId = "remote-$id", remoteVersion = "baseline")) is SaveResult.Saved)

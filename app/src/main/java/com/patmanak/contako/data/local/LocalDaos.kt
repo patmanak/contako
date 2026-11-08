@@ -46,6 +46,8 @@ internal data class BlockedSyncItemRecord(
 internal interface ContactDao {
     @Query("SELECT * FROM contacts WHERE account_id=:accountId AND remote_contact_id=:remoteId LIMIT 2")
     suspend fun getEntitiesByRemoteContactId(accountId: String, remoteId: String): List<ContactEntity>
+    @Query("SELECT * FROM contacts WHERE account_id=:accountId AND (remote_vcard_uid=:uid OR id=:uid) LIMIT 2")
+    suspend fun getEntitiesByStableCreateUid(accountId: String, uid: String): List<ContactEntity>
     @Query("""
         SELECT c.id AS contact_id, c.remote_contact_id, v.id AS value_id, v.metadata_encoding
         FROM contacts c JOIN contact_values v ON v.account_id = c.account_id AND v.contact_id = c.id
@@ -93,8 +95,8 @@ internal interface ContactDao {
         """
         SELECT c.* FROM contacts c JOIN outbox_mutations o
         ON o.account_id = c.account_id AND o.aggregate_id = c.id
-        WHERE c.account_id = :accountId AND c.remote_contact_id IS NULL AND c.is_deleted = 0
-        AND o.aggregate_type = 'CONTACT' AND o.operation = 'UPSERT'
+        WHERE c.account_id = :accountId AND c.remote_contact_id IS NULL
+        AND o.aggregate_type = 'CONTACT' AND o.operation IN ('UPSERT', 'DELETE')
         AND o.remote_identity IS NULL AND o.requires_reconciliation = 1
         AND c.pending_mutation_revision = o.revision AND c.revision = o.revision
         AND (c.remote_vcard_uid = :uid OR c.id = :uid)
@@ -305,6 +307,13 @@ internal interface OutboxDao {
         SELECT * FROM outbox_mutations
         WHERE account_id = :accountId AND state = 'PENDING' AND blocked_reason IS NULL
           AND next_attempt_at_epoch_millis <= :nowEpochMillis
+          AND NOT (aggregate_type = 'GROUP' AND operation = 'ASSIGNMENTS' AND EXISTS (
+              SELECT 1 FROM outbox_mutations AS intent
+              JOIN contacts AS contact ON contact.account_id = intent.account_id
+                  AND contact.id = intent.aggregate_id
+              WHERE intent.account_id = :accountId AND intent.aggregate_type = 'CONTACT'
+                  AND contact.pending_mutation_revision = intent.revision
+          ))
         ORDER BY created_at_epoch_millis, aggregate_type, aggregate_id
         LIMIT :limit
         """,

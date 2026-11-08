@@ -1,5 +1,20 @@
 # Functional test plan
 
+For mutation interruption changes, use controlled synthetic contacts with repeated
+fields and per-email groups. Compare Contako, Proton and the source-owned Android
+copy after creation, successive edits, restart and deletion. A newer edit made
+during a submitted write MUST remain pending until its own acknowledgement.
+For a delivered CREATE with a deliberately withheld response, verify one remote
+identity and one local aggregate after editing or deleting it. A never-delivered
+CREATE must have a recoverable verification path without blind replay. Use
+controlled fault injection; ordinary successful creation does not qualify the
+lost-response case. Complete the corresponding Room/software cases as well.
+
+After a native-bundle rebuild, exercise real decrypt/verify/sign operations and a
+minified contact round trip on a physical runtime. Record the device's actual
+page size. ELF/ZIP alignment checks and 4 KiB-device execution MUST remain distinct
+from 16 KiB-device qualification.
+
 Target tests use the real minified Contako app, a physical system contact editor
 and the dedicated Proton Web account when available. This is a reusable procedure,
 not a history of APK installations or old campaign results. Read [QA](QA.md) for

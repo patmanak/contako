@@ -31,6 +31,8 @@ import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.GroupMembership
 import com.patmanak.contako.domain.repository.SaveResult
 import com.patmanak.contako.data.sync.DurableMutationOrchestrator
+import com.patmanak.contako.data.sync.DurableMutationCommand
+import com.patmanak.contako.data.sync.RemoteMutationOperation
 import com.patmanak.contako.data.sync.RetryDecision
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
@@ -340,10 +342,12 @@ class RoomBackedMutationGatewaysDeviceTest {
             memberships = listOf(GroupMembership("contact", "email-value"))))
         val groupIntent = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
         database.outboxDao().upsert(groupIntent.copy(operation = MutationOperation.ASSIGNMENTS.name))
+        val store = RoomMutationExecutionStore(database)
         val local = requireNotNull(database.contactDao().get(ACCOUNT.value, "contact")).toDomain()
         saveContact(local.copy(displayName = "Local choice"))
-        val store = RoomMutationExecutionStore(database)
-        val groupCommand = store.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "GROUP" }
+        assertTrue(store.eligible(ACCOUNT.value, 1_000, 20).all { it.aggregateType == "CONTACT" })
+        // Bypass selection only to exercise the preparation guard on the exact current intent.
+        val groupCommand = pendingAssignmentCommand("group")
         val preparation = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote).prepare(groupCommand)
         assertEquals(com.patmanak.contako.data.sync.MutationPreparation.WaitingForDependencies,
             (preparation as GatewayOutcome.Success).value)
@@ -375,13 +379,14 @@ class RoomBackedMutationGatewaysDeviceTest {
                 metadata = mapOf("protonEmailId" to "removed-email")))))
         cleanContact("contact", "remote-contact")
         saveGroup(ContactGroup(ACCOUNT.value, "group", "Fixture group", remoteLabelId = "remote-group"))
-        saveContact(requireNotNull(database.contactDao().get(ACCOUNT.value, "contact")).toDomain()
-            .copy(displayName = "Local choice"))
         val pending = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
         database.outboxDao().upsert(pending.copy(operation = MutationOperation.ASSIGNMENTS.name))
         val store = RoomMutationExecutionStore(database)
+        saveContact(requireNotNull(database.contactDao().get(ACCOUNT.value, "contact")).toDomain()
+            .copy(displayName = "Local choice"))
+        assertTrue(store.eligible(ACCOUNT.value, 1_000, 20).all { it.aggregateType == "CONTACT" })
+        val groupCommand = pendingAssignmentCommand("group")
         val preparation = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote)
-        val groupCommand = store.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "GROUP" }
         assertEquals(com.patmanak.contako.data.sync.MutationPreparation.WaitingForDependencies,
             (preparation.prepare(groupCommand) as GatewayOutcome.Success).value)
         assertEquals(0, remote.assignmentWrites)
@@ -415,6 +420,15 @@ class RoomBackedMutationGatewaysDeviceTest {
         assertEquals(DurableMutationState.ACTION_REQUIRED.name, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")?.state)
         assertEquals(GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED.name,
             database.outboxDao().get(ACCOUNT.value, "GROUP", "group")?.errorCategory)
+    }
+
+    private suspend fun pendingAssignmentCommand(groupId: String): DurableMutationCommand {
+        val intent = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", groupId))
+        check(intent.operation == MutationOperation.ASSIGNMENTS.name)
+        return DurableMutationCommand(intent.accountId, intent.aggregateType, intent.aggregateId,
+            intent.revision, RemoteMutationOperation.ASSIGNMENTS, intent.attemptCount,
+            intent.nextAttemptAtEpochMillis, intent.requiresReconciliation,
+            expectedRemoteIdentity = intent.remoteIdentity, expectedRemoteVersion = intent.remoteVersion)
     }
 
     private fun orchestrator() = DurableMutationOrchestrator(

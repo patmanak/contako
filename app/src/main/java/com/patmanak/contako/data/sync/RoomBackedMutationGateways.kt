@@ -29,6 +29,7 @@ internal class RoomBackedMutationPreparationGateway(
     private val membershipReader: ProtonEmailGroupMembershipReader,
     private val verifiedCards: com.patmanak.contako.data.gateway.ProtonVerifiedContactCardGateway? = null,
     private val existence: com.patmanak.contako.data.gateway.ProtonContactExistenceGateway? = null,
+    private val createRecovery: com.patmanak.contako.data.local.RoomAmbiguousContactCreateRecovery? = null,
 ) : MutationPreparationGateway {
     override suspend fun prepare(command: DurableMutationCommand): GatewayOutcome<MutationPreparation> {
         if (command.accountId != expectedAccount.value) {
@@ -50,16 +51,16 @@ internal class RoomBackedMutationPreparationGateway(
                 MutationPreparation.ActionRequired(MutationPreparationActionRequiredReason.REVISION_MISMATCH),
             )
         }
-        if (command.operation == RemoteMutationOperation.DELETE && contact.remoteContactId == null) {
-            return GatewayOutcome.Success(
-                MutationPreparation.AlreadyApplied(RemoteMutationAcknowledgement(null, null)),
-            )
-        }
         if (command.requiresReconciliation && contact.remoteContactId == null) {
-            return GatewayOutcome.Success(
+            return createRecovery?.prepare(command) ?: GatewayOutcome.Success(
                 MutationPreparation.ActionRequired(
                     MutationPreparationActionRequiredReason.RECONCILIATION_REMOTE_IDENTITY_MISSING,
                 ),
+            )
+        }
+        if (command.operation == RemoteMutationOperation.DELETE && contact.remoteContactId == null) {
+            return GatewayOutcome.Success(
+                MutationPreparation.AlreadyApplied(RemoteMutationAcknowledgement(null, null)),
             )
         }
         val remoteId = contact.remoteContactId

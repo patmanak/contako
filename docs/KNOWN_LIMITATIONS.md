@@ -18,6 +18,7 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
 | Condition | Current behavior or limitation |
 | --- | --- |
 | Concurrent local/Web updates | A targeted complete-card read blocks conflicting uploads and Sync offers a version choice. The GET-to-write window remains non-atomic. Both choices and stale-choice rejection have scoped physical coverage; this does not qualify every field, account or OEM combination. |
+| Ambiguous creation | Exceptional verification may read all complete cards to establish UID absence before retrying. Multiple matches, unreadable cards or a changing inventory retain the local intent. The inventory-to-create window remains non-atomic; this is not a server idempotency guarantee. |
 | Conflict field comparison | Choices apply to the whole contact. Repeated occurrences without reliable identity stay unpaired; missing group context and referenced-media contents stay unknown. Source cards are preserved internally rather than exposed as fields. The preview describes canonical preservation rules, not an exhaustive decoded diff of raw source cards or a current confirmation from either peer. |
 | Field compatibility help | Rules describe generated-format and theoretical projection support, with current cached capability and permission conditions. They do not certify every contact editor, resolve/download media, validate arbitrary imported payloads or prove delivery. Unknown vCard data remains read-only; opaque provider data stays in Android. |
 | Private-only Web changes | Public fingerprints alone cannot detect these edits. The current implementation supplements them with the contacts v6 event feed and a durable cursor. Note-only edits have scoped physical/Web coverage, including restart and an empty follow-up. Earlier distributed builds without this feed can miss private-only edits. This does not qualify every private-field variant or the non-atomic remote-write window. |
@@ -94,6 +95,10 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
   or vector master. See [licensing](LICENSING.md).
 
 ## Security and qualification
+
+The native bundle has validated 16 KiB ELF LOAD alignment and compatible RELRO
+on all packaged architectures. Runtime execution on an actual 16 KiB-page device
+remains unqualified; a successful 4 KiB-device run does not establish that case.
 
 The durable local owner protects retained data after session revocation. Legacy
 nonempty data without an owner marker or retained session cannot be assigned to

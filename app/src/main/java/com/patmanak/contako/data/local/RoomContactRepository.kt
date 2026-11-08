@@ -748,7 +748,7 @@ internal class RoomContactRepository(
     ) {
         val dao = database.outboxDao()
         val existing = dao.get(accountId, type.name, aggregateId)
-        val ambiguousCreation = type == AggregateType.GROUP && remoteIdentity == null && existing != null &&
+        val ambiguousCreation = remoteIdentity == null && existing != null &&
             (existing.requiresReconciliation ||
                 (existing.remoteIdentity == null && existing.operation == MutationOperation.UPSERT.name &&
                     existing.state == DurableMutationState.IN_FLIGHT.name))

@@ -9,13 +9,67 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 SOURCE = Path(__file__).resolve().parent
 WORK = SOURCE / 'build'
-VERSION = '2.10.0-2-go1.27.1'
+VERSION = '2.10.0-2-go1.27.1-16k'
 ABIS = {'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'}
+
+
+def elf_page_layout(data, abi):
+    """Reject incompatible LOAD/RELRO layouts before publishing the AAR.
+
+    ELF segment alignment is distinct from APK ZIP entry alignment. The latter
+    must also be verified on the assembled APK.
+    """
+    expected = {'arm64-v8a': (2, 183), 'armeabi-v7a': (1, 40),
+                'x86': (1, 3), 'x86_64': (2, 62)}
+    if abi not in expected or len(data) < 16 or data[:4] != b'\x7fELF':
+        raise ValueError('NATIVE_ELF_INVALID')
+    elf_class, machine = expected[abi]
+    if data[4] != elf_class or data[5] != 1:
+        raise ValueError('NATIVE_ELF_ARCHITECTURE_MISMATCH')
+    header_format = '<HHIQQQIHHHHHH' if elf_class == 2 else '<HHIIIIIHHHHHH'
+    header_size = struct.calcsize(header_format)
+    if len(data) < 16 + header_size:
+        raise ValueError('NATIVE_ELF_TRUNCATED')
+    header = struct.unpack_from(header_format, data, 16)
+    if header[1] != machine:
+        raise ValueError('NATIVE_ELF_ARCHITECTURE_MISMATCH')
+    offset, entry_size, count = header[4], header[8], header[9]
+    segment_format = '<IIQQQQQQ' if elf_class == 2 else '<IIIIIIII'
+    if entry_size != struct.calcsize(segment_format) or not count or offset + count * entry_size > len(data):
+        raise ValueError('NATIVE_ELF_PROGRAM_HEADERS_INVALID')
+    loads, relros = [], []
+    for index in range(count):
+        values = struct.unpack_from(segment_format, data, offset + index * entry_size)
+        if elf_class == 2:
+            kind, flags, file_offset, virtual, _, file_size, memory_size, alignment = values
+        else:
+            kind, file_offset, virtual, _, file_size, memory_size, flags, alignment = values
+        if file_offset + file_size > len(data) or file_size > memory_size:
+            raise ValueError('NATIVE_ELF_SEGMENT_INVALID')
+        if kind == 1:
+            if alignment < 16384 or alignment & (alignment - 1) or file_offset % alignment != virtual % alignment:
+                raise ValueError('NATIVE_ELF_LOAD_NOT_16K_ALIGNED')
+            loads.append((virtual, memory_size, flags, alignment))
+        elif kind == 0x6474e552:
+            relros.append((virtual, memory_size))
+    if not loads:
+        raise ValueError('NATIVE_ELF_LOAD_MISSING')
+    for virtual, memory_size in relros:
+        end = virtual + memory_size
+        if end % 16384 == 0:
+            continue
+        containing = [(start, size, flags) for start, size, flags, _ in loads
+                      if start <= virtual and end <= start + size]
+        if not containing or any(flags & 2 and start + size != end for start, size, flags in containing):
+            raise ValueError('NATIVE_ELF_RELRO_NOT_16K_COMPATIBLE')
+    return {'minimum_load_alignment': min(load[3] for load in loads),
+            'relro_16k_compatible': True}
 
 
 def command(arguments):
@@ -68,10 +122,14 @@ def normalized_zip(contents):
 
 
 def main():
+    global WORK
     parser = argparse.ArgumentParser()
     parser.add_argument('--go', required=True, type=Path)
     parser.add_argument('--java-home', required=True, type=Path)
+    parser.add_argument('--work', type=Path, default=WORK)
+    parser.add_argument('--repository', type=Path, default=SOURCE.parent / 'build/maven')
     args = parser.parse_args()
+    WORK = args.work.resolve()
     official_api = api(WORK / 'official.aar', 'official', args.java_home)
     rebuilt_api = api(WORK / 'raw.aar', 'rebuilt', args.java_home)
     if official_api != rebuilt_api:
@@ -91,7 +149,8 @@ def main():
         metadata = command([str(args.go), 'version', '-m', str(library)])
         if not metadata.splitlines()[0].endswith(': go1.27.1'):
             raise ValueError('NATIVE_GO_VERSION_MISMATCH')
-        native.append({'entry': entry, 'sha256': sha(contents[entry]), 'go': '1.27.1'})
+        layout = elf_page_layout(contents[entry], abi)
+        native.append({'entry': entry, 'sha256': sha(contents[entry]), 'go': '1.27.1', **layout})
         for path, version, checksum in re.findall(r'^\s+dep\s+(\S+)\s+(\S+)\s+(\S+)$', metadata, re.M):
             value = {'path': path, 'version': version, 'sum': checksum}
             if path in modules and modules[path] != value:
@@ -130,7 +189,7 @@ def main():
     }
     contents['META-INF/contako-native-provenance.json'] = (json.dumps(provenance, indent=2) + '\n').encode()
     output = normalized_zip(contents)
-    repository = SOURCE.parent / 'build/maven/com/patmanak/contako/crypto/android-golib' / VERSION
+    repository = args.repository / 'com/patmanak/contako/crypto/android-golib' / VERSION
     repository.mkdir(parents=True, exist_ok=True)
     artifact = repository / ('android-golib-' + VERSION + '.aar')
     # Never leave a partially packaged file at the dependency's final path.

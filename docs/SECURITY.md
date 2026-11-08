@@ -30,6 +30,10 @@ Missing evidence MUST NOT be interpreted as an empty partition.
 - Ordinary and release builds disable Android Logcat diagnostics. `diagnostic`
   enables the reviewed typed Logcat sink; `syncDiagnostic` enables only closed
   sync enums and aggregates while remaining minified and non-debuggable.
+  `investigation` is release-derived and also enables the closed import trace;
+  it is minified and non-debuggable, but is a diagnostic build. It retains the
+  normal package unless a candidate suffix is selected explicitly. These flags
+  do not permit contact values, identifiers or authentication traces in logs.
 - All variants maintain a local rotating journal of at most 128 closed technical
   events and a retained latest detailed failure (a generic result only when no
   finer cause was recorded in that pass). It records UTC
