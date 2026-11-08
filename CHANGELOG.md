@@ -20,6 +20,7 @@ Features and improvements by version.
   values or losing further units.
 - Recover Android companion bindings after adding or replacing job titles, roles
   or phonetic names, with verified write and ownership evidence.
+- Keep newer contact versions intact when recovering an interrupted Android copy.
 - Export current failure summaries and bounded protocol codes in sanitized diagnostics;
   retain failures and transitions separately from repetitive import progress.
 - Preserve ambiguous contact creations and newer edits/deletions when an earlier

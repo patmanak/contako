@@ -284,6 +284,15 @@ MAY accompany this recovery. A legacy detached copy that exactly matches the
 current canonical projection MAY arm a guarded pending preparation and replan;
 this MUST NOT confirm a baseline, skip normal planning or accept claims alone.
 
+If a remote echo replaced companion IDs before an interrupted copy completed,
+a surviving complete authorized projection commitment MAY prove only the older
+provider state. Its entire decoded snapshot, including IDs, MUST match that
+commitment under the same ownership, baseline, locator, source and epoch guards.
+Already registered pending non-photo rows MAY attach under that same atomic proof.
+Recording this older observed baseline MUST keep the copy detached, preserve the
+current canonical version and intentions, and replan; it MUST NOT confirm their
+delivery. Missing or mismatching proof remains a guarded failure.
+
 A verified completed group deletion receipt is not an active group binding.
 Contact ingestion and projection MUST both exclude it only after account,
 identity, provider epoch, converged tombstone, absent locator and canonical

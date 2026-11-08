@@ -590,6 +590,10 @@ untouched values independently on each peer:
   MUST follow only an exact prepared, verified write. Interrupt before the write
   and after provider commit, then resume; forged claims, stale revisions and
   concurrent native edits MUST NOT authorize adopting a different binding.
+  Receive a verified Proton echo that assigns new companion IDs after an earlier
+  write lost completion. Only a complete retained commitment may recover that
+  older provider baseline; the current canonical version and pending intentions
+  MUST remain unchanged until their own newly verified projection.
   Include a second save before the first projection completes. Verify exact
   values and durable linked identities after each save in all peers, restart and
   repeat a no-change pass. No divergent binding, pending Android copy or false

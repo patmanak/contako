@@ -11,6 +11,7 @@ import com.patmanak.contako.data.android.mapping.AndroidRowKind
 import com.patmanak.contako.data.gateway.AccountScope
 import com.patmanak.contako.data.local.AndroidProviderIdentityOwnerEntity
 import com.patmanak.contako.data.local.AndroidProviderRowBindingEntity
+import com.patmanak.contako.data.local.AndroidProjectionBaselineEntity
 import com.patmanak.contako.data.local.ContakoDatabase
 import com.patmanak.contako.data.local.toDomain
 import com.patmanak.contako.data.sync.AndroidInteroperabilityContext
@@ -148,17 +149,33 @@ internal class RoomAndroidProviderIdentityResolver(
                     )
                 }
                 val expectedFingerprint = mapper.fingerprint(expected)
+                // A verified remote echo can replace canonical value IDs after a provider write
+                // failed local completion. Its complete historical plan commitment survives detach.
+                val historicalFingerprint = ledger.canonicalProjectionFingerprint?.takeIf {
+                    detached && it != expectedFingerprint.sha256Hex
+                }
+                if (historicalFingerprint != null && (completedBaseline == null ||
+                        projectionMapper.fingerprint(projectionMapper.project(canonicalAggregate.toDomain())) != expectedFingerprint))
+                    return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.BASELINE_INTEGRITY)
+                var retainedCommitment: String? = null
 
                 val accountName = AndroidProviderAccountName(context.androidAccountName)
                 val route = AndroidProviderMimeRouter().route(raw.rawContactId, observation.dataRows)
                 requireUnmanagedRowsUnbound(canonicalContactId, raw.rawContactId, route)
                 val moves = mutableListOf<ProjectionBindingMove>()
                 val transitions = mutableListOf<ProjectionCompanionTransition>()
+                val retainedPending = mutableListOf<Pair<AndroidProviderIdentityClaim, List<AndroidProviderRowBindingEntity>>>()
+                val retainedAttached = mutableSetOf<String>()
                 // This resolver is read-only. No pending attachment or fresh identity is persisted
                 // until the complete decoded payload has matched the durable write fingerprint.
                 val candidateResolver = AndroidProviderIdentityResolver { claims ->
                     if (claims.size > MAX_BINDINGS_PER_CONTACT)
                         return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.CLAIM_LIMIT)
+                    retainedCommitment = historicalFingerprint?.takeIf {
+                        claims.any { claim -> desired.rows.singleOrNull { row -> row.kind == claim.kind &&
+                            row.identity.canonicalValueId == claim.claimedCanonicalValueId }?.let { row ->
+                            row.linkedCanonicalValueIds != claim.claimedLinkedCanonicalValueIds } == true }
+                    }
                     val resolved = linkedMapOf<Long, AndroidDurableValueBinding>()
                     for (claim in claims) {
                         if (!validClaim(claim) || claim.accountName != accountName ||
@@ -178,6 +195,16 @@ internal class RoomAndroidProviderIdentityResolver(
                         val locators = group.map { it.dataRowLocator }.distinct()
                         if (locators.size != 1) return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.BINDING_LOCATORS, claim.kind)
                         val old = locators.single()
+                        if (retainedCommitment != null && state == STATE_ATTACHED) {
+                            val baselineRow = completedBaseline?.rows?.singleOrNull {
+                                it.kind == claim.kind && it.identity.canonicalValueId == id && it.identity.providerRowId == claim.providerRowId
+                            }
+                            if (old != claim.providerRowId || baselineRow == null ||
+                                baselineRow.linkedCanonicalValueIds != binding.linkedCanonicalValueIds ||
+                                group.size != 1 + binding.linkedCanonicalValueIds.size)
+                                return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.BASELINE_INTEGRITY, claim.kind)
+                            retainedAttached += id
+                        }
                         if (binding.linkedCanonicalValueIds != claim.claimedLinkedCanonicalValueIds) {
                             if ((!pending && !detached) || state != STATE_ATTACHED || old != claim.providerRowId ||
                                 claim.kind !in setOf(AndroidRowKind.ORGANIZATION, AndroidRowKind.STRUCTURED_NAME))
@@ -194,9 +221,12 @@ internal class RoomAndroidProviderIdentityResolver(
                                 projectionMapper.fingerprint(desired))
                                 return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.CONTEXT_CHANGED, claim.kind)
                             val target = desired.rows.singleOrNull { it.kind == claim.kind && it.identity.canonicalValueId == id }
-                            if (target == null || target.linkedCanonicalValueIds != claim.claimedLinkedCanonicalValueIds)
+                            if (target == null || (retainedCommitment == null && target.linkedCanonicalValueIds != claim.claimedLinkedCanonicalValueIds))
                                 return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.CLAIM_IDENTITY_MISMATCH, claim.kind)
-                            val replacement = AndroidDurableValueBinding(id, target.linkedCanonicalValueIds)
+                            // Historical claims remain in memory until the COMPLETE committed hash
+                            // proves them. Text equality never links the old and current IDs.
+                            val replacement = AndroidDurableValueBinding(id, if (retainedCommitment == null)
+                                target.linkedCanonicalValueIds else claim.claimedLinkedCanonicalValueIds)
                             val newRows = AndroidPendingProviderBinding(claim.kind, replacement)
                                 .toRows(accountName, canonicalContactId, raw.rawContactId, claim.providerRowId, STATE_ATTACHED)
                             if (newRows.any { row -> dao.getBindingByCanonicalValueId(account.value, canonicalContactId,
@@ -206,9 +236,12 @@ internal class RoomAndroidProviderIdentityResolver(
                             binding = replacement
                         }
                         if (state == STATE_PENDING) {
-                            if (!pending || old != null || dao.getAttachedBindingGroup(account.value, canonicalContactId, providerEpoch,
+                            if ((!pending && retainedCommitment == null) || old != null ||
+                                (retainedCommitment != null && claim.kind == AndroidRowKind.PHOTO) ||
+                                dao.getAttachedBindingGroup(account.value, canonicalContactId, providerEpoch,
                                     raw.rawContactId, claim.providerRowId).isNotEmpty()
                             ) return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.PENDING_ATTACHMENT, claim.kind)
+                            if (retainedCommitment != null) retainedPending += claim to group
                         } else if (old != claim.providerRowId) {
                             // All non-photo rows share the same durable applyBatch receipt.
                             // Restricting this to name/email stranded a reinserted birthday.
@@ -240,7 +273,15 @@ internal class RoomAndroidProviderIdentityResolver(
                     mapper.normalizeGeneratedName(decoded, expected) else decoded
                 val exactTarget = if (transitions.isEmpty() || freshNameReceipt) expected else retainProvedUnchangedName(expected, decoded,
                     completedBaseline, transitions.flatMap { it.before }.map { it.bindingPrimaryId }.toSet(), mapper)
-                if (mapper.fingerprint(comparison) != mapper.fingerprint(exactTarget)) {
+                val historicalCandidate = if (retainedCommitment != null && exactTarget !== expected) {
+                    // Only the unchanged completed name may be represented by its already-proved
+                    // generated-name form when checking the historical plan's commitment.
+                    val canonicalName = expected.rows.single { it.kind == AndroidRowKind.STRUCTURED_NAME }
+                    decoded.copy(rows = decoded.rows.map { if (it.kind == AndroidRowKind.STRUCTURED_NAME) canonicalName else it })
+                } else decoded
+                if ((retainedCommitment != null && (completedBaseline!!.rows.map { it.identity.canonicalValueId }.toSet() != retainedAttached ||
+                            mapper.fingerprint(historicalCandidate).sha256Hex != retainedCommitment)) ||
+                    (retainedCommitment == null && mapper.fingerprint(comparison) != mapper.fingerprint(exactTarget))) {
                     var kind: AndroidRowKind? = null
                     var component: com.patmanak.contako.data.android.mapping.AndroidComponent? = null
                     var difference: com.patmanak.contako.data.sync.AndroidComponentDifference? = null
@@ -261,7 +302,20 @@ internal class RoomAndroidProviderIdentityResolver(
                     database.androidProjectionLedgerDao().getAccount(account.value) != accountRow ||
                     database.contactDao().get(account.value, canonicalContactId) != canonicalAggregate)
                     return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.CONTEXT_CHANGED)
-                if (detached) {
+                if (retainedCommitment != null) {
+                    val baseline = database.androidProjectionLedgerDao().getBaseline(account.value, canonicalContactId)
+                    if (baselineEntity == null || baseline == null || baseline.fingerprint != baselineEntity.fingerprint ||
+                        !baseline.encodedSnapshot.contentEquals(baselineEntity.encodedSnapshot))
+                        return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.CONTEXT_CHANGED)
+                    if (database.androidProjectionLedgerDao().compareAndSetRevision(account.value, canonicalContactId, ledger.revision) != 1)
+                        throw IdentityBindingTransactionDiverged()
+                    val observedFingerprint = mapper.fingerprint(decoded).sha256Hex
+                    check(database.androidProjectionLedgerDao().update(ledger.copy(revision = Math.incrementExact(ledger.revision),
+                        androidBaselineFingerprint = observedFingerprint, pendingProjectionFingerprint = null,
+                        projectionState = "DETACHED")) == 1)
+                    database.androidProjectionLedgerDao().upsertBaseline(AndroidProjectionBaselineEntity(account.value,
+                        canonicalContactId, observedFingerprint, AndroidContactSnapshotBinaryCodec.encode(decoded)))
+                } else if (detached) {
                     if (database.androidProjectionLedgerDao().compareAndSetRevision(account.value, canonicalContactId, ledger.revision) != 1)
                         throw IdentityBindingTransactionDiverged()
                     check(database.androidProjectionLedgerDao().update(ledger.copy(revision = Math.incrementExact(ledger.revision),
@@ -284,6 +338,15 @@ internal class RoomAndroidProviderIdentityResolver(
                         .map { AndroidProviderIdentityOwnerEntity(account.value, canonicalContactId, it.canonicalValueId) }
                     if (owners.isNotEmpty()) dao.insertOwners(owners)
                     if (inserted.isNotEmpty()) dao.insertBindings(inserted)
+                }
+                retainedPending.forEach { (claim, before) ->
+                    if (dao.getBindingGroup(account.value, canonicalContactId, providerEpoch, raw.rawContactId,
+                            requireNotNull(claim.claimedCanonicalValueId)) != before ||
+                        dao.getAttachedBindingGroup(account.value, canonicalContactId, providerEpoch,
+                            raw.rawContactId, claim.providerRowId).isNotEmpty()) throw IdentityBindingTransactionDiverged()
+                    if (dao.attachPendingBindingGroup(account.value, canonicalContactId, providerEpoch, raw.rawContactId,
+                            requireNotNull(claim.claimedCanonicalValueId), claim.providerRowId) != before.size)
+                        throw IdentityBindingTransactionDiverged()
                 }
                 moves.forEach { move ->
                     val updated = dao.relocateProjectionBindingGroup(

@@ -22,6 +22,21 @@ import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.data.local.toEntity
+import com.patmanak.contako.data.local.RoomContactRepository
+import com.patmanak.contako.data.local.RoomMutationExecutionStore
+import com.patmanak.contako.data.local.RoomRemoteCanonicalReconciliationStore
+import com.patmanak.contako.data.local.toDomain
+import com.patmanak.contako.data.proton.ProtonContactVCardCodec
+import com.patmanak.contako.data.proton.ProtonPlainContactCard
+import com.patmanak.contako.data.gateway.RemoteContactId
+import com.patmanak.contako.data.gateway.RemoteVersion
+import com.patmanak.contako.data.gateway.VerifiedContactCard
+import com.patmanak.contako.data.sync.RemoteMutationAcknowledgement
+import com.patmanak.contako.domain.repository.SaveResult
+import me.proton.core.contact.domain.entity.Contact
+import me.proton.core.contact.domain.entity.ContactId
+import me.proton.core.contact.domain.entity.ContactCardType
+import me.proton.core.domain.entity.UserId
 import com.patmanak.contako.data.local.AndroidProjectionBaselineEntity
 import com.patmanak.contako.data.sync.AndroidInteroperabilityContext
 import kotlinx.coroutines.runBlocking
@@ -230,6 +245,163 @@ class RoomAndroidProviderIdentityResolverDeviceTest {
         }
     }
 
+    @Test fun anAcknowledgedCodecEchoCanRecoverOnlyTheHistoricallyCommittedProjectionAndPendingEmail() = runBlocking {
+        for (compound in listOf(false, true)) {
+            resetScope()
+            val fixture = seedAcknowledgedHistoricalProjection(compound)
+            val canonical = database.contactDao().get(ACCOUNT.value, CONTACT_ID)!!
+            val ledger = database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT_ID)!!
+            val androidEvidence = database.contactSyncEvidenceDao().get(ACCOUNT.value, CONTACT_ID, "ANDROID")
+            assertTrue(recoverCompanions(fixture, detached = true))
+            assertEquals(canonical, database.contactDao().get(ACCOUNT.value, CONTACT_ID))
+            assertEquals(androidEvidence, database.contactSyncEvidenceDao().get(ACCOUNT.value, CONTACT_ID, "ANDROID"))
+            assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
+            val after = database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT_ID)!!
+            assertEquals(ledger.revision + 1, after.revision)
+            assertEquals("DETACHED", after.projectionState)
+            assertEquals(null, after.pendingProjectionFingerprint)
+            assertEquals(ledger.canonicalProjectionFingerprint, after.canonicalProjectionFingerprint)
+            val actual = claimedSnapshot(fixture.observation)
+            assertEquals(CanonicalAndroidContactMapper().fingerprint(actual).sha256Hex, after.androidBaselineFingerprint)
+            val stored = database.androidProjectionLedgerDao().getBaseline(ACCOUNT.value, CONTACT_ID)!!
+            assertEquals(actual, AndroidContactSnapshotBinaryCodec.decode(stored.encodedSnapshot))
+            val nextPlan = CanonicalAndroidContactMapper().planProjection(actual, canonical.toDomain())
+            val organizationUpdate = nextPlan.operations.filterIsInstance<com.patmanak.contako.data.android.mapping.AndroidRowOperation.Update>()
+                .single { it.desired.kind == AndroidRowKind.ORGANIZATION }
+            assertEquals(canonical.toDomain().values.single { it.kind == ContactValueKind.TITLE }.id,
+                organizationUpdate.desired.linkedCanonicalValueIds[AndroidLinkedValueRole.TITLE])
+            assertNotEquals("submitted-title-a", organizationUpdate.desired.linkedCanonicalValueIds[AndroidLinkedValueRole.TITLE])
+            assertTrue(database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID)
+                .any { it.role == "TITLE" && it.canonicalValueId == "submitted-title-a" })
+            if (compound) assertTrue(database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID)
+                .any { it.canonicalValueId == "submitted-email-a" && it.state == "ATTACHED" && it.dataRowLocator == 502L })
+            reopenDatabase()
+            assertTrue(resolver().resolve(fixture.claims()) is AndroidProviderIdentityResolution.Bound)
+        }
+    }
+
+    @Test fun aHistoricalCommitmentNeverAuthorizesChangedClaimsPayloadScopeOrForeignBindings() = runBlocking {
+        for (failure in listOf("missing-hash", "changed-hash", "payload", "claim", "locator", "source", "epoch", "revision",
+                "foreign", "pending-claim", "pending-attached-elsewhere", "observation", "baseline")) {
+            resetScope()
+            var fixture = seedAcknowledgedHistoricalProjection(compound = true)
+            if (failure.endsWith("hash")) {
+                val ledger = database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT_ID)!!
+                database.androidProjectionLedgerDao().update(ledger.copy(canonicalProjectionFingerprint =
+                    if (failure == "missing-hash") null else "0".repeat(64)))
+            }
+            if (failure == "payload") fixture = fixture.copy(observation = fixture.observation.copy(dataRows = fixture.observation.dataRows.map {
+                if (it.dataRowId == 801L) it.copy(stringSlots = it.stringSlots.toMutableList().also { slots -> slots[3] = "Changed title" }) else it
+            }))
+            if (failure == "claim") fixture = fixture.copy(observation = fixture.observation.copy(dataRows = fixture.observation.dataRows.map {
+                if (it.dataRowId == 801L) it.copy(linkedValueIdsEncoding = encodeLinked(mapOf(AndroidLinkedValueRole.TITLE to "forged"))) else it
+            }))
+            if (failure == "locator") fixture = fixture.copy(observation = fixture.observation.copy(dataRows = fixture.observation.dataRows.map {
+                if (it.dataRowId == 801L) it.copy(dataRowId = 802) else it
+            }))
+            if (failure == "source") fixture = fixture.copy(observation = fixture.observation.copy(
+                rawContact = fixture.observation.rawContact.copy(sourceIdentity = "another-source")))
+            if (failure == "pending-claim") fixture = fixture.copy(observation = fixture.observation.copy(dataRows = fixture.observation.dataRows.map {
+                if (it.dataRowId == 502L) it.copy(canonicalValueId = "unregistered-email") else it
+            }))
+            if (failure == "pending-attached-elsewhere") assertTrue(resolver().resolve(listOf(
+                claim(999, AndroidRowKind.EMAIL, "submitted-email-a"))) is AndroidProviderIdentityResolution.Bound)
+            if (failure == "foreign") {
+                assertEquals(AndroidPendingBindingRegistration.Registered, resolver().registerPendingBindings(ANDROID_ACCOUNT, CONTACT_ID, RAW_CONTACT_ID,
+                    listOf(AndroidPendingProviderBinding(AndroidRowKind.NOTE, AndroidDurableValueBinding("submitted-title-a", emptyMap())))))
+                assertTrue(resolver().resolve(listOf(claim(999, AndroidRowKind.NOTE, "submitted-title-a"))) is AndroidProviderIdentityResolution.Bound)
+            }
+            if (failure == "baseline") {
+                val baseline = database.androidProjectionLedgerDao().getBaseline(ACCOUNT.value, CONTACT_ID)!!
+                database.androidProjectionLedgerDao().upsertBaseline(baseline.copy(fingerprint = "1".repeat(64)))
+            }
+            val rows = database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID)
+            val ledger = database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT_ID)
+            val canonical = database.contactDao().get(ACCOUNT.value, CONTACT_ID)
+            val baseline = database.androidProjectionLedgerDao().getBaseline(ACCOUNT.value, CONTACT_ID)!!
+            val owner = database.androidProjectionLedgerDao().getAccount(ACCOUNT.value)!!
+            assertFalse("RETAINED_COMMITMENT_$failure", resolver().recoverProjectionBindings(
+                AndroidInteroperabilityContext(ACCOUNT, ANDROID_ACCOUNT.value, owner.revision,
+                    if (failure == "epoch") PROVIDER_EPOCH + 1 else PROVIDER_EPOCH),
+                CONTACT_ID, if (failure == "revision") fixture.revision + 1 else fixture.revision,
+                fixture.observation, fixture.desired, noPhoto, { "missing" }, { failure != "observation" },
+                allowDetachedPreparation = true))
+            assertEquals(rows, database.androidProviderIdentityDao().getAllForContact(ACCOUNT.value, CONTACT_ID))
+            assertEquals(ledger, database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT_ID))
+            assertEquals(canonical, database.contactDao().get(ACCOUNT.value, CONTACT_ID))
+            val afterBaseline = database.androidProjectionLedgerDao().getBaseline(ACCOUNT.value, CONTACT_ID)!!
+            assertEquals(baseline.fingerprint, afterBaseline.fingerprint)
+            assertTrue(baseline.encodedSnapshot.contentEquals(afterBaseline.encodedSnapshot))
+        }
+    }
+
+    private suspend fun seedAcknowledgedHistoricalProjection(compound: Boolean): CompanionFixture {
+        val codec = ProtonContactVCardCodec()
+        val remote = Contact(UserId(ACCOUNT.value), ContactId("source-id"), "Display Alias", emptyList())
+        fun decode(prepared: com.patmanak.contako.data.proton.ProtonPreparedVCard) = codec.decode(ACCOUNT.value, remote, listOf(
+            ProtonPlainContactCard(ContactCardType.Signed, prepared.signed),
+            ProtonPlainContactCard(ContactCardType.EncryptedAndSigned, prepared.encryptedPrivate)))
+        val initial = decode(codec.encode(CanonicalContact(ACCOUNT.value, CONTACT_ID, displayName = "Display Alias",
+            values = listOf(ContactValue("new-org", ContactValueKind.ORGANIZATION, "Fixture company", order = 0),
+                ContactValue("new-email", ContactValueKind.EMAIL, "duplicate@example.test", order = 0))))).copy(
+            id = CONTACT_ID, revision = 0, remoteVersion = "verified-v1")
+        database.contactDao().upsert(initial.toEntity())
+        database.contactDao().upsertValues(initial.values.map { it.toEntity(initial) })
+        database.androidProjectionLedgerDao().bindAndroidAccountName(ACCOUNT.value, 0, ANDROID_ACCOUNT.value)
+        val mapper = CanonicalAndroidContactMapper()
+        fun located(snapshot: AndroidContactSnapshot) = snapshot.copy(rows = snapshot.rows.map {
+            it.copy(identity = it.identity.copy(providerRowId = when (it.kind) {
+                AndroidRowKind.STRUCTURED_NAME -> 601L
+                AndroidRowKind.ORGANIZATION -> 801L
+                else -> 501L + it.order
+            }))
+        })
+        val baseline = located(mapper.project(initial)).let { snapshot -> snapshot.copy(rows = snapshot.rows.map {
+            if (it.kind == AndroidRowKind.STRUCTURED_NAME) it.copy(components = it.components + mapOf(
+                AndroidComponent.GIVEN_NAME to "Display", AndroidComponent.FAMILY_NAME to "Alias")) else it
+        }) }
+        assertEquals(AndroidPendingBindingRegistration.Registered, resolver().registerPendingBindings(ANDROID_ACCOUNT, CONTACT_ID, RAW_CONTACT_ID,
+            baseline.rows.map { AndroidPendingProviderBinding(it.kind, AndroidDurableValueBinding(it.identity.canonicalValueId, it.linkedCanonicalValueIds)) }))
+        assertTrue(resolver().resolve(baseline.rows.map { claim(it.identity.providerRowId!!, it.kind, it.identity.canonicalValueId,
+            it.linkedCanonicalValueIds) }) is AndroidProviderIdentityResolution.Bound)
+        val added = listOf(ContactValue("submitted-title-a", ContactValueKind.TITLE, "Engineer", order = 0)) +
+            if (compound) listOf(ContactValue("submitted-email-a", ContactValueKind.EMAIL, "duplicate@example.test", order = 1)) else emptyList()
+        val saved = (RoomContactRepository(database).saveContact(initial.copy(values = initial.values + added)) as SaveResult.Saved).value
+        val submittedProjection = located(mapper.project(saved))
+        if (compound) {
+            val email = submittedProjection.rows.single { it.identity.canonicalValueId == "submitted-email-a" }
+            assertEquals(AndroidPendingBindingRegistration.Registered, resolver().registerPendingBindings(ANDROID_ACCOUNT, CONTACT_ID, RAW_CONTACT_ID,
+                listOf(AndroidPendingProviderBinding(email.kind, AndroidDurableValueBinding(email.identity.canonicalValueId, emptyMap())))))
+        }
+        val baselineFingerprint = mapper.fingerprint(baseline).sha256Hex
+        database.androidProjectionLedgerDao().upsertBaseline(AndroidProjectionBaselineEntity(ACCOUNT.value, CONTACT_ID,
+            baselineFingerprint, AndroidContactSnapshotBinaryCodec.encode(baseline)))
+        val ledger = database.androidProjectionLedgerDao().get(ACCOUNT.value, CONTACT_ID)!!
+        // Exact state persisted by projection preparation before the lost completion.
+        database.androidProjectionLedgerDao().update(ledger.copy(projectionState = "WRITE_PENDING",
+            canonicalProjectionFingerprint = mapper.fingerprint(submittedProjection).sha256Hex,
+            pendingProjectionFingerprint = mapper.fingerprint(submittedProjection).sha256Hex,
+            androidBaselineFingerprint = baselineFingerprint))
+        val execution = RoomMutationExecutionStore(database)
+        val command = execution.eligible(ACCOUNT.value, Long.MAX_VALUE, 10).single()
+        assertTrue(execution.claim(command, Long.MAX_VALUE))
+        assertTrue(execution.acknowledgeAndFinish(command, RemoteMutationAcknowledgement("source-id", "verified-v2")))
+        val echo = decode(codec.encode(saved))
+        assertNotEquals("submitted-title-a", echo.values.single { it.kind == ContactValueKind.TITLE }.id)
+        assertEquals(initial.values.single { it.kind == ContactValueKind.ORGANIZATION }.id,
+            echo.values.single { it.kind == ContactValueKind.ORGANIZATION }.id)
+        RoomRemoteCanonicalReconciliationStore(database).reconcileTargetedVerified(ACCOUNT,
+            VerifiedContactCard(RemoteContactId("source-id"), RemoteVersion("verified-v2"), echo))
+        val current = database.contactDao().get(ACCOUNT.value, CONTACT_ID)!!.toDomain()
+        val observed = submittedProjection.copy(rows = submittedProjection.rows.map {
+            if (it.kind == AndroidRowKind.STRUCTURED_NAME) baseline.rows.single { previous -> previous.kind == it.kind } else it
+        })
+        fun observation(snapshot: AndroidContactSnapshot) = AndroidStableRawContactObservation(
+            AndroidOwnedRawContact(RAW_CONTACT_ID, CONTACT_ID, "source-id", false, false, 7),
+            snapshot.rows.map(::compositeProviderRow).sortedBy { it.dataRowId })
+        return CompanionFixture(current.revision, mapper.project(current), observation(observed), observation(baseline), baselineFingerprint)
+    }
+
     private suspend fun resetScope() {
         database.close()
         context.deleteDatabase(DATABASE_NAME)
@@ -241,10 +413,18 @@ class RoomAndroidProviderIdentityResolverDeviceTest {
         val observation: AndroidStableRawContactObservation, val oldObservation: AndroidStableRawContactObservation,
         val baselineFingerprint: String) {
         fun claims() = observation.dataRows.map { row ->
-            val kind = if (row.dataRowId == 601L) AndroidRowKind.STRUCTURED_NAME else AndroidRowKind.ORGANIZATION
-            val desiredRow = desired.rows.single { it.kind == kind }
+            val kind = when (row.mimeType) {
+                ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE -> AndroidRowKind.STRUCTURED_NAME
+                ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE -> AndroidRowKind.EMAIL
+                else -> AndroidRowKind.ORGANIZATION
+            }
+            val linked = row.linkedValueIdsEncoding?.split(',')?.associate { encoded ->
+                val parts = encoded.split(':')
+                AndroidLinkedValueRole.valueOf(parts[0]) to
+                    java.util.Base64.getUrlDecoder().decode(parts[2]).toString(Charsets.UTF_8)
+            }.orEmpty()
             AndroidProviderIdentityClaim(ANDROID_ACCOUNT, CONTACT_ID, RAW_CONTACT_ID, row.dataRowId, kind,
-                row.canonicalValueId, if (row.linkedValueIdsEncoding == null) emptyMap() else desiredRow.linkedCanonicalValueIds)
+                row.canonicalValueId, linked)
         }
     }
 
@@ -313,10 +493,14 @@ class RoomAndroidProviderIdentityResolverDeviceTest {
             7 to AndroidComponent.PHONETIC_MIDDLE_NAME, 8 to AndroidComponent.PHONETIC_FAMILY_NAME)
         else mapOf(0 to AndroidComponent.COMPANY, 3 to AndroidComponent.TITLE, 4 to AndroidComponent.DEPARTMENT, 5 to AndroidComponent.ROLE)
         return AndroidOwnedDataRow(requireNotNull(row.identity.providerRowId), RAW_CONTACT_ID,
-            if (row.kind == AndroidRowKind.STRUCTURED_NAME) ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE
-                else ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE,
+            when (row.kind) {
+                AndroidRowKind.STRUCTURED_NAME -> ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE
+                AndroidRowKind.EMAIL -> ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE
+                else -> ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE
+            },
             row.identity.canonicalValueId, row.order, false, encodeLinked(row.linkedCanonicalValueIds), row.isPrimary, row.isSuperPrimary,
-            List(14) { components[it]?.let(row.components::get)?.takeIf(String::isNotEmpty) }, null)
+            List(14) { if (row.kind == AndroidRowKind.EMAIL) row.value.takeIf { _ -> it == 0 }
+                else components[it]?.let(row.components::get)?.takeIf(String::isNotEmpty) }, null)
     }
 
     private fun encodeLinked(linked: Map<AndroidLinkedValueRole, String>): String? = linked.entries.joinToString(",") { (role, id) ->
