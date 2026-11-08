@@ -529,4 +529,5 @@
     <string name="sync_email_partial_body">Alcuni indirizzi e-mail richiedono una verifica.</string>
     <string name="sync_create_anyway">Crea comunque</string>
     <string name="sync_create_anyway_warning">La creazione precedente non è stata verificata. Creare di nuovo potrebbe duplicare questo contatto su Proton.</string>
+    <string name="sync_retry_match_unverified">È stata trovata una possibile corrispondenza in Proton, ma non è stato possibile leggere un altro contatto.</string>
 </resources>

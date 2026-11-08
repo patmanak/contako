@@ -61,7 +61,7 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
     }
     conflicts.forEach { conflict ->
         if (snapshot.blockedItems.any { it.id == conflict.contactId && it.type == SyncBlockedItemType.CONTACT &&
-                it.retry?.reason == SyncMutationRetryReason.VERIFICATION }) return@forEach
+                it.retry?.reason in setOf(SyncMutationRetryReason.VERIFICATION, SyncMutationRetryReason.MATCH_VERIFICATION) }) return@forEach
         val contact = contacts[conflict.contactId]
         add("conflict:${conflict.contactId}", conflict.contactId, contact?.resolvedDisplayName,
             SyncProblem.CONFLICT_RECOVERY_REQUIRED, SyncIssueScope.CONTACT,
@@ -136,6 +136,7 @@ internal fun syncIssueBodyResources(advice: SyncIssueAdvice): List<Int> {
         SyncIssueCause.REMOTE_PERMISSION -> R.string.sync_issue_remote_permission
         SyncIssueCause.ANDROID -> R.string.sync_issue_android_body
         SyncIssueCause.VERIFICATION -> R.string.sync_retry_verification
+        SyncIssueCause.MATCH_VERIFICATION -> R.string.sync_retry_match_unverified
         SyncIssueCause.UNKNOWN -> R.string.sync_issue_unknown
     })
 }

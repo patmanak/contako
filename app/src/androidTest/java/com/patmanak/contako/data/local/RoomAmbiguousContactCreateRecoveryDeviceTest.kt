@@ -17,6 +17,7 @@ import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.PreservationEnvelope
+import com.patmanak.contako.domain.sync.SyncMutationRetryReason
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -182,8 +183,8 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
         remote = listOf(card("unreadable", "other"), card("delivered", UID))
         cardFailures = mapOf("unreadable" to GatewayFailureCategory.MALFORMED_RESPONSE)
         val before = intent()
-        assertReason(MutationPreparationActionRequiredReason.RECONCILIATION_CREATION_MATCH_UNVERIFIED,
-            recovery().prepare(command()))
+        assertEquals(GatewayFailureCategory.RECONCILIATION_MATCH_UNVERIFIED,
+            (recovery().prepare(command()) as GatewayOutcome.Failure).category)
         assertEquals(2, cardReads)
         assertEquals(before, intent())
         assertEquals(initial, contact())
@@ -598,7 +599,7 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
         }
     }
 
-    @Test fun sharedIncompleteFailureExcludesChangedFutureBlockedNewAndVisibleCandidates() = runBlocking {
+    @Test fun sharedIncompleteFailureExcludesIneligibleTargetsAndKeepsVisibleMatchCauseDistinct() = runBlocking {
         val local = seed()
         database.outboxDao().upsert(intent().copy(lastAttemptAtEpochMillis = 1_000))
         val before = linkedMapOf<String, OutboxMutationEntity>()
@@ -636,9 +637,12 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
         assertEquals(before.getValue("intent").copy(nextAttemptAtEpochMillis = 99_000),
             database.outboxDao().get(ACCOUNT.value, "CONTACT", "intent"))
         assertEquals(1, database.outboxDao().get(ACCOUNT.value, "CONTACT", "new-after-cut")!!.attemptCount)
-        assertEquals(1, database.outboxDao().get(ACCOUNT.value, "CONTACT", "visible")!!.attemptCount)
+        assertEquals(2, database.outboxDao().get(ACCOUNT.value, "CONTACT", "visible")!!.attemptCount)
+        assertEquals(GatewayFailureCategory.RECONCILIATION_MATCH_UNVERIFIED.name,
+            database.outboxDao().get(ACCOUNT.value, "CONTACT", "visible")!!.errorCategory)
         assertTrue(database.outboxDao().get(ACCOUNT.value, "CONTACT", "visible")!!.requiresReconciliation)
         assertNull(database.contactDao().getEntity(ACCOUNT.value, "visible")!!.remoteContactId)
+        assertNull(RoomAmbiguousContactCreateChoiceStore(database).offerRevision(ACCOUNT, "visible"))
         assertEquals(1, intent().attemptCount) // Current failure belongs to the orchestrator, not the scan helper.
         assertEquals(2, inventoryReads)
         assertEquals(2, cardReads)
@@ -679,6 +683,113 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
             assertEquals(1, intent().attemptCount)
             assertTrue(intent().requiresReconciliation)
         }
+    }
+
+    @Test fun exhaustedVisibleMatchCanBeRetriedAfterRestartAndConvergesOnlyWithCompleteUniqueProof() = runBlocking {
+        val original = seed()
+        val delivered = VerifiedContactCard(RemoteContactId("delivered"), RemoteVersion("full-delivered"),
+            original.copy(id = "remote-local", remoteContactId = "delivered", remoteVCardUid = UID,
+                pendingMutationRevision = null, preservationEnvelope = payload()))
+        remote = listOf(card("unreadable", "other-uid"), delivered)
+        cardFailures = mapOf("unreadable" to GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED)
+        database.outboxDao().upsert(intent().copy(state = DurableMutationState.PENDING.name, attemptCount = 8))
+        var now = 1_000L
+        var uploads = 0
+        fun runner(): DurableMutationOrchestrator {
+            val helper = recovery(clock = { now })
+            return DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+                com.patmanak.contako.data.sync.RoomBackedMutationPreparationGateway(ACCOUNT, database,
+                    com.patmanak.contako.data.proton.ProtonEmailGroupMembershipReader { _, _ -> error("No group read") },
+                    createRecovery = helper), MutationUploadGateway { uploads++; error("No duplicate POST") })
+        }
+        assertEquals(1, runner().drain(ACCOUNT.value, now).actionRequired)
+        val blocked = intent()
+        assertEquals(GatewayFailureCategory.RECONCILIATION_MATCH_UNVERIFIED.name, blocked.errorCategory)
+        assertEquals("REMOTE_ACTION_REQUIRED", blocked.blockedReason)
+        assertEquals(DurableMutationState.ACTION_REQUIRED.name, blocked.state)
+        assertEquals(8, blocked.attemptCount)
+        assertTrue(blocked.requiresReconciliation)
+        assertEquals(original, contact())
+        assertNull(database.contactConflictDao().get(ACCOUNT.value, LOCAL_ID))
+        assertNull(RoomAmbiguousContactCreateChoiceStore(database).offerRevision(ACCOUNT, LOCAL_ID))
+        var retries = RoomMutationRetryRequestStore(database)
+        assertEquals(SyncMutationRetryReason.MATCH_VERIFICATION, retries.availability(ACCOUNT, "CONTACT", LOCAL_ID)?.reason)
+        assertTrue(retries.queue(ACCOUNT, "CONTACT", LOCAL_ID, blocked.revision, now))
+        database.close(); database = ContakoDatabase.create(context, DATABASE)
+        retries = RoomMutationRetryRequestStore(database)
+        assertTrue(requireNotNull(retries.availability(ACCOUNT, "CONTACT", LOCAL_ID)).queued)
+        assertEquals(1, retries.consume(ACCOUNT, now))
+        assertEquals(1, runner().drain(ACCOUNT.value, now).actionRequired) // Still unreadable: verification only.
+        assertEquals(0, uploads)
+        assertEquals(8, intent().attemptCount)
+        assertEquals(GatewayFailureCategory.RECONCILIATION_MATCH_UNVERIFIED.name, intent().errorCategory)
+        assertNull(database.contactConflictDao().get(ACCOUNT.value, LOCAL_ID))
+        assertFalse(retries.queue(ACCOUNT, "CONTACT", LOCAL_ID, blocked.revision, now + 1))
+        now += RoomMutationRetryRequestStore.COOLDOWN_MILLIS
+        assertTrue(retries.queue(ACCOUNT, "CONTACT", LOCAL_ID, blocked.revision, now))
+        cardFailures = emptyMap() // Both cards readable, stable inventory and one matching UID.
+        assertEquals(1, runner().drain(ACCOUNT.value, now).reconciledWithoutUpload)
+        assertEquals(0, uploads)
+        assertEquals("delivered", contact().remoteContactId)
+        assertEquals(original.displayName, contact().displayName)
+        assertEquals(original.values, contact().values)
+        assertEquals(PreservationEnvelope(mapOf("X-OPAQUE" to "retained opaque value")), payload())
+        assertNull(contact().pendingMutationRevision)
+        assertNull(contact().conflictState)
+        assertNull(database.outboxDao().get(ACCOUNT.value, "CONTACT", LOCAL_ID))
+        assertNull(database.contactConflictDao().get(ACCOUNT.value, LOCAL_ID))
+        assertEquals(6, inventoryReads)
+        assertEquals(6, cardReads)
+    }
+
+    @Test fun completeRecheckOfADifferentVisibleMatchCreatesARealVersionConflictWithoutPosting() = runBlocking {
+        val original = seed()
+        remote = listOf(card("unreadable", "other-uid"), card("delivered", UID))
+        cardFailures = mapOf("unreadable" to GatewayFailureCategory.MALFORMED_RESPONSE)
+        database.outboxDao().upsert(intent().copy(state = DurableMutationState.PENDING.name, attemptCount = 8))
+        fun runner() = DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+            MutationPreparationGateway { recovery().prepare(it) }, MutationUploadGateway { error("No duplicate POST") })
+        assertEquals(1, runner().drain(ACCOUNT.value, 1_000).actionRequired)
+        assertEquals(GatewayFailureCategory.RECONCILIATION_MATCH_UNVERIFIED.name, intent().errorCategory)
+        assertNull(database.contactConflictDao().get(ACCOUNT.value, LOCAL_ID))
+        assertTrue(RoomMutationRetryRequestStore(database).queue(ACCOUNT, "CONTACT", LOCAL_ID, 3, 1_000))
+        cardFailures = emptyMap()
+        assertEquals(1, runner().drain(ACCOUNT.value, 1_000).actionRequired)
+        val conflict = requireNotNull(RoomContactConflictStore(database).detail(ACCOUNT.value, LOCAL_ID))
+        assertEquals(original.displayName, conflict.local.displayName)
+        assertEquals(original.values, conflict.local.values)
+        assertEquals("Remote delivered", conflict.proton.displayName)
+        assertEquals("delivered", contact().remoteContactId)
+        assertTrue(intent().requiresReconciliation)
+        assertEquals(8, intent().attemptCount)
+        assertNull(RoomAmbiguousContactCreateChoiceStore(database).offerRevision(ACCOUNT, LOCAL_ID))
+        assertNull(RoomMutationRetryRequestStore(database).availability(ACCOUNT, "CONTACT", LOCAL_ID))
+    }
+
+    @Test fun unreadableKnownRemoteIdentityRemainsVerificationRetryWithoutOfferingAnotherCreate() = runBlocking {
+        val original = seed()
+        val delivered = VerifiedContactCard(RemoteContactId("delivered"), RemoteVersion("full-delivered"),
+            original.copy(id = "remote-local", remoteContactId = "delivered", remoteVCardUid = UID,
+                pendingMutationRevision = null, preservationEnvelope = payload()))
+        RoomRemoteCanonicalReconciliationStore(database).reconcileTargetedVerified(ACCOUNT, delivered)
+        remote = listOf(delivered)
+        cardFailure = GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED
+        database.outboxDao().upsert(intent().copy(state = DurableMutationState.PENDING.name,
+            blockedReason = null, errorCategory = null, attemptCount = 8))
+        val helper = recovery()
+        val runner = DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+            com.patmanak.contako.data.sync.RoomBackedMutationPreparationGateway(ACCOUNT, database,
+                com.patmanak.contako.data.proton.ProtonEmailGroupMembershipReader { _, _ -> error("No group read") },
+                createRecovery = helper), MutationUploadGateway { error("No duplicate POST") })
+        assertEquals(1, runner.drain(ACCOUNT.value, 1_000).actionRequired)
+        assertEquals(GatewayFailureCategory.RECONCILIATION_INCOMPLETE.name, intent().errorCategory)
+        assertEquals("delivered", contact().remoteContactId)
+        assertTrue(intent().requiresReconciliation)
+        assertEquals(SyncMutationRetryReason.VERIFICATION,
+            RoomMutationRetryRequestStore(database).availability(ACCOUNT, "CONTACT", LOCAL_ID)?.reason)
+        assertNull(RoomAmbiguousContactCreateChoiceStore(database).offerRevision(ACCOUNT, LOCAL_ID))
+        assertEquals(original.displayName, contact().displayName)
+        assertEquals(original.values, contact().values)
     }
 
     private suspend fun seedSibling(local: CanonicalContact, id: String): OutboxMutationEntity {

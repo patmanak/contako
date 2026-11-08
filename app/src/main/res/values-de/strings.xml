@@ -521,4 +521,5 @@
     <string name="sync_email_partial_body">E-Mail-Adressen müssen überprüft werden.</string>
     <string name="sync_create_anyway">Trotzdem erstellen</string>
     <string name="sync_create_anyway_warning">Die vorherige Erstellung konnte nicht bestätigt werden. Eine erneute Erstellung kann diesen Kontakt in Proton duplizieren.</string>
+    <string name="sync_retry_match_unverified">Ein möglicher Proton-Kontakt wurde gefunden, aber ein anderer Kontakt konnte nicht gelesen werden.</string>
 </resources>

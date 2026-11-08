@@ -12,6 +12,21 @@ import org.junit.Test
 class SyncIssueItemsTest {
     private val contact = CanonicalContact("synthetic-owner", "one", displayName = "Chloë Groß")
 
+    @Test fun visibleUnverifiedMatchHasItsOwnCauseAndRetryWithoutCompareOrCreateAnyway() {
+        val retry = SyncMutationRetry(8, SyncMutationRetryReason.MATCH_VERIFICATION)
+        val blocked = SyncBlockedItem(contact.id, SyncBlockedItemType.CONTACT, contact.resolvedDisplayName,
+            false, SyncProblem.INTERNAL_FAILURE, retry = retry)
+        val state = ContactsUiState(actionContacts = listOf(contact), syncDashboard = SyncDashboardSnapshot(
+            SyncDashboardState.BLOCKED, blockedItems = listOf(blocked)))
+        val issue = currentSyncIssues(state, emptyList()).single()
+        assertEquals(SyncIssueCause.MATCH_VERIFICATION, issue.advice.cause)
+        assertEquals(SyncIssueAction.RETRY_ITEM, issue.advice.action)
+        assertEquals(listOf(R.string.sync_retry_match_unverified), syncIssueBodyResources(issue.advice))
+        assertEquals(retry, issue.retry)
+        assertNull(issue.createAnywayRevision)
+        assertEquals(contact.id, issue.targetId)
+    }
+
     @Test fun retainedPartialGroupDoesNotHideThePartialContactTitle() {
         val partial = SyncDashboardSnapshot(SyncDashboardState.PENDING, pendingMutationCount = 0,
             partialContactIds = setOf(contact.id))

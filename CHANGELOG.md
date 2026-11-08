@@ -14,6 +14,8 @@ Features and improvements by version.
   when exhausted verification cannot establish absence.
 - Share incomplete verification attempts across unchanged eligible creations in
   the same bounded scan, preserving retry budgets and deadlines.
+- Identify unverified Proton matches separately from content conflicts and allow
+  guarded verification retries without risking another creation.
 - Probe exhausted transient writes approximately daily without resetting retry
   history or bypassing server delays; retain real failure causes during dependency waits.
 

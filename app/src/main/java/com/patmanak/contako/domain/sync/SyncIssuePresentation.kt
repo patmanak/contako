@@ -5,7 +5,7 @@ enum class SyncIssueScope { ACCOUNT, CONTACT, GROUP, PROTON_IMPORT, ANDROID_COPY
 
 enum class SyncIssueCause {
     AUTHENTICATION, NETWORK, CONFLICT, VALIDATION, CRYPTOGRAPHY,
-    GROUP_CAPABILITY, REMOTE_PERMISSION, ANDROID, VERIFICATION, UNKNOWN,
+    GROUP_CAPABILITY, REMOTE_PERMISSION, ANDROID, VERIFICATION, MATCH_VERIFICATION, UNKNOWN,
 }
 
 enum class SyncIssueAction {
@@ -67,7 +67,11 @@ object SyncIssuePresentationPolicy {
             return advice(SyncIssueCause.AUTHENTICATION, SyncIssueAction.SIGN_IN)
         }
         if (retryReason != null && scope in setOf(SyncIssueScope.CONTACT, SyncIssueScope.GROUP)) {
-            return advice(if (retryReason == SyncMutationRetryReason.NETWORK) SyncIssueCause.NETWORK else SyncIssueCause.VERIFICATION,
+            return advice(when (retryReason) {
+                SyncMutationRetryReason.NETWORK -> SyncIssueCause.NETWORK
+                SyncMutationRetryReason.VERIFICATION -> SyncIssueCause.VERIFICATION
+                SyncMutationRetryReason.MATCH_VERIFICATION -> SyncIssueCause.MATCH_VERIFICATION
+            },
                 SyncIssueAction.RETRY_ITEM)
         }
         return when (problem) {

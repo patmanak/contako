@@ -130,34 +130,26 @@ internal class RoomAmbiguousContactCreateRecovery(
                 val safe = (knownIdentity != null || uid !in duplicates) &&
                     owners.size == 1 && owners.single().id == targetCommand.aggregateId
                 val matched = if (knownIdentity != null) boundMatches[knownIdentity] else matches[uid]
-                val outcome = if (!safe || (before.intent.remoteIdentity != null &&
-                        (matched == null || matched.id.value != before.intent.remoteIdentity))) unidentified()
+                val outcome = if (!safe) unidentified()
                 else if (matched == null) {
                     if (incomplete != null) {
-                        if (isCurrent) result = checkNotNull(incomplete)
-                        else {
-                            // This one verification inspected every captured target. Charge
-                            // only that exact due snapshot, using the ordinary CAS lifecycle;
-                            // never charge the claimed command twice or spend a future credit.
-                            checkLocalReconciliationInvariant(RoomOutboxStore(database).claim(before.intent, scanTime),
-                                LocalReconciliationInvariant.INTENT_REVISION)
-                            val failure = checkNotNull(incomplete)
-                            val decision = retryPolicy.decide(failure.category, targetCommand.operation,
-                                before.intent.attemptCount, scanTime, failure.retryAfterMillis)
-                            checkLocalReconciliationInvariant(RoomMutationExecutionStore(database).recordFailure(
-                                targetCommand, failure.category, decision), LocalReconciliationInvariant.INTENT_REVISION)
-                        }
+                        val failure = recordVerificationFailure(targetCommand, before, checkNotNull(incomplete), isCurrent, scanTime)
+                        if (isCurrent) result = failure
                         continue
                     }
-                    database.outboxDao().upsert(before.intent.copy(requiresReconciliation = false))
-                    GatewayOutcome.Success(if (targetCommand.operation == RemoteMutationOperation.DELETE)
-                        MutationPreparation.AlreadyApplied(RemoteMutationAcknowledgement(null, null))
-                    else MutationPreparation.UploadAllowed)
+                    if (knownIdentity != null) unidentified()
+                    else {
+                        database.outboxDao().upsert(before.intent.copy(requiresReconciliation = false))
+                        GatewayOutcome.Success(if (targetCommand.operation == RemoteMutationOperation.DELETE)
+                            MutationPreparation.AlreadyApplied(RemoteMutationAcknowledgement(null, null))
+                        else MutationPreparation.UploadAllowed)
+                    }
                 } else if (incomplete != null && knownIdentity == null) {
                     // An unreadable card could hide a duplicate UID. A visible candidate
                     // is enough to forbid a blind create, not enough to choose its identity.
-                    GatewayOutcome.Success(MutationPreparation.ActionRequired(
-                        MutationPreparationActionRequiredReason.RECONCILIATION_CREATION_MATCH_UNVERIFIED))
+                    recordVerificationFailure(targetCommand, before, GatewayOutcome.Failure(
+                        GatewayFailureCategory.RECONCILIATION_MATCH_UNVERIFIED,
+                        retryAfterMillis = checkNotNull(incomplete).retryAfterMillis), isCurrent, scanTime)
                 } else if (database.contactDao().getEntitiesByRemoteContactId(account.value, matched.id.value)
                         .any { it.id != targetCommand.aggregateId }) unidentified()
                 else {
@@ -172,6 +164,20 @@ internal class RoomAmbiguousContactCreateRecovery(
             }
             result
         }
+    }
+
+    /** One shared scan verifies each captured intent, without charging the claimed one twice. */
+    private suspend fun recordVerificationFailure(command: DurableMutationCommand, before: Snapshot,
+        failure: GatewayOutcome.Failure, isCurrent: Boolean, scanTime: Long): GatewayOutcome.Failure {
+        if (!isCurrent) {
+            checkLocalReconciliationInvariant(RoomOutboxStore(database).claim(before.intent, scanTime),
+                LocalReconciliationInvariant.INTENT_REVISION)
+            val decision = retryPolicy.decide(failure.category, command.operation,
+                before.intent.attemptCount, scanTime, failure.retryAfterMillis)
+            checkLocalReconciliationInvariant(RoomMutationExecutionStore(database).recordFailure(
+                command, failure.category, decision), LocalReconciliationInvariant.INTENT_REVISION)
+        }
+        return failure
     }
 
     private suspend fun snapshot(command: DurableMutationCommand, allowPending: Boolean = false): Snapshot? {

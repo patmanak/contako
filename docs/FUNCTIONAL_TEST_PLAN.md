@@ -617,7 +617,13 @@ untouched values independently on each peer:
   Place an unreadable card before a later known remote identity: continue reading
   and recover that bound identity. An unbound visible UID candidate with incomplete
   coverage MUST NOT be adopted as unique or offered a blind creation. Exhaust
-  incomplete verification without a visible match: show **Create anyway** with a
+  that visible-match verification: the affected item identifies the unreadable
+  dependency and offers a cooled verification retry, not a generic conflict or
+  fabricated version comparison. Retry while still unreadable, restart, then make
+  the dependency readable: a complete equivalent match converges without POST;
+  truly different content retains a real conflict. A known bound identity whose
+  card is unreadable also remains eligible for verification rather than creation.
+  Exhaust incomplete verification without a visible match: show **Create anyway** with a
   duplicate warning; cancel has no effect, confirmation survives restart and server
   delay, and a local edit invalidates it. Never create without that confirmation.
   Repeat with 25 ambiguous creations and one unreadable unrelated card. A stable

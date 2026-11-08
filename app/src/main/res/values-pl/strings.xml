@@ -537,4 +537,5 @@
     <string name="sync_email_partial_body">Adresy e-mail wymagają sprawdzenia.</string>
     <string name="sync_create_anyway">Utwórz mimo to</string>
     <string name="sync_create_anyway_warning">Nie udało się potwierdzić poprzedniego utworzenia. Ponowne utworzenie może zduplikować ten kontakt w Proton.</string>
+    <string name="sync_retry_match_unverified">Znaleziono możliwe dopasowanie w Proton, ale nie udało się odczytać innego kontaktu.</string>
 </resources>

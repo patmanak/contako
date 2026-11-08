@@ -529,4 +529,5 @@
     <string name="sync_email_partial_body">Hay direcciones de correo que revisar.</string>
     <string name="sync_create_anyway">Crear de todos modos</string>
     <string name="sync_create_anyway_warning">No se pudo verificar la creación anterior. Volver a crear puede duplicar este contacto en Proton.</string>
+    <string name="sync_retry_match_unverified">Se encontró una posible coincidencia en Proton, pero no se pudo leer otro contacto.</string>
 </resources>

@@ -135,7 +135,7 @@ exceptional reconciliation can read full cards, with one complete scan per pass;
 ordinary no-change synchronization MUST NOT do so. Earlier blocked unbound
 creations MAY reopen this verification once per fresh recovery generation.
 If that stable scan is incomplete because of unreadable cards, each unchanged,
-due and unblocked captured intent without a visible candidate MAY consume one
+due and unblocked captured intent requiring incomplete verification MAY consume one
 verification attempt through the same claim/retry lifecycle. The already claimed
 intent MUST NOT be charged twice. Future, changed or newly created intentions
 MUST remain untouched, and interrupted network/account scans MUST NOT distribute
@@ -144,7 +144,11 @@ failure credits without the second stable inventory.
 An unreadable card MUST NOT stop inspection of later cards, but MUST prevent
 absence and unbound UID-uniqueness proofs. A previously bound exact remote ID MAY
 still be verified. A visible unbound candidate with incomplete coverage MUST
-remain unresolved rather than be adopted or created again. After exhausted
+retain its distinct match-verification cause rather than become a content
+conflict, be adopted or be created again. Bounded automatic verification and an
+explicit cooled item retry after exhaustion MUST remain available; the item
+MUST explain the unreadable-card cause without offering comparison of invented
+versions or **Create anyway**. After exhausted
 incomplete verification with no visible candidate, the user MAY explicitly
 confirm **Create anyway**, acknowledging duplicate risk. This permission MUST be
 revision-bound, invalidated by an edit and consumed only by the serialized

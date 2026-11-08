@@ -521,4 +521,5 @@
     <string name="sync_email_partial_body">E-mailadressen moeten worden nagekeken.</string>
     <string name="sync_create_anyway">Toch aanmaken</string>
     <string name="sync_create_anyway_warning">De vorige aanmaak kon niet worden bevestigd. Opnieuw aanmaken kan dit contact dupliceren in Proton.</string>
+    <string name="sync_retry_match_unverified">Er is een mogelijke overeenkomst in Proton gevonden, maar een ander contact kon niet worden gelezen.</string>
 </resources>

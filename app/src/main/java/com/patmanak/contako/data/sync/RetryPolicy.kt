@@ -78,6 +78,7 @@ class MutationRetryPolicy(
             GatewayFailureCategory.REMOTE_SERVICE_FAILURE, GatewayFailureCategory.UNKNOWN)
         private val RETRYABLE = setOf(
             GatewayFailureCategory.RECONCILIATION_INCOMPLETE,
+            GatewayFailureCategory.RECONCILIATION_MATCH_UNVERIFIED,
             GatewayFailureCategory.NETWORK_UNAVAILABLE,
             GatewayFailureCategory.TIMEOUT,
             GatewayFailureCategory.RATE_LIMITED,

@@ -190,7 +190,7 @@ class RoomMutationRetryRequestDeviceTest {
         assertEquals(0, retries.consume(account, NOW + day))
         assertEquals(0, retries.consume(account, NOW + day * 3 - 1))
         assertEquals(1, retries.consume(account, NOW + day * 3))
-        for (category in listOf("RECONCILIATION_INCOMPLETE", "VALIDATION_REJECTED", "CONFLICT", "AUTHENTICATION_REQUIRED")) {
+        for (category in listOf("RECONCILIATION_INCOMPLETE", "RECONCILIATION_MATCH_UNVERIFIED", "VALIDATION_REJECTED", "CONFLICT", "AUTHENTICATION_REQUIRED")) {
             blocked(category, category)
         }
         assertEquals(0, retries.consume(account, NOW + day * 4))
@@ -207,6 +207,41 @@ class RoomMutationRetryRequestDeviceTest {
         assertTrue(RoomMutationExecutionStore(database).defer(command))
         assertEquals(original.copy(state = "PENDING"), intent("deferred"))
         assertFalse(RoomMutationExecutionStore(database).defer(command))
+    }
+
+    @Test fun visibleMatchRetryKeepsItsTypedCauseServerDeadlineAndManualCooldownAcrossRestart() = runBlocking {
+        val original = blocked("visible", "RECONCILIATION_MATCH_UNVERIFIED")
+        val canonical = requireNotNull(database.contactDao().getEntity(account.value, "visible"))
+        database.contactDao().upsert(canonical.copy(remoteContactId = null, remoteVersion = null,
+            remoteVCardUid = "synthetic-visible-match-uid"))
+        database.outboxDao().upsert(original.copy(remoteIdentity = null, remoteVersion = null,
+            nextAttemptAtEpochMillis = NOW + 100))
+        assertEquals(SyncMutationRetryReason.MATCH_VERIFICATION, retries.availability(account, "CONTACT", "visible")?.reason)
+        assertFalse(retries.queue(account, "CONTACT", "visible", original.revision, NOW))
+        assertTrue(retries.queue(account, "CONTACT", "visible", original.revision, NOW + 100))
+        database.outboxDao().upsert(intent("visible").copy(nextAttemptAtEpochMillis = NOW + 500))
+        database.close(); open()
+        assertTrue(requireNotNull(retries.availability(account, "CONTACT", "visible")).queued)
+        assertEquals(0, retries.consume(account, NOW + 200))
+        assertNull(database.mutationRetryRequestDao().get(account.value, "CONTACT", "visible")?.consumedAtEpochMillis)
+        assertEquals(1, retries.consume(account, NOW + 500))
+        var uploads = 0
+        val runner = DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+            MutationPreparationGateway { GatewayOutcome.Failure(GatewayFailureCategory.RECONCILIATION_MATCH_UNVERIFIED) },
+            MutationUploadGateway { uploads++; error("Visible unverified match cannot authorize a POST") })
+        assertEquals(1, runner.drain(account.value, NOW + 500).actionRequired)
+        assertEquals(0, uploads)
+        assertEquals(8, intent("visible").attemptCount)
+        assertTrue(intent("visible").requiresReconciliation)
+        assertEquals("RECONCILIATION_MATCH_UNVERIFIED", intent("visible").errorCategory)
+        assertNull(database.contactConflictDao().get(account.value, "visible"))
+        assertNull(RoomAmbiguousContactCreateChoiceStore(database).offerRevision(account, "visible"))
+        assertFalse(retries.queue(account, "CONTACT", "visible", original.revision, NOW + 501))
+        assertEquals(NOW + 100 + RoomMutationRetryRequestStore.COOLDOWN_MILLIS,
+            retries.availability(account, "CONTACT", "visible")?.nextEligibleAtEpochMillis)
+        val terminal = intent("visible")
+        assertEquals(0, retries.consume(account, NOW + MutationRetryPolicy.DAILY_RETRY_MILLIS * 2))
+        assertEquals(terminal, intent("visible"))
     }
 
     private suspend fun blocked(id: String, category: String = "NETWORK_UNAVAILABLE"): OutboxMutationEntity {

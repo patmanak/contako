@@ -33,7 +33,7 @@ data class SyncAndroidContactIssue(val contactId: String, val kind: SyncAndroidC
 
 enum class SyncBlockedItemType { CONTACT, GROUP }
 
-enum class SyncMutationRetryReason { NETWORK, VERIFICATION }
+enum class SyncMutationRetryReason { NETWORK, VERIFICATION, MATCH_VERIFICATION }
 
 data class SyncMutationRetry(val revision: Long, val reason: SyncMutationRetryReason,
     val nextEligibleAtEpochMillis: Long = 0, val queued: Boolean = false)

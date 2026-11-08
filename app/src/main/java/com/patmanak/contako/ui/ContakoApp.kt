@@ -1223,7 +1223,9 @@ private fun syncProblemBody(snapshot: com.patmanak.contako.domain.sync.SyncDashb
     if (snapshot.blockedItems.isNotEmpty() && snapshot.blockedItems.all { it.retry != null } &&
         snapshot.androidContactIssues.isEmpty() && snapshot.importProblems.none { !it.isTransient && !it.ignored } &&
         snapshot.state != SyncDashboardState.AUTHENTICATION_REQUIRED) {
-        if (snapshot.blockedItems.any { it.retry?.reason == com.patmanak.contako.domain.sync.SyncMutationRetryReason.VERIFICATION })
+        if (snapshot.blockedItems.any { it.retry?.reason in setOf(
+                com.patmanak.contako.domain.sync.SyncMutationRetryReason.VERIFICATION,
+                com.patmanak.contako.domain.sync.SyncMutationRetryReason.MATCH_VERIFICATION) })
             R.string.sync_retry_verification else R.string.sync_item_retry_needed
     } else when (snapshot.problem) {
         com.patmanak.contako.domain.sync.SyncProblem.VALIDATION_REJECTED -> R.string.sync_problem_validation

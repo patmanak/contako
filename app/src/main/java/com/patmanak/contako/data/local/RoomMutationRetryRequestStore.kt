@@ -55,7 +55,11 @@ internal class RoomMutationRetryRequestStore(private val database: ContakoDataba
             ?: return@withTransaction null
         val request = dao.get(account.value, type, id)
         SyncMutationRetry(intent.revision,
-            if (intent.errorCategory == "RECONCILIATION_INCOMPLETE") SyncMutationRetryReason.VERIFICATION else SyncMutationRetryReason.NETWORK,
+            when (intent.errorCategory) {
+                "RECONCILIATION_INCOMPLETE" -> SyncMutationRetryReason.VERIFICATION
+                "RECONCILIATION_MATCH_UNVERIFIED" -> SyncMutationRetryReason.MATCH_VERIFICATION
+                else -> SyncMutationRetryReason.NETWORK
+            },
             maxOf(intent.nextAttemptAtEpochMillis, request?.nextRequestAtEpochMillis ?: 0L),
             request?.revision == intent.revision && request.consumedAtEpochMillis == null)
     }
@@ -141,6 +145,6 @@ internal class RoomMutationRetryRequestStore(private val database: ContakoDataba
 
     companion object {
         const val COOLDOWN_MILLIS = 5 * 60 * 1_000L
-        private val RETRYABLE_FAILURES = setOf("NETWORK_UNAVAILABLE", "TIMEOUT", "RATE_LIMITED", "REMOTE_SERVICE_FAILURE", "UNKNOWN", "RECONCILIATION_INCOMPLETE")
+        private val RETRYABLE_FAILURES = setOf("NETWORK_UNAVAILABLE", "TIMEOUT", "RATE_LIMITED", "REMOTE_SERVICE_FAILURE", "UNKNOWN", "RECONCILIATION_INCOMPLETE", "RECONCILIATION_MATCH_UNVERIFIED")
     }
 }
