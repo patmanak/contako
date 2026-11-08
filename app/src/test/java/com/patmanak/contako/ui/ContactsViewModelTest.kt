@@ -10,6 +10,16 @@ import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.model.GroupMembership
 import com.patmanak.contako.domain.model.EmailGroupAssignmentAvailability
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
+import com.patmanak.contako.domain.policy.OrganizationPolicy
+import com.patmanak.contako.data.android.mapping.AndroidComponent
+import com.patmanak.contako.data.android.mapping.AndroidRowKind
+import com.patmanak.contako.data.android.mapping.CanonicalAndroidContactMapper
+import com.patmanak.contako.data.proton.ProtonContactVCardCodec
+import com.patmanak.contako.data.proton.ProtonPlainContactCard
+import me.proton.core.contact.domain.entity.Contact
+import me.proton.core.contact.domain.entity.ContactId
+import me.proton.core.contact.domain.entity.ContactCardType
+import me.proton.core.domain.entity.UserId
 import com.patmanak.contako.domain.policy.DirectoryFilter
 import com.patmanak.contako.domain.repository.ContactDirectorySnapshot
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
@@ -1499,6 +1509,63 @@ class ContactsViewModelTest {
         assertEquals(unknown, saved.values.single { it.kind == ContactValueKind.UNKNOWN_VCARD_PROPERTY })
         assertEquals(original.preservationEnvelope, saved.preservationEnvelope)
         assertNull(viewModel.uiState.value.contactEditor)
+        collection.cancel()
+    }
+
+    @Test
+    fun importedOrganizationEditsKeepCompanyDepartmentWireAndGeneratedNameConsistentAcrossEchoes() = runTest(dispatcher) {
+        val codec = ProtonContactVCardCodec()
+        val remote = Contact(UserId("synthetic-user"), ContactId("organization-fixture"), "Remote name", emptyList())
+        fun card(fields: String) = "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:organization-fixture\r\n$fields\r\nEND:VCARD\r\n"
+        fun decode(signed: String, privateCard: String) = codec.decode(LOCAL_ACCOUNT_ID, remote, listOf(
+            ProtonPlainContactCard(ContactCardType.Signed, signed),
+            ProtonPlainContactCard(ContactCardType.EncryptedAndSigned, privateCard)))
+        val original = decode(card("FN:Before / Sales / Europe / Squad"),
+            card("X-CONTAKO-AUTO-FN:Before / Sales / Europe / Squad\r\nORG;X-KEEP=opaque:Before;Sales;Europe;Squad"))
+        val organization = original.valuesOf(ContactValueKind.ORGANIZATION).single()
+        val repository = FakeRepository(listOf(original))
+        val model = ContactsViewModel(repository, directoryDispatcher = dispatcher)
+        val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        advanceUntilIdle()
+        model.editContact(original)
+        // Legacy callers edit the company, never the flattened multi-unit summary.
+        model.updateContactValue(organization.id, "Café / Studio-Next")
+        model.updateOrganizationComponent(organization.id, OrganizationPolicy.DEPARTMENT, "Research")
+        model.saveContact()
+        advanceUntilIdle()
+        var saved = requireNotNull(repository.savedContact)
+        val edited = saved.valuesOf(ContactValueKind.ORGANIZATION).single()
+        assertEquals(organization.id, edited.id)
+        assertEquals(organization.preservationKey, edited.preservationKey)
+        assertEquals(organization.metadata, edited.metadata)
+        assertEquals("Europe", edited.components["component_2"])
+        assertEquals("Squad", edited.components["component_3"])
+        for (department in listOf("Research", "")) {
+            val expected = listOf("Café / Studio-Next", department, "Europe", "Squad")
+                .filter(String::isNotEmpty).joinToString(" / ")
+            repeat(2) {
+                val wire = codec.encode(saved)
+                val orgLine = wire.encryptedPrivate.lineSequence().single { it.startsWith("ORG") }.trimEnd('\r')
+                assertTrue(orgLine.substringBefore(':').contains("X-KEEP=opaque"))
+                assertEquals("Café / Studio-Next;$department;Europe;Squad", orgLine.substringAfter(':'))
+                assertTrue(wire.signed.contains("FN;PREF=1:$expected"))
+                val projected = CanonicalAndroidContactMapper().project(saved).rows.single { it.kind == AndroidRowKind.ORGANIZATION }
+                assertEquals("Café / Studio-Next", projected.components[AndroidComponent.COMPANY])
+                assertEquals(department, projected.components[AndroidComponent.DEPARTMENT])
+                saved = decode(wire.signed, wire.encryptedPrivate)
+                assertEquals("", saved.displayName)
+                assertEquals(expected, saved.resolvedDisplayName)
+                assertEquals(expected, saved.valuesOf(ContactValueKind.ORGANIZATION).single().value)
+            }
+            if (department.isNotEmpty()) {
+                model.editContact(saved)
+                model.updateOrganizationComponent(saved.valuesOf(ContactValueKind.ORGANIZATION).single().id,
+                    OrganizationPolicy.DEPARTMENT, "")
+                model.saveContact()
+                advanceUntilIdle()
+                saved = requireNotNull(repository.savedContact)
+            }
+        }
         collection.cancel()
     }
 

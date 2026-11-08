@@ -226,6 +226,8 @@
     <string name="field_website">Sítio Web</string>
     <string name="field_nickname">Apelido</string>
     <string name="field_organization">Organização</string>
+    <string name="field_organization_company">Empresa</string>
+    <string name="field_organization_department">Departamento</string>
     <string name="field_job_title">Título da tarefa</string>
     <string name="field_relationship">Relação</string>
     <string name="field_address">Endereço</string>

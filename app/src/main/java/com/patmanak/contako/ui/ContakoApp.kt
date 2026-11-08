@@ -149,6 +149,7 @@ import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import com.patmanak.contako.data.android.mapping.ContactFieldCompatibility
 import com.patmanak.contako.domain.policy.PostalAddressPolicy
+import com.patmanak.contako.domain.policy.OrganizationPolicy
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
 import com.patmanak.contako.ui.components.InfoCard
 import com.patmanak.contako.ui.components.StatusLabel
@@ -1785,6 +1786,21 @@ private fun ContactValueFamily(
                             } else {
                                 null
                             },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                } else if (kind == ContactValueKind.ORGANIZATION) {
+                    OrganizationPolicy.editableComponents.forEach { component ->
+                        OutlinedTextField(
+                            value = if (component == OrganizationPolicy.COMPANY) OrganizationPolicy.company(value)
+                                else OrganizationPolicy.department(value),
+                            onValueChange = { viewModel.updateOrganizationComponent(value.id, component, it) },
+                            label = { Text(stringResource(if (component == OrganizationPolicy.COMPANY)
+                                R.string.field_organization_company else R.string.field_organization_department)) },
+                            singleLine = true,
+                            isError = value.id in editor.fieldErrors,
+                            supportingText = if (component == OrganizationPolicy.COMPANY)
+                                editor.fieldErrors[value.id]?.let { error -> ({ Text(uiMessage(error)) }) } else null,
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }

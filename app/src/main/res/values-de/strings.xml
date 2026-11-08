@@ -222,6 +222,8 @@
     <string name="field_website">Internetseite</string>
     <string name="field_nickname">Spitzname</string>
     <string name="field_organization">Organisation</string>
+    <string name="field_organization_company">Unternehmen</string>
+    <string name="field_organization_department">Abteilung</string>
     <string name="field_job_title">Berufsbezeichnung</string>
     <string name="field_relationship">Beziehung</string>
     <string name="field_address">Anschrift</string>

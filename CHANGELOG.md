@@ -14,6 +14,10 @@ Features and improvements by version.
   accepted remote value; distinguish partial synchronization from confirmation.
 - Generate missing display names from available fields and tolerate approved Android
   formatting changes only with guarded post-write evidence.
+- Accept organization-only contacts on Proton and identify blocked contacts by
+  their resolved display names.
+- Edit company and department independently without reverting imported organization
+  values or losing further units.
 - Export current failure summaries and bounded protocol codes in sanitized diagnostics;
   retain failures and transitions separately from repetitive import progress.
 - Preserve ambiguous contact creations and newer edits/deletions when an earlier

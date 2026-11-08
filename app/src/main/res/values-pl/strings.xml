@@ -230,6 +230,8 @@
     <string name="field_website">Strona internetowa</string>
     <string name="field_nickname">Pseudonim</string>
     <string name="field_organization">Organizacja</string>
+    <string name="field_organization_company">Firma</string>
+    <string name="field_organization_department">Dział</string>
     <string name="field_job_title">Tytuł pracy</string>
     <string name="field_relationship">Związek</string>
     <string name="field_address">Adres</string>

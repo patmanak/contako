@@ -6,6 +6,7 @@ import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import com.patmanak.contako.domain.policy.PostalAddressPolicy
+import com.patmanak.contako.domain.policy.OrganizationPolicy
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -547,25 +548,17 @@ internal class CanonicalAndroidContactMapper(
         val company = row.components[AndroidComponent.COMPANY].orEmpty()
         val department = row.components[AndroidComponent.DEPARTMENT].orEmpty()
         val existingOrganization = values.firstOrNull { it.id == organizationId }
-        values = if (company.isNotBlank() || department.isNotBlank()) {
-            values.replaceOrAdd(
-                ContactValue(
-                    id = organizationId,
-                    kind = ContactValueKind.ORGANIZATION,
-                    value = company,
-                    order = existingOrganization?.order ?: row.order,
-                    isPrimary = existingOrganization?.isPrimary ?: true,
-                    components = existingOrganization?.components.orEmpty() + mapOf(
-                        "company" to company,
-                        "department" to department,
-                        "component_0" to company,
-                        "component_1" to department,
-                    ),
-                    metadata = existingOrganization?.metadata.orEmpty(),
-                    preservationKey = existingOrganization?.preservationKey,
-                ),
-            )
-        } else values.filterNot { it.id == organizationId }
+        val organizationChanged = baseline == null || company != baseline.components[AndroidComponent.COMPANY].orEmpty() ||
+            department != baseline.components[AndroidComponent.DEPARTMENT].orEmpty()
+        if (organizationChanged) {
+            val organization = existingOrganization ?: ContactValue(organizationId, ContactValueKind.ORGANIZATION, "",
+                order = row.order, isPrimary = true)
+            val updated = OrganizationPolicy.updateComponent(
+                OrganizationPolicy.updateComponent(organization, OrganizationPolicy.COMPANY, company),
+                OrganizationPolicy.DEPARTMENT, department)
+            values = if (updated.value.isNotBlank()) values.replaceOrAdd(updated)
+                else values.filterNot { it.id == organizationId }
+        }
 
         values = applyLinkedText(
             contact,

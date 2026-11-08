@@ -222,6 +222,8 @@
     <string name="field_website">website</string>
     <string name="field_nickname">Bijnaam</string>
     <string name="field_organization">Organisatie</string>
+    <string name="field_organization_company">Bedrijf</string>
+    <string name="field_organization_department">Afdeling</string>
     <string name="field_job_title">Functie</string>
     <string name="field_relationship">Relatie</string>
     <string name="field_address">Adres</string>

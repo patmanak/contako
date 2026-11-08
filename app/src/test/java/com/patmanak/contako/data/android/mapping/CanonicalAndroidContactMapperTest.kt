@@ -444,6 +444,67 @@ class CanonicalAndroidContactMapperTest {
     }
 
     @Test
+    fun `native title or role edit leaves private organization units and provenance exactly unchanged`() {
+        val organization = value("org", ContactValueKind.ORGANIZATION, "Europe / Team", label = "Custom organization", primary = true,
+            components = mapOf("company" to "", "department" to "", "component_0" to "", "component_1" to "",
+                "component_2" to "Europe", "component_3" to "Team", "opaque" to "keep"),
+            metadata = mapOf("opaque" to "metadata")).copy(preservationKey = "private-org-provenance")
+        val canonical = contact(values = listOf(organization,
+            value("title", ContactValueKind.TITLE, "Original title", primary = true),
+            value("role", ContactValueKind.ROLE, "Original role", primary = true)))
+        val baseline = mapper.project(canonical).withProviderIds()
+        for ((field, id) in listOf(AndroidComponent.TITLE to "title", AndroidComponent.ROLE to "role")) {
+            val row = baseline.row(AndroidRowKind.ORGANIZATION)
+            val observed = baseline.copy(rows = baseline.rows.replace(row.copy(components = row.components + (field to "Changed"))))
+            val delta = mapper.applyControlledDelta(canonical, baseline, observed)
+            assertSame(organization, delta.contact.values.single { it.id == "org" })
+            assertEquals("Changed", delta.contact.values.single { it.id == id }.value)
+            assertFalse("org" in delta.changedValueIds)
+        }
+    }
+
+    @Test
+    fun `native company and department edits preserve later units when both visible units are cleared`() {
+        val organization = value("org", ContactValueKind.ORGANIZATION, "Before / Sales / Europe / Team", label = "Custom organization",
+            order = 2, primary = true, components = mapOf("company" to "Before", "department" to "Sales",
+                "component_0" to "Before", "component_1" to "Sales", "component_2" to "Europe", "component_3" to "Team", "opaque" to "keep"),
+            metadata = mapOf("opaque" to "metadata")).copy(preservationKey = "private-org-provenance")
+        val canonical = contact(values = listOf(organization))
+        val baseline = mapper.project(canonical).withProviderIds()
+        val row = baseline.row(AndroidRowKind.ORGANIZATION)
+        val changed = mapper.applyControlledDelta(canonical, baseline, baseline.copy(rows = baseline.rows.replace(row.copy(
+            value = "Café / Studio", components = row.components + mapOf(AndroidComponent.COMPANY to "Café / Studio",
+                AndroidComponent.DEPARTMENT to "Research"))))).contact
+        val edited = changed.values.single { it.id == "org" }
+        assertEquals("Café / Studio / Research / Europe / Team", edited.value)
+        assertEquals("Café / Studio", edited.components["company"])
+        assertEquals("Café / Studio", edited.components["component_0"])
+        assertEquals("Research", edited.components["department"])
+        assertEquals("Research", edited.components["component_1"])
+        val nextBaseline = mapper.project(changed).withProviderIds()
+        val nextRow = nextBaseline.row(AndroidRowKind.ORGANIZATION)
+        val cleared = mapper.applyControlledDelta(changed, nextBaseline, nextBaseline.copy(rows = nextBaseline.rows.replace(nextRow.copy(
+            value = "", components = nextRow.components + mapOf(AndroidComponent.COMPANY to "", AndroidComponent.DEPARTMENT to ""))))).contact
+            .values.single { it.id == "org" }
+        assertEquals("Europe / Team", cleared.value)
+        assertEquals("", cleared.components["component_0"])
+        assertEquals("", cleared.components["component_1"])
+        assertEquals("", cleared.components["company"])
+        assertEquals("", cleared.components["department"])
+        for (actual in listOf(edited, cleared)) {
+            assertEquals("Europe", actual.components["component_2"])
+            assertEquals("Team", actual.components["component_3"])
+            assertEquals("keep", actual.components["opaque"])
+            assertEquals(organization.id, actual.id)
+            assertEquals(organization.label, actual.label)
+            assertEquals(organization.order, actual.order)
+            assertEquals(organization.isPrimary, actual.isPrimary)
+            assertEquals(organization.metadata, actual.metadata)
+            assertEquals(organization.preservationKey, actual.preservationKey)
+        }
+    }
+
+    @Test
     fun `value-only edit retains exact custom label and unknown remote type tokens`() {
         val original = value(
             "phone",

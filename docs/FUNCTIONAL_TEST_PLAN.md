@@ -581,6 +581,10 @@ untouched values independently on each peer:
   banner MUST NOT hide a detailed failure recorded for the relevant pass.
 - For FT-15/FT-07 composite organization rows: save a title without a company,
   then separately replace the title, add/remove a role and add/remove a company.
+  After a Proton round trip, edit Company and Department separately. Verify
+  the ORG units, generated FN and Android company/department independently;
+  preserve further imported units and literal slashes in an edited company.
+  Clearing Department MUST NOT remove Company or those further units.
   Include a second save before the first projection completes. Verify exact
   values and durable linked identities after each save in all peers, restart and
   repeat a no-change pass. No divergent binding, pending Android copy or false

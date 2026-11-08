@@ -4,6 +4,7 @@ import com.patmanak.contako.data.gateway.GatewayFailureCategory
 import com.patmanak.contako.domain.model.*
 import com.patmanak.contako.domain.policy.ContactDisplayNamePolicy
 import com.patmanak.contako.domain.policy.ContactValidation
+import com.patmanak.contako.domain.policy.OrganizationPolicy
 import me.proton.core.contact.domain.entity.*
 import me.proton.core.domain.entity.UserId
 import org.junit.Assert.*
@@ -38,9 +39,16 @@ class GeneratedDisplayNameTest {
             ContactValue("org", ContactValueKind.ORGANIZATION, "Café before", order = 0)))
         val first = codec.encode(local)
         val read = decode(first.signed, first.encryptedPrivate)
-        val changed = read.copy(values = read.values.map { if (it.kind == ContactValueKind.ORGANIZATION) it.copy(value = "Café après") else it })
+        val changed = read.copy(values = read.values.map {
+            if (it.kind == ContactValueKind.ORGANIZATION)
+                OrganizationPolicy.updateComponent(it, OrganizationPolicy.COMPANY, "Café après") else it
+        })
         val second = codec.encode(changed)
         assertTrue(second.signed.contains("FN;PREF=1:Café après"))
+        assertTrue(second.encryptedPrivate.contains("ORG:Café après"))
+        val echoed = decode(second.signed, second.encryptedPrivate)
+        assertEquals("Café après", echoed.valuesOf(ContactValueKind.ORGANIZATION).single().value)
+        assertEquals("Café après", echoed.resolvedDisplayName)
         val explicit = codec.encode(changed.copy(displayName = "Chosen name ß"))
         assertFalse(explicit.encryptedPrivate.contains("X-CONTAKO-AUTO-FN"))
         assertEquals("Chosen name ß", decode(explicit.signed, explicit.encryptedPrivate).displayName)

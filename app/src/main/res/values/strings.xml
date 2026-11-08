@@ -251,6 +251,8 @@
     <string name="field_website">Website</string>
     <string name="field_nickname">Nickname</string>
     <string name="field_organization">Organization</string>
+    <string name="field_organization_company">Company</string>
+    <string name="field_organization_department">Department</string>
     <string name="field_job_title">Job title</string>
     <string name="field_relationship">Relationship</string>
     <string name="field_address">Address</string>

@@ -31,6 +31,12 @@ the unique authenticated public signed `FN` card. It MUST NOT add a private `FN`
 that could hide a later public-name edit. Legacy authenticated Type 2 markers
 remain readable and migrate to the encrypted partition on a compatible write.
 
+## Organization fields
+
+Organization editing separates Company and Department. Both the display summary
+and structured ORG units MUST change together. Further imported units and opaque
+decorations MUST survive these edits; a literal slash MUST NOT split a company.
+
 ## Guarded Android formatting equivalences
 
 After a version-guarded owned write, a matching post-write receipt MAY establish
@@ -515,12 +521,13 @@ assignments.
 
 The current `D-031` contract distinguishes identity lifecycle state:
 
-- a new local/Android contact MUST have at least one nonblank first name, last
-  name, or display name before Proton creation; organization and email do not
-  satisfy this predicate, and email is optional;
+- a new local/Android contact MUST have a usable explicit or generated display
+  name before Proton creation. Without an explicit name, phonetic name, nickname,
+  organization, phone or email MAY supply it under the generated-name policy;
+  a contact without any usable source remains a durable local draft;
 - an existing Proton-identified contact MAY be nameless and MUST remain
   representable, editable, and synchronizable;
-- Contako MUST NOT fabricate a name, silently delete the contact, or convert an
+- Contako MUST NOT invent structured name parts, silently delete the contact, or convert an
   existing nameless remote contact into a new-contact draft;
 - if the deployed API rejects an otherwise Web-valid nameless update, the edit
   remains durable and action-required rather than being stripped.

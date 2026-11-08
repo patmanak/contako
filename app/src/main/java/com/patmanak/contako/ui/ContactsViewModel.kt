@@ -17,6 +17,7 @@ import com.patmanak.contako.domain.policy.DirectoryFilter
 import com.patmanak.contako.domain.repository.ContactDirectorySnapshot
 import com.patmanak.contako.domain.policy.CanonicalPrimaryValuePolicy
 import com.patmanak.contako.domain.policy.PostalAddressPolicy
+import com.patmanak.contako.domain.policy.OrganizationPolicy
 import com.patmanak.contako.domain.repository.ContactGroupAssignment
 import com.patmanak.contako.domain.model.GroupOperation
 import com.patmanak.contako.domain.repository.ContactRepository
@@ -1078,6 +1079,8 @@ class ContactsViewModel(
                         PostalAddressPolicy.STREET,
                         value,
                     )
+                } else if (it.kind == ContactValueKind.ORGANIZATION) {
+                    OrganizationPolicy.updateComponent(it, OrganizationPolicy.COMPANY, value)
                 } else {
                     it.copy(value = value)
                 }
@@ -1097,6 +1100,19 @@ class ContactsViewModel(
                 } else {
                     it
                 }
+            },
+            validationError = null,
+            fieldErrors = editor.fieldErrors - id,
+        )
+    }
+
+    fun updateOrganizationComponent(id: String, component: String, value: String) {
+        val editor = contactEditor.value?.takeUnless { it.saving } ?: return
+        require(component in OrganizationPolicy.editableComponents)
+        contactEditor.value = editor.copy(
+            values = editor.values.map {
+                if (it.id == id && it.kind == ContactValueKind.ORGANIZATION)
+                    OrganizationPolicy.updateComponent(it, component, value) else it
             },
             validationError = null,
             fieldErrors = editor.fieldErrors - id,
