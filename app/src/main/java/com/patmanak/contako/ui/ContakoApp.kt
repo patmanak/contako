@@ -1204,7 +1204,7 @@ private fun SyncDashboard(state: ContactsUiState, viewModel: ContactsViewModel, 
 }
 
 @StringRes
-private fun syncStateTitle(snapshot: com.patmanak.contako.domain.sync.SyncDashboardSnapshot): Int =
+internal fun syncStateTitle(snapshot: com.patmanak.contako.domain.sync.SyncDashboardSnapshot): Int =
     if (snapshot.partialContactIds.isNotEmpty() && snapshot.pendingMutationCount == 0 &&
         snapshot.state in setOf(SyncDashboardState.CURRENT, SyncDashboardState.PENDING)) R.string.sync_email_partial_title
     else when (snapshot.state) {

@@ -117,6 +117,52 @@ class RoomRemoteGroupReconciliationStoreDeviceTest {
         assertEquals("REMOTE_GROUP_DELETION_RECOVERY_REQUIRED", blocked.conflictState)
     }
 
+    @Test fun parkedAssignmentKeepsItsIntentAcrossRemoteMetadataChange() = runBlocking {
+        stage().run(ACCOUNT)
+        val imported = repository.observeGroups(ACCOUNT.value).first().single()
+        save(imported.copy(name = "Retained local name"))
+        val original = database.outboxDao().getAll(ACCOUNT.value).single().copy(
+            operation = MutationOperation.ASSIGNMENTS.name, state = DurableMutationState.PARTIAL.name,
+            attemptCount = 4, nextAttemptAtEpochMillis = 90_000, requiresReconciliation = true)
+        database.outboxDao().upsert(original)
+        remote = listOf(remoteGroup("remote-group", "Remote rename", "#654321"))
+
+        assertTrue(stage().run(ACCOUNT) is RemoteGroupStageResult.Success)
+
+        val after = database.outboxDao().getAll(ACCOUNT.value).single()
+        assertEquals(original.copy(remoteVersion = remote.single().fingerprint()), after)
+        val retained = database.contactGroupDao().get(ACCOUNT.value, "remote-group")!!.group
+        assertEquals("Retained local name", retained.name)
+        assertEquals(original.revision, retained.pendingMutationRevision)
+        assertEquals(remote.single().fingerprint(), retained.remoteVersion)
+        assertEquals(0, database.outboxDao().observePendingCount(ACCOUNT.value).first())
+    }
+
+    @Test fun remoteDeletionOfParkedAssignmentRequiresRecoveryWithoutErasingIntent() = runBlocking {
+        stage().run(ACCOUNT)
+        val imported = repository.observeGroups(ACCOUNT.value).first().single()
+        save(imported.copy(name = "Retained local name"))
+        val original = database.outboxDao().getAll(ACCOUNT.value).single().copy(
+            operation = MutationOperation.ASSIGNMENTS.name, state = DurableMutationState.PARTIAL.name,
+            attemptCount = 4, nextAttemptAtEpochMillis = 90_000, requiresReconciliation = true)
+        database.outboxDao().upsert(original)
+        remote = emptyList()
+
+        assertTrue(stage().run(ACCOUNT) is RemoteGroupStageResult.Success)
+
+        val after = database.outboxDao().getAll(ACCOUNT.value).single()
+        assertEquals(DurableMutationState.ACTION_REQUIRED.name, after.state)
+        assertEquals("REMOTE_GROUP_DELETION_RECOVERY_REQUIRED", after.blockedReason)
+        assertEquals(original.revision, after.revision)
+        assertEquals(original.attemptCount, after.attemptCount)
+        assertEquals(original.nextAttemptAtEpochMillis, after.nextAttemptAtEpochMillis)
+        assertTrue(after.requiresReconciliation)
+        val retained = database.contactGroupDao().get(ACCOUNT.value, "remote-group")!!.group
+        assertFalse(retained.isDeleted)
+        assertEquals(original.revision, retained.pendingMutationRevision)
+        assertEquals("REMOTE_GROUP_DELETION_RECOVERY_REQUIRED", retained.conflictState)
+    }
+
     private fun stage() = IncrementalRemoteGroupStage(
         object : ProtonContactGroupGateway {
             override fun capabilities() = ContactGroupCapabilities.PROTON_CORE_36_6_2_SURFACE

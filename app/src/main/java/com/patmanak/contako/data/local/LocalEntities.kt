@@ -1045,4 +1045,4 @@ private val ANDROID_GROUP_PROVIDER_JOURNAL_STATES = setOf("PREPARED", "COMMITTED
 
 internal enum class AggregateType { CONTACT, GROUP }
 internal enum class MutationOperation { UPSERT, DELETE, ASSIGNMENTS }
-internal enum class DurableMutationState { PENDING, IN_FLIGHT, ACKNOWLEDGED, ACTION_REQUIRED }
+internal enum class DurableMutationState { PENDING, IN_FLIGHT, ACKNOWLEDGED, ACTION_REQUIRED, PARTIAL }

@@ -7,6 +7,8 @@ Features and improvements by version.
 - Bound import reads during persistent network outages while preserving per-contact
   retry deadlines and healthy progress.
 - Synchronize valid group members while retaining a new invalid email locally.
+- Keep partially delivered groups visible without repeated network retries or
+  queued-write counts while their remaining invalid input awaits correction.
 - Verify more uncertain creations per bounded scan, preserve partial email edits
   after a lost acknowledgement, and offer an explicit duplicate-risk confirmation
   when exhausted verification cannot establish absence.

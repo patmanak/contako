@@ -21,7 +21,7 @@ internal class RoomMutationExecutionStore(
     private val lastRecoveredGenerations = mutableMapOf<String, Long>()
 
     override suspend fun remaining(accountId: String): MutationRemainingWork {
-        val rows = database.outboxDao().getAll(accountId)
+        val rows = database.outboxDao().getAll(accountId).filter { it.state != DurableMutationState.PARTIAL.name }
         val blocked = rows.filter { it.state == DurableMutationState.ACTION_REQUIRED.name || it.blockedReason != null }
         return MutationRemainingWork(blocked.size, rows.size - blocked.size, blocked.map { row ->
             GatewayFailureCategory.entries.firstOrNull { it.name == row.errorCategory } ?: GatewayFailureCategory.UNKNOWN
@@ -125,6 +125,9 @@ internal class RoomMutationExecutionStore(
             current.errorCategory, current.requiresReconciliation) == 1
     }
 
+    override suspend fun awaitLocalInput(command: DurableMutationCommand): Boolean =
+        RoomPartialGroupMutationStore(database).park(command)
+
     override suspend fun recordFailure(
         command: DurableMutationCommand,
         category: GatewayFailureCategory,
@@ -190,6 +193,7 @@ internal class RoomMutationExecutionStore(
                 }
             }
         }
+        if (stored != null) RoomPartialGroupMutationStore(database).wakeForContact(command.accountId, command.aggregateId)
         val acknowledged = entity(command) ?: return@withTransaction false
         val finished = store.finishAcknowledged(acknowledged)
         if (finished && stored != null && acknowledgement.remoteIdentity != null &&

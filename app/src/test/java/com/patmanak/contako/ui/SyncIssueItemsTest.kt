@@ -12,6 +12,14 @@ import org.junit.Test
 class SyncIssueItemsTest {
     private val contact = CanonicalContact("synthetic-owner", "one", displayName = "Chloë Groß")
 
+    @Test fun retainedPartialGroupDoesNotHideThePartialContactTitle() {
+        val partial = SyncDashboardSnapshot(SyncDashboardState.PENDING, pendingMutationCount = 0,
+            partialContactIds = setOf(contact.id))
+        assertEquals(R.string.sync_email_partial_title, syncStateTitle(partial))
+        assertEquals(R.string.sync_state_pending, syncStateTitle(partial.copy(pendingMutationCount = 1)))
+        assertEquals(R.string.sync_state_blocked, syncStateTitle(partial.copy(state = SyncDashboardState.BLOCKED)))
+    }
+
     @Test fun ambiguousCreateChoiceIsScopedToTheBlockedContactRevision() {
         val blocked = SyncBlockedItem(contact.id, SyncBlockedItemType.CONTACT, contact.resolvedDisplayName,
             false, SyncProblem.INTERNAL_FAILURE, createAnywayRevision = 17L)

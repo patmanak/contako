@@ -252,7 +252,7 @@ internal interface OutboxDao {
     @Upsert
     suspend fun upsert(mutation: OutboxMutationEntity)
 
-    @Query("SELECT COUNT(*) FROM outbox_mutations WHERE account_id = :accountId")
+    @Query("SELECT COUNT(*) FROM outbox_mutations WHERE account_id = :accountId AND state != 'PARTIAL'")
     fun observePendingCount(accountId: String): Flow<Int>
 
     @Query("SELECT * FROM outbox_mutations WHERE account_id = :accountId ORDER BY created_at_epoch_millis")
@@ -440,7 +440,8 @@ internal interface OutboxDao {
         UPDATE outbox_mutations
         SET remote_identity = :remoteIdentity, remote_version = :remoteVersion
         WHERE account_id = :accountId AND aggregate_type = :aggregateType
-          AND aggregate_id = :aggregateId AND revision = :revision AND state = 'PENDING'
+          AND aggregate_id = :aggregateId AND revision = :revision
+          AND (state = 'PENDING' OR (state = 'PARTIAL' AND aggregate_type = 'GROUP' AND operation = 'ASSIGNMENTS'))
         """,
     )
     suspend fun updateCheckedRemoteBaseline(
@@ -472,7 +473,7 @@ internal interface OutboxDao {
           error_category = 'CONFLICT'
         WHERE account_id = :accountId AND aggregate_type = :aggregateType
           AND aggregate_id = :aggregateId AND revision = :revision
-          AND state IN ('PENDING', 'IN_FLIGHT')
+          AND (state IN ('PENDING', 'IN_FLIGHT') OR (state = 'PARTIAL' AND aggregate_type = 'GROUP' AND operation = 'ASSIGNMENTS'))
         """,
     )
     suspend fun blockConflict(

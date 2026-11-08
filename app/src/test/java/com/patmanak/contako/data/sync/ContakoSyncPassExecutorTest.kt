@@ -36,6 +36,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ContakoSyncPassExecutorTest {
+    @Test fun retainedPartialGroupIsNotRetryableIoOrImmediateProgress() = runTest {
+        val group = DurableMutationCommand("account", "GROUP", "partial", 1, RemoteMutationOperation.ASSIGNMENTS,
+            0, 0, false, "remote-group", "baseline")
+        var reads = 0
+        var uploads = 0
+        val candidate = executor(prerequisite = { SyncPrerequisiteState.READY }, inventory = {}, canonical = {},
+            store = SingleCommandStore(group), prepare = { reads++ }, upload = { uploads++ },
+            preparationOutcome = MutationPreparation.WaitingForLocalInput)
+        repeat(2) { pass ->
+            val outcome = candidate.execute(request())
+            assertEquals(SyncPassOutcome.SUCCESS, outcome)
+            assertFalse(candidate.hasUnscopedFailure)
+            assertEquals(com.patmanak.contako.android.sync.AndroidSyncCompletionClassification.SUCCESS,
+                com.patmanak.contako.android.sync.classifyAndroidSyncCompletion(
+                    com.patmanak.contako.domain.sync.SyncRunState.Completed(outcome, pass.toLong(), candidate.completionCause)))
+        }
+        assertEquals(1, reads)
+        assertEquals(0, uploads)
+    }
     @Test fun aScopedAndroidFailureCannotAttributeAnIndependentRemoteTimeoutToThatContact() = runTest {
         val android = object : AndroidInteroperabilityStage, AndroidScopedFailureProofSource {
             override val lastFailureIsFullyScoped = true
@@ -1506,6 +1525,7 @@ class ContakoSyncPassExecutorTest {
         inventoryFailure: GatewayFailureCategory? = null,
         cardFailure: GatewayFailureCategory? = null,
         remoteStageOverride: IncrementalRemoteContactStage? = null,
+        preparationOutcome: MutationPreparation = MutationPreparation.UploadAllowed,
     ): ContakoSyncPassExecutor {
         val checkpoint = MemoryCheckpointStore()
         val metadata = ContactInventoryMetadata(
@@ -1541,7 +1561,7 @@ class ContakoSyncPassExecutorTest {
             store,
             MutationPreparationGateway {
                 prepare()
-                GatewayOutcome.Success(MutationPreparation.UploadAllowed)
+                GatewayOutcome.Success(preparationOutcome)
             },
             MutationUploadGateway {
                 upload()
@@ -1672,6 +1692,12 @@ private class SingleCommandStore(
         category: com.patmanak.contako.data.gateway.GatewayFailureCategory,
         decision: RetryDecision,
     ) = true
+    override suspend fun awaitLocalInput(command: DurableMutationCommand): Boolean {
+        assertTrue(inFlight)
+        this.command = null
+        inFlight = false
+        return true
+    }
     override suspend fun acknowledgeAndFinish(
         command: DurableMutationCommand,
         acknowledgement: RemoteMutationAcknowledgement,

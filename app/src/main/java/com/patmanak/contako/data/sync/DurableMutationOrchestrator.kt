@@ -45,6 +45,8 @@ sealed interface MutationPreparation {
     data object UploadAllowed : MutationPreparation
     /** Account contact writes must finish before dependent assignments can run. */
     data object WaitingForDependencies : MutationPreparation
+    /** Accepted group members are delivered; only retained invalid local input remains. */
+    data object WaitingForLocalInput : MutationPreparation
     class AlreadyApplied(val acknowledgement: RemoteMutationAcknowledgement) : MutationPreparation {
         override fun toString(): String = "MutationPreparation.AlreadyApplied(REDACTED)"
     }
@@ -99,6 +101,7 @@ interface MutationExecutionStore {
     suspend fun claim(command: DurableMutationCommand, nowEpochMillis: Long): Boolean
     suspend fun defer(command: DurableMutationCommand): Boolean =
         recordFailure(command, GatewayFailureCategory.CANCELLED, RetryDecision.Cancelled)
+    suspend fun awaitLocalInput(command: DurableMutationCommand): Boolean = false
     suspend fun recordFailure(
         command: DurableMutationCommand,
         category: GatewayFailureCategory,
@@ -305,6 +308,11 @@ class DurableMutationOrchestrator(
                         // bounded drain rechecks the dependency; no remote write was attempted.
                         store.defer(command)
                         progressPending++
+                    }
+                    MutationPreparation.WaitingForLocalInput -> {
+                        // Durable partial intent is neither an ACK nor retryable I/O. A stale
+                        // claim stays pending for a bounded replan, never silently disappears.
+                        if (!store.awaitLocalInput(command)) progressPending++
                     }
                     is MutationPreparation.ActionRequired -> {
                         failureCategories += GatewayFailureCategory.CONFLICT

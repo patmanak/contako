@@ -200,7 +200,7 @@ internal class RoomBackedMutationPreparationGateway(
                 } else if (current.value.emailIds.toSet() == projection.emailIds.toSet()) {
                     // Accepted members are delivered, but the local membership of an omitted
                     // invalid occurrence is still durable. It is not a group conflict or ACK.
-                    if (projection.hasDeferredMembers) return GatewayOutcome.Success(MutationPreparation.WaitingForDependencies)
+                    if (projection.hasDeferredMembers) return GatewayOutcome.Success(MutationPreparation.WaitingForLocalInput)
                     GatewayOutcome.Success(
                         MutationPreparation.AlreadyApplied(
                             RemoteMutationAcknowledgement(group.remoteLabelId, group.remoteVersion),

@@ -377,6 +377,7 @@ internal class RoomRemoteCanonicalReconciliationStore(
                     blockedReason = null, errorCategory = null, requiresReconciliation = true, nextAttemptAtEpochMillis = 0))
             }
         }
+        RoomPartialGroupMutationStore(database).wakeForContact(contact.accountId, contact.id)
         attachToAndroidProjection(contact)
     }
 

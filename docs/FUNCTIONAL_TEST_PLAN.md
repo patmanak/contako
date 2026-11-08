@@ -654,7 +654,12 @@ untouched values independently on each peer:
   Put a newly omitted invalid email in a group alongside valid members, remove
   one old valid member, restart and retry. Valid membership changes reach Proton;
   the invalid occurrence and group intent remain durable without a false conflict
-  or full acknowledgement. Correction resumes the remaining membership. Repeat
+  or full acknowledgement. Once accepted members are delivered, ordinary passes
+  and restart MUST show partial synchronization with zero queued writes, no I/O
+  failure and no repeated membership reads for unchanged input. Sign-out still
+  protects that intent. A remote member identity change reactivates guarded
+  preparation; a remote group rename/deletion stays safely reconciled.
+  Correction resumes the remaining membership. Repeat
   with identical emails, different per-occurrence groups and a lost contact CREATE
   acknowledgement; compare the verified submitted projection, not the invalid input.
 - Create organization-, nickname-, phonetic-, phone- and email-only contacts.

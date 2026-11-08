@@ -232,7 +232,7 @@ internal class RoomSyncPassStatusPublisher(
             wallClock(),
             SyncStatusUpdate(
                 outcome = outcome,
-                pendingMutationCount = all.size,
+                pendingMutationCount = all.count { it.state != com.patmanak.contako.data.local.DurableMutationState.PARTIAL.name },
                 actionRequiredCount = if (reason == null) 0 else maxOf(1,
                     (blocked.map { it.aggregateType to it.aggregateId } +
                         androidIssues.map { "CONTACT" to it.canonicalContactId } +

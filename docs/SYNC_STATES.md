@@ -165,6 +165,12 @@ once, including a pending deletion. It MUST retain idempotency, attempts, remote
 baseline, ambiguous-delivery evidence and server delay. Duplicate requests are
 idempotent and new requests have a durable cooling period. The severity of one
 blocked item MUST NOT suppress independent eligible work or transient scheduling.
+When accepted group members are verified delivered and only a safely omitted
+invalid local email remains, its assignment intent MUST be retained as PARTIAL.
+It MUST NOT count as a queued write, immediate progress or retryable I/O; sign-out
+MUST still count the retained intent. Correction or a relevant accepted email
+identity change MUST reactivate guarded preparation. Unchanged ordinary passes
+MUST NOT reread the group's remote membership solely for that retained input.
 Exhausted network, timeout, rate-limit, service and unknown transient failures
 MUST remain visible while permitting at most one automatic probe approximately
 daily through ordinary synchronization. The daily and manual paths MUST share

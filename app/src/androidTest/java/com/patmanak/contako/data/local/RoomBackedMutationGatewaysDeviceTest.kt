@@ -34,10 +34,19 @@ import com.patmanak.contako.data.sync.DurableMutationOrchestrator
 import com.patmanak.contako.data.sync.DurableMutationCommand
 import com.patmanak.contako.data.sync.RemoteMutationOperation
 import com.patmanak.contako.data.sync.RetryDecision
+import com.patmanak.contako.data.sync.*
+import com.patmanak.contako.data.proton.ContactInventoryCheckpoint
+import com.patmanak.contako.data.proton.ContactInventoryCheckpointStore
+import com.patmanak.contako.data.proton.PersistentContactInventoryPlanner
+import com.patmanak.contako.data.proton.VersionedContactInventoryCheckpoint
+import com.patmanak.contako.domain.sync.*
+import com.patmanak.contako.android.sync.AndroidSyncCompletionClassification
+import com.patmanak.contako.android.sync.classifyAndroidSyncCompletion
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -481,7 +490,7 @@ class RoomBackedMutationGatewaysDeviceTest {
         assertEquals(setOf(RemoteEmailId("healthy-first")), remote.memberships)
         assertEquals(2, remote.assignmentWrites) // Add valid member, then remove the obsolete member.
         var pending = database.outboxDao().get(ACCOUNT.value, "GROUP", "partial-group")!!
-        assertEquals(DurableMutationState.PENDING.name, pending.state)
+        assertEquals(DurableMutationState.PARTIAL.name, pending.state)
         assertNull(pending.blockedReason)
         assertTrue(pending.errorCategory != GatewayFailureCategory.CONFLICT.name)
         assertEquals(0, pending.attemptCount)
@@ -491,10 +500,9 @@ class RoomBackedMutationGatewaysDeviceTest {
         database.close()
         database = ContakoDatabase.create(context, DATABASE_NAME)
         repository = RoomContactRepository(database, clock = { 1_000 }, elapsedRealtimeClock = { 1_000 })
-        val preparation = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote)
-        assertEquals(com.patmanak.contako.data.sync.MutationPreparation.WaitingForDependencies,
-            (preparation.prepare(pendingAssignmentCommand("partial-group")) as GatewayOutcome.Success).value)
+        val membershipReads = remote.membershipReads
         orchestrator().drain(ACCOUNT.value, 1_000)
+        assertEquals(membershipReads, remote.membershipReads)
         assertEquals(2, remote.assignmentWrites)
         assertEquals(2, database.contactGroupDao().get(ACCOUNT.value, "partial-group")!!.memberships.size)
 
@@ -553,11 +561,232 @@ class RoomBackedMutationGatewaysDeviceTest {
         assertTrue(remote.memberships.isEmpty())
         val intent = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
         assertEquals("ASSIGNMENTS", intent.operation)
-        assertEquals(DurableMutationState.PENDING.name, intent.state)
+        assertEquals(DurableMutationState.PARTIAL.name, intent.state)
         assertEquals(intent.revision, database.contactGroupDao().get(ACCOUNT.value, "group")!!.group.pendingMutationRevision)
         assertEquals(GroupMembership("partial", "unfinished"),
             database.contactGroupDao().get(ACCOUNT.value, "group")!!.toDomain().memberships.single())
     }
+
+    @Test
+    fun partialGroupCompletesThePassWithoutIoRetryOrRepeatedReadsAndSurvivesRestart() = runBlocking {
+        saveContact(CanonicalContact(ACCOUNT.value, "partial", displayName = "Partial", values = listOf(
+            ContactValue("unfinished", ContactValueKind.EMAIL, "unfinished", order = 0))))
+        assertEquals(1, orchestrator().drain(ACCOUNT.value, 1_000).uploaded)
+        saveGroup(ContactGroup(ACCOUNT.value, "group", "Group", remoteLabelId = "remote-group",
+            memberships = listOf(GroupMembership("partial", "unfinished"))))
+        val executor = partialGroupPassExecutor()
+        val outcome = executor.execute(incrementalRequest())
+        assertEquals(SyncPassOutcome.SUCCESS, outcome)
+        assertFalse(executor.hasUnscopedFailure)
+        assertEquals(AndroidSyncCompletionClassification.SUCCESS,
+            classifyAndroidSyncCompletion(SyncRunState.Completed(outcome, 1, executor.completionCause)))
+        val parked = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertEquals(DurableMutationState.PARTIAL.name, parked.state)
+        assertEquals(parked.revision, database.contactGroupDao().get(ACCOUNT.value, "group")!!.group.pendingMutationRevision)
+        assertEquals(0, database.outboxDao().observePendingCount(ACCOUNT.value).first())
+        assertEquals(2, database.accountRemovalDao().countPending(ACCOUNT.value)) // Group intent plus invalid contact input.
+        val status = requireNotNull(RoomSyncStatusStore(database).observe(ACCOUNT.value).first())
+        assertEquals(0, status.pendingMutationCount)
+        assertTrue(status.scopedIssuesOnly)
+        assertEquals(SyncActionReason.VALIDATION_REJECTED, status.actionReason)
+        val reads = remote.membershipReads
+
+        database.close()
+        database = ContakoDatabase.create(context, DATABASE_NAME)
+        repository = RoomContactRepository(database, clock = { 1_000 }, elapsedRealtimeClock = { 1_000 })
+        val replay = partialGroupPassExecutor()
+        repeat(3) {
+            assertEquals(SyncPassOutcome.SUCCESS, replay.execute(incrementalRequest()))
+            assertFalse(replay.hasUnscopedFailure)
+        }
+        assertEquals(reads, remote.membershipReads)
+        assertEquals(parked, database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertEquals(GroupMembership("partial", "unfinished"),
+            database.contactGroupDao().get(ACCOUNT.value, "group")!!.toDomain().memberships.single())
+        assertEquals("unfinished", repository.getContact(ACCOUNT.value, "partial")!!.values.single().value)
+        assertEquals(1, database.contactEmailUploadOverlayDao().getForContact(ACCOUNT.value, "partial").size)
+
+        val recovery = RoomSyncRecoveryDataSource(database, AccountSyncRunner(this, SyncPassExecutor { SyncPassOutcome.SUCCESS }),
+            NetworkStateProvider { NetworkState.WIFI }, ACCOUNT, clock = { 1_000 })
+        val dashboard = requireNotNull(recovery.observeStatus(ACCOUNT.value).first())
+        assertEquals(0, dashboard.pendingMutationCount)
+        assertEquals(setOf("partial"), dashboard.partialContactIds)
+        assertEquals(SyncDashboardState.PENDING, dashboard.state)
+        assertTrue(dashboard.blockedItems.none { it.type == SyncBlockedItemType.GROUP })
+    }
+
+    @Test
+    fun verifiedContactAdoptionWakesItsParkedGroupWithoutResettingDeadlineOrDroppingInvalidInput() = runBlocking {
+        saveContact(CanonicalContact(ACCOUNT.value, "partial", displayName = "Partial", values = listOf(
+            ContactValue("unfinished", ContactValueKind.EMAIL, "unfinished", order = 0))))
+        assertEquals(1, orchestrator().drain(ACCOUNT.value, 1_000).uploaded)
+        saveContact(CanonicalContact(ACCOUNT.value, "healthy", displayName = "Healthy", values = listOf(
+            ContactValue("healthy-email", ContactValueKind.EMAIL, "healthy@example.test", order = 0,
+                metadata = mapOf("protonEmailId" to "old-healthy-email")),
+            ContactValue("unchanged-note", ContactValueKind.NOTE, "Unchanged private note", order = 1))))
+        cleanContact("healthy", "healthy-remote")
+        saveGroup(ContactGroup(ACCOUNT.value, "group", "Group", remoteLabelId = "remote-group",
+            memberships = listOf(GroupMembership("partial", "unfinished"), GroupMembership("healthy", "healthy-email"))))
+        remote.memberships = linkedSetOf(RemoteEmailId("old-healthy-email"))
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        val parked = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+            .copy(attemptCount = 4, nextAttemptAtEpochMillis = 80_000)
+        assertEquals(DurableMutationState.PARTIAL.name, parked.state)
+        database.outboxDao().upsert(parked)
+        val healthy = requireNotNull(repository.getContact(ACCOUNT.value, "healthy"))
+        val adopted = healthy.copy(id = "remote-side-healthy", remoteContactId = "healthy-remote", remoteVersion = "new-version",
+            values = healthy.values.map { if (it.id == "healthy-email")
+                it.copy(metadata = mapOf("protonEmailId" to "new-healthy-email")) else it })
+
+        RoomRemoteCanonicalReconciliationStore(database).reconcileTargetedVerified(ACCOUNT,
+            com.patmanak.contako.data.gateway.VerifiedContactCard(RemoteContactId("healthy-remote"), RemoteVersion("new-version"), adopted))
+
+        assertEquals(parked.copy(state = DurableMutationState.PENDING.name, requiresReconciliation = true),
+            database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertEquals("new-healthy-email", repository.getContact(ACCOUNT.value, "healthy")!!.values
+            .single { it.id == "healthy-email" }.metadata["protonEmailId"])
+        assertEquals("Unchanged private note", repository.getContact(ACCOUNT.value, "healthy")!!.values
+            .single { it.id == "unchanged-note" }.value)
+        assertEquals("unfinished", repository.getContact(ACCOUNT.value, "partial")!!.values.single().value)
+        assertEquals(2, database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.size)
+        val reads = remote.membershipReads
+        assertEquals(0, orchestrator().drain(ACCOUNT.value, 79_999).examined)
+        assertEquals(reads, remote.membershipReads)
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 80_000) }
+        assertEquals(setOf(RemoteEmailId("new-healthy-email")), remote.memberships)
+        assertEquals(DurableMutationState.PARTIAL.name, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.state)
+        assertEquals(4, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.attemptCount)
+    }
+
+    @Test
+    fun contactAcknowledgementWakesParkedCurrentAndRemovedDependenciesWithoutLosingTheirHistory() = runBlocking {
+        for (removed in listOf(false, true)) {
+            database.clearAllTables()
+            remote = FakeRemoteMutations()
+            saveContact(CanonicalContact(ACCOUNT.value, "partial", displayName = "Partial", values = listOf(
+                ContactValue("unfinished", ContactValueKind.EMAIL, "unfinished", order = 0))))
+            assertEquals(1, orchestrator().drain(ACCOUNT.value, 1_000).uploaded)
+            saveContact(CanonicalContact(ACCOUNT.value, "healthy", displayName = "Healthy", values = listOf(
+                ContactValue("healthy-email", ContactValueKind.EMAIL, "healthy@example.test", order = 0,
+                    metadata = mapOf("protonEmailId" to "old-healthy-email")),
+                ContactValue("private-note", ContactValueKind.NOTE, "Retained note", order = 1))))
+            cleanContact("healthy", "healthy-remote")
+            saveGroup(ContactGroup(ACCOUNT.value, "group", "Group", remoteLabelId = "remote-group",
+                memberships = listOf(GroupMembership("partial", "unfinished"), GroupMembership("healthy", "healthy-email"))))
+            remote.memberships = linkedSetOf(RemoteEmailId("old-healthy-email"))
+            repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+            if (removed) {
+                val group = database.contactGroupDao().get(ACCOUNT.value, "group")!!.toDomain()
+                saveGroup(group.copy(memberships = group.memberships.filterNot { it.contactId == "healthy" }))
+                repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+                assertTrue(database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.none { it.contactId == "healthy" })
+                assertTrue(database.remoteGroupAssignmentDependencyDao().edges(ACCOUNT.value, "group").any { it.contactId == "healthy" })
+            }
+            assertEquals(DurableMutationState.PARTIAL.name, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.state)
+            val local = repository.getContact(ACCOUNT.value, "healthy")!!
+            saveContact(local.copy(displayName = "Edited healthy contact"))
+            val store = RoomMutationExecutionStore(database)
+            val command = store.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "CONTACT" }
+            assertTrue(store.claim(command, 1_000))
+            // Install a retained parked assignment at the current revision to isolate the
+            // ACK wake boundary from the repository's earlier current-membership wakeup.
+            val parked = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+                .copy(state = DurableMutationState.PARTIAL.name, attemptCount = 4, nextAttemptAtEpochMillis = 80_000)
+            database.outboxDao().upsert(parked)
+            assertTrue(store.acknowledgeAndFinish(command, RemoteMutationAcknowledgement(
+                "healthy-remote", "ack-version", emailIdsByValueId = mapOf("healthy-email" to "new-healthy-email"))))
+
+            assertEquals(parked.copy(state = DurableMutationState.PENDING.name, requiresReconciliation = true),
+                database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+            assertEquals("new-healthy-email", repository.getContact(ACCOUNT.value, "healthy")!!.values
+                .single { it.id == "healthy-email" }.metadata["protonEmailId"])
+            assertEquals("Retained note", repository.getContact(ACCOUNT.value, "healthy")!!.values.single { it.id == "private-note" }.value)
+            assertEquals("unfinished", repository.getContact(ACCOUNT.value, "partial")!!.values.single().value)
+            assertEquals(if (removed) 1 else 2, database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.size)
+            // A remote contact PUT can restore a removed email label. The retained edge
+            // must wake the assignment even though the canonical membership no longer exists.
+            if (removed) remote.memberships = linkedSetOf(RemoteEmailId("new-healthy-email"))
+            repeat(3) { orchestrator().drain(ACCOUNT.value, 80_000) }
+            assertEquals(if (removed) emptySet<RemoteEmailId>() else setOf(RemoteEmailId("new-healthy-email")), remote.memberships)
+            assertEquals(DurableMutationState.PARTIAL.name, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.state)
+            assertEquals(4, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.attemptCount)
+        }
+    }
+
+    @Test
+    fun parkingRejectsStaleForeignOrChangedRemoteBindingAndOnlyAcceptsTheClaimedGroup() = runBlocking {
+        saveContact(CanonicalContact(ACCOUNT.value, "partial", displayName = "Partial", values = listOf(
+            ContactValue("unfinished", ContactValueKind.EMAIL, "unfinished", order = 0))))
+        assertEquals(1, orchestrator().drain(ACCOUNT.value, 1_000).uploaded)
+        saveGroup(ContactGroup(ACCOUNT.value, "group", "Group", remoteLabelId = "remote-group",
+            memberships = listOf(GroupMembership("partial", "unfinished"))))
+        orchestrator().drain(ACCOUNT.value, 1_000)
+        val assignments = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertEquals(MutationOperation.ASSIGNMENTS.name, assignments.operation)
+        assertEquals(DurableMutationState.PENDING.name, assignments.state)
+        assertEquals(assignments.revision, database.contactGroupDao().get(ACCOUNT.value, "group")!!.group.pendingMutationRevision)
+        val command = pendingAssignmentCommand("group")
+        val execution = RoomMutationExecutionStore(database)
+        assertTrue(execution.claim(command, 1_000))
+        val original = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+        val group = database.contactGroupDao().get(ACCOUNT.value, "group")!!.group
+        val partial = RoomPartialGroupMutationStore(database)
+        fun candidate(accountId: String = ACCOUNT.value, revision: Long = command.revision,
+            identity: String? = command.expectedRemoteIdentity, version: String? = command.expectedRemoteVersion) =
+            DurableMutationCommand(accountId, "GROUP", "group", revision, RemoteMutationOperation.ASSIGNMENTS,
+                command.attemptCount, command.nextEligibleEpochMillis, command.requiresReconciliation, identity, version)
+        for (bad in listOf(candidate(accountId = "foreign-account"), candidate(revision = command.revision + 1),
+                candidate(identity = "foreign-source"), candidate(version = "foreign-version"))) {
+            assertFalse(partial.park(bad))
+            assertEquals(original, database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        }
+        for (changed in listOf(group.copy(remoteLabelId = "foreign-source"), group.copy(remoteVersion = "foreign-version"),
+                group.copy(revision = group.revision + 1), group.copy(conflictState = "GROUP_EDIT_DELETE_RECOVERY_REQUIRED"))) {
+            database.contactGroupDao().upsert(changed)
+            assertFalse(partial.park(command))
+            assertEquals(original, database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        }
+        database.contactGroupDao().upsert(group)
+        assertTrue(partial.park(command))
+        assertEquals(original.copy(state = DurableMutationState.PARTIAL.name, errorCategory = null),
+            database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertFalse(partial.park(command))
+    }
+
+    private fun partialGroupPassExecutor(): ContakoSyncPassExecutor {
+        val checkpoint = object : ContactInventoryCheckpointStore {
+            private var current: VersionedContactInventoryCheckpoint? = null
+            override suspend fun load(account: AccountScope) = current
+            override suspend fun compareAndSet(account: AccountScope, expectedGeneration: Long?, checkpoint: ContactInventoryCheckpoint): Boolean {
+                if (current?.generation != expectedGeneration) return false
+                current = VersionedContactInventoryCheckpoint((expectedGeneration ?: -1) + 1, checkpoint)
+                return true
+            }
+        }
+        val stage = IncrementalRemoteContactStage(
+            com.patmanak.contako.data.gateway.ProtonContactInventoryGateway { _, _ -> GatewayOutcome.Success(
+                com.patmanak.contako.data.gateway.ContactInventoryPage(emptyList(), null, null, 0,
+                    com.patmanak.contako.data.gateway.ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY)) },
+            com.patmanak.contako.data.gateway.ProtonVerifiedContactCardGateway { _, _ -> error("No hydration belongs to this fixture") },
+            PersistentContactInventoryPlanner(checkpoint),
+            RemoteCanonicalReconciliationStore { _, _, cards, labels, deletions ->
+                CanonicalReconciliationReceipt(cards.map { it.id }.toSet(), labels, deletions)
+            })
+        lateinit var executor: ContakoSyncPassExecutor
+        val publisher = RoomSyncPassStatusPublisher(ACCOUNT.value, database, wallClock = { 1_000 },
+            hasUnscopedFailure = { executor.hasUnscopedFailure })
+        executor = ContakoSyncPassExecutor(ACCOUNT, SyncPrerequisiteChecker { SyncPrerequisiteState.READY }, stage,
+            orchestrator(), wallClock = { 1_000 }, statusPublisher = publisher,
+            androidPreflight = AndroidInteroperabilityPreflight { _, _ -> AndroidInteroperabilityPreflightResult.Ready(
+                AndroidInteroperabilityContext(ACCOUNT, "fixture@example.test", 0, 0)) },
+            androidStage = object : AndroidInteroperabilityStage {
+                override suspend fun ingest(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) = AndroidInteroperabilityStageResult.Success
+                override suspend fun project(context: AndroidInteroperabilityContext, isCancelled: () -> Boolean) = AndroidInteroperabilityStageResult.Success
+            })
+        return executor
+    }
+
+    private fun incrementalRequest() = SyncPassRequest(setOf(SyncTrigger.MANUAL), SyncScope.INCREMENTAL, 0, { 0 }, 0, { 0 })
 
     private suspend fun pendingAssignmentCommand(groupId: String): DurableMutationCommand {
         val intent = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", groupId))
@@ -606,6 +835,7 @@ private class FakeRemoteMutations :
     val contactMutations = mutableListOf<ContactMutation>()
     var groupCreates = 0
     var assignmentWrites = 0
+    var membershipReads = 0
     var memberships = linkedSetOf<RemoteEmailId>()
     private val groups = linkedMapOf<RemoteGroupId, RemoteContactGroup>()
     private val contacts = linkedMapOf<RemoteContactId, com.patmanak.contako.data.gateway.VerifiedContactCard>()
@@ -660,9 +890,10 @@ private class FakeRemoteMutations :
     override suspend fun members(
         account: AccountScope,
         groupId: RemoteGroupId,
-    ): GatewayOutcome<AuthoritativeEmailGroupMembership> = GatewayOutcome.Success(
-        AuthoritativeEmailGroupMembership(account, groupId, memberships.toList()),
-    )
+    ): GatewayOutcome<AuthoritativeEmailGroupMembership> {
+        membershipReads++
+        return GatewayOutcome.Success(AuthoritativeEmailGroupMembership(account, groupId, memberships.toList()))
+    }
 
     override suspend fun apply(account: AccountScope, mutation: EmailLabelMutation): GatewayOutcome<Unit> {
         assignmentWrites++
