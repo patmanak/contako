@@ -233,6 +233,10 @@ internal class ProductionAndroidProjectionItemExecutor(
         } catch (_: IllegalArgumentException) {
             return repair(AndroidProjectionRepairCategory.CURRENT_CONTACT_DECODING)
         } ?: return repair(AndroidProjectionRepairCategory.CONTACT_DECODING)
+        // Guarded legacy companion recovery can arm a new preparation. Its CAS invalidates
+        // this pass's ledger snapshot; re-observe before planning or touching the provider.
+        if (database.androidProjectionLedgerDao().get(context.account.value, ledger.canonicalContactId) != ledger)
+            return replan(AndroidProjectionReplanCategory.LEDGER_CONTEXT)
         val contactPlan = try {
             materializeMissingPhotoClaims(
                 mapper.planProjection(current, canonical), current, rawContactId, currentObservation.dataRows,
@@ -504,7 +508,8 @@ internal class ProductionAndroidProjectionItemExecutor(
             return repair(AndroidProjectionRepairCategory.PROVIDER_IDENTITY_REGISTRATION)
         }
         val postContact = try {
-            decodeContact(context, accountName, canonical, post, desiredContact, AndroidProjectionDecodeStage.POST_WRITE)
+            decodeContact(context, accountName, canonical, post, desiredContact, AndroidProjectionDecodeStage.POST_WRITE,
+                expectedProviderVersion = expectedPostWriteVersion)
         } catch (failure: AndroidProviderRowCodecException) {
             return repair(failure.category.toProjectionRepairCategory())
         } catch (_: IllegalArgumentException) {
@@ -667,6 +672,7 @@ internal class ProductionAndroidProjectionItemExecutor(
         observation: com.patmanak.contako.data.android.provider.AndroidStableRawContactObservation,
         desired: AndroidContactSnapshot,
         stage: AndroidProjectionDecodeStage,
+        expectedProviderVersion: Long? = null,
     ) = AndroidProviderMimeRouter().route(observation.rawContact.rawContactId, observation.dataRows).let { route ->
         run {
             val desiredPhoto = desired.rows.singleOrNull { it.kind == AndroidRowKind.PHOTO }
@@ -701,6 +707,9 @@ internal class ProductionAndroidProjectionItemExecutor(
                         !resolver.recoverProjectionBindings(context, canonical.id, canonical.revision, observation,
                             desired, photoCapture, { MISSING_PROVIDER_PHOTO_REFERENCE },
                             confirmObservation = { readExact(accountName, observation.rawContact.rawContactId)?.rawContact == observation.rawContact },
+                            allowDetachedPreparation = stage == AndroidProjectionDecodeStage.CURRENT,
+                            expectedProviderVersion = expectedProviderVersion,
+                            projectionMapper = mapper,
                             onRejected = { detail -> runCatching { repairObserver.onBindingRecoveryFailure(stage, detail) } })
                     ) throw failure
                     identityFailure = null

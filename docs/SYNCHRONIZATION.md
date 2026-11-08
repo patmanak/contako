@@ -272,6 +272,18 @@ receipt under the ownership, version and readback guards in Contacts.
 Baseline recovery MUST NOT skip normal planning or photo byte verification:
 a decoded projection fingerprint alone is not proof of the current image bytes.
 
+An existing organization or structured-name row MAY change its registered
+companions only against a verified whole projection and its integrity-checked
+previous binding baseline. The primary identity and physical row MUST remain
+owned, and the replacement companions MUST match the current canonical projection.
+Account, source, epoch, revision and a rechecked non-DIRTY provider observation
+MUST hold; companion changes commit atomically. A fresh pending write with its
+exact returned provider version MAY use the existing display-only name equivalence.
+Without that receipt, only an unchanged, previously confirmed name decomposition
+MAY accompany this recovery. A legacy detached copy that exactly matches the
+current canonical projection MAY arm a guarded pending preparation and replan;
+this MUST NOT confirm a baseline, skip normal planning or accept claims alone.
+
 A verified completed group deletion receipt is not an active group binding.
 Contact ingestion and projection MUST both exclude it only after account,
 identity, provider epoch, converged tombstone, absent locator and canonical

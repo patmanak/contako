@@ -585,6 +585,11 @@ untouched values independently on each peer:
   the ORG units, generated FN and Android company/department independently;
   preserve further imported units and literal slashes in an edited company.
   Clearing Department MUST NOT remove Company or those further units.
+  Add, remove and replace TITLE/ROLE companions on an existing provider row,
+  and repeat with linked phonetic-name components. The durable companion ledger
+  MUST follow only an exact prepared, verified write. Interrupt before the write
+  and after provider commit, then resume; forged claims, stale revisions and
+  concurrent native edits MUST NOT authorize adopting a different binding.
   Include a second save before the first projection completes. Verify exact
   values and durable linked identities after each save in all peers, restart and
   repeat a no-change pass. No divergent binding, pending Android copy or false

@@ -1346,6 +1346,21 @@ internal interface AndroidProviderIdentityDao {
         bindingPrimaryId: String, kind: String, oldLocator: Long, newLocator: Long,
     ): Int
 
+    @Query("""
+        DELETE FROM android_provider_row_bindings
+        WHERE account_id = :accountId AND canonical_contact_id = :canonicalContactId
+            AND provider_epoch = :providerEpoch AND raw_contact_locator = :rawContactLocator
+            AND binding_primary_id = :bindingPrimaryId AND canonical_value_id = :canonicalValueId
+            AND role = :role AND role != 'PRIMARY' AND kind = :kind
+            AND android_account_name = :androidAccountName AND state = 'ATTACHED'
+            AND data_row_locator = :dataRowLocator
+    """)
+    fun deleteAttachedCompanion(
+        accountId: String, canonicalContactId: String, providerEpoch: Long, rawContactLocator: Long,
+        bindingPrimaryId: String, canonicalValueId: String, role: String, kind: String,
+        androidAccountName: String, dataRowLocator: Long,
+    ): Int
+
     @Query(
         "SELECT * FROM android_provider_row_bindings " +
             "WHERE account_id = :accountId AND canonical_contact_id = :canonicalContactId " +

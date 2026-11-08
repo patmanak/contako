@@ -18,6 +18,8 @@ Features and improvements by version.
   their resolved display names.
 - Edit company and department independently without reverting imported organization
   values or losing further units.
+- Recover Android companion bindings after adding or replacing job titles, roles
+  or phonetic names, with verified write and ownership evidence.
 - Export current failure summaries and bounded protocol codes in sanitized diagnostics;
   retain failures and transitions separately from repetitive import progress.
 - Preserve ambiguous contact creations and newer edits/deletions when an earlier

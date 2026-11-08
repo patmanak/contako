@@ -12,6 +12,7 @@ import com.patmanak.contako.data.gateway.AccountScope
 import com.patmanak.contako.data.local.AndroidProviderIdentityOwnerEntity
 import com.patmanak.contako.data.local.AndroidProviderRowBindingEntity
 import com.patmanak.contako.data.local.ContakoDatabase
+import com.patmanak.contako.data.local.toDomain
 import com.patmanak.contako.data.sync.AndroidInteroperabilityContext
 import java.util.UUID
 import java.util.concurrent.Callable
@@ -85,6 +86,9 @@ internal class RoomAndroidProviderIdentityResolver(
         photoCapture: AndroidDurablePhotoCapture,
         missingPhotoReference: () -> String,
         confirmObservation: () -> Boolean,
+        allowDetachedPreparation: Boolean = false,
+        expectedProviderVersion: Long? = null,
+        projectionMapper: CanonicalAndroidContactMapper = CanonicalAndroidContactMapper(),
         onRejected: (AndroidBindingRecoveryDiagnostic) -> Unit = {},
     ): Boolean {
         val diagnostic = AndroidBindingRecoveryDiagnosticRecorder(onRejected)
@@ -94,8 +98,9 @@ internal class RoomAndroidProviderIdentityResolver(
                     ?: return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.LOCAL_STATE_MISSING)
                 val ledger = database.androidProjectionLedgerDao().get(account.value, canonicalContactId)
                     ?: return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.LOCAL_STATE_MISSING)
-                val canonical = database.contactDao().get(account.value, canonicalContactId)?.contact
+                val canonicalAggregate = database.contactDao().get(account.value, canonicalContactId)
                     ?: return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.LOCAL_STATE_MISSING)
+                val canonical = canonicalAggregate.contact
                 val raw = observation.rawContact
                 val mapper = CanonicalAndroidContactMapper()
                 if (context.account != account || context.providerEpoch != providerEpoch ||
@@ -106,15 +111,28 @@ internal class RoomAndroidProviderIdentityResolver(
                     canonical.revision != canonicalRevision || canonical.isDeleted || canonical.conflictState != null ||
                     canonical.remoteContactId == null || canonical.remoteContactId != ledger.sourceIdentity ||
                     raw.dirty || raw.deleted || raw.canonicalContactIdClaim != canonicalContactId ||
-                    raw.sourceIdentity != ledger.sourceIdentity || desired.canonicalContactId != canonicalContactId
+                    raw.sourceIdentity != ledger.sourceIdentity || desired.canonicalContactId != canonicalContactId ||
+                    (expectedProviderVersion != null && raw.version != expectedProviderVersion)
                 ) return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.CONTEXT_CHANGED)
 
                 // A provider can relocate a name after a completed write too. The last completed
                 // baseline remains the authority for those rows even if Proton has since refreshed
                 // the canonical contact. Never substitute the newly desired state for that receipt.
                 val pending = ledger.projectionState == "WRITE_PENDING"
+                val detached = allowDetachedPreparation && ledger.projectionState == "DETACHED" &&
+                    ledger.pendingProjectionFingerprint == null
+                val baselineEntity = database.androidProjectionLedgerDao().getBaseline(account.value, canonicalContactId)
+                val completedBaseline = baselineEntity?.let { entity ->
+                    val decoded = try { AndroidContactSnapshotBinaryCodec.decode(entity.encodedSnapshot) }
+                        catch (_: AndroidContactSnapshotCodecException) { null }
+                    decoded
+                        ?.takeIf { it.canonicalContactId == canonicalContactId &&
+                            entity.fingerprint == ledger.androidBaselineFingerprint &&
+                            mapper.fingerprint(it).sha256Hex == entity.fingerprint }
+                }
                 val expected = when {
                     pending && ledger.pendingProjectionFingerprint == mapper.fingerprint(desired).sha256Hex -> desired
+                    detached -> desired
                     ledger.projectionState == "CLEAN" -> {
                         val baseline = database.androidProjectionLedgerDao().getBaseline(account.value, canonicalContactId)
                             ?: return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.BASELINE_MISSING)
@@ -135,6 +153,7 @@ internal class RoomAndroidProviderIdentityResolver(
                 val route = AndroidProviderMimeRouter().route(raw.rawContactId, observation.dataRows)
                 requireUnmanagedRowsUnbound(canonicalContactId, raw.rawContactId, route)
                 val moves = mutableListOf<ProjectionBindingMove>()
+                val transitions = mutableListOf<ProjectionCompanionTransition>()
                 // This resolver is read-only. No pending attachment or fresh identity is persisted
                 // until the complete decoded payload has matched the durable write fingerprint.
                 val candidateResolver = AndroidProviderIdentityResolver { claims ->
@@ -152,13 +171,40 @@ internal class RoomAndroidProviderIdentityResolver(
                             ?: return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.BINDING_MISSING, claim.kind)
                         if (state != STATE_ATTACHED && state != STATE_PENDING)
                             return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.BINDING_STATE, claim.kind)
-                        val binding = group.toDurableBinding(accountName, claim.kind, state)
+                        var binding = group.toDurableBinding(accountName, claim.kind, state)
                             ?: return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.BINDING_SHAPE, claim.kind)
-                        if (binding.canonicalValueId != id || binding.linkedCanonicalValueIds != claim.claimedLinkedCanonicalValueIds)
+                        if (binding.canonicalValueId != id)
                             return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.CLAIM_IDENTITY_MISMATCH, claim.kind)
                         val locators = group.map { it.dataRowLocator }.distinct()
                         if (locators.size != 1) return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.BINDING_LOCATORS, claim.kind)
                         val old = locators.single()
+                        if (binding.linkedCanonicalValueIds != claim.claimedLinkedCanonicalValueIds) {
+                            if ((!pending && !detached) || state != STATE_ATTACHED || old != claim.providerRowId ||
+                                claim.kind !in setOf(AndroidRowKind.ORGANIZATION, AndroidRowKind.STRUCTURED_NAME))
+                                return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.CLAIM_IDENTITY_MISMATCH, claim.kind)
+                            val before = completedBaseline?.rows?.singleOrNull {
+                                it.kind == claim.kind && it.identity.canonicalValueId == id &&
+                                    it.identity.providerRowId == claim.providerRowId
+                            }
+                            if (before == null || before.linkedCanonicalValueIds != binding.linkedCanonicalValueIds ||
+                                group.size != 1 + binding.linkedCanonicalValueIds.size)
+                                return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.BASELINE_INTEGRITY, claim.kind)
+                            // Reconstruct authority from the current canonical revision, not DATA_SYNC.
+                            if (projectionMapper.fingerprint(projectionMapper.project(canonicalAggregate.toDomain())) !=
+                                projectionMapper.fingerprint(desired))
+                                return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.CONTEXT_CHANGED, claim.kind)
+                            val target = desired.rows.singleOrNull { it.kind == claim.kind && it.identity.canonicalValueId == id }
+                            if (target == null || target.linkedCanonicalValueIds != claim.claimedLinkedCanonicalValueIds)
+                                return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.CLAIM_IDENTITY_MISMATCH, claim.kind)
+                            val replacement = AndroidDurableValueBinding(id, target.linkedCanonicalValueIds)
+                            val newRows = AndroidPendingProviderBinding(claim.kind, replacement)
+                                .toRows(accountName, canonicalContactId, raw.rawContactId, claim.providerRowId, STATE_ATTACHED)
+                            if (newRows.any { row -> dao.getBindingByCanonicalValueId(account.value, canonicalContactId,
+                                    providerEpoch, row.canonicalValueId)?.let { it !in group } == true })
+                                return@AndroidProviderIdentityResolver diagnostic.rejectClaim(AndroidBindingRecoveryReason.DESTINATION_BOUND, claim.kind)
+                            transitions += ProjectionCompanionTransition(group, newRows)
+                            binding = replacement
+                        }
                         if (state == STATE_PENDING) {
                             if (!pending || old != null || dao.getAttachedBindingGroup(account.value, canonicalContactId, providerEpoch,
                                     raw.rawContactId, claim.providerRowId).isNotEmpty()
@@ -184,8 +230,17 @@ internal class RoomAndroidProviderIdentityResolver(
                 }
                 val decoded = AndroidProviderRowCodec(candidateResolver, photoCapture, missingPhotoReference)
                     .decode(accountName, canonicalContactId, raw.rawContactId, route.contactRows.rows)
-                if (moves.isEmpty()) return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.NO_RELOCATIONS)
-                if (mapper.fingerprint(mapper.normalizeGeneratedName(decoded, expected)) != expectedFingerprint) {
+                if (moves.isEmpty() && transitions.isEmpty()) return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.NO_RELOCATIONS)
+                if (detached && (transitions.isEmpty() || moves.isNotEmpty()))
+                    return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.UNSUPPORTED_RELOCATION)
+                // A fresh batch's exact version receipt also covers ContactsProvider's known
+                // display-only name decomposition. Lost receipts retain the stricter baseline proof.
+                val freshNameReceipt = pending && expectedProviderVersion != null
+                val comparison = if (transitions.isEmpty() || freshNameReceipt)
+                    mapper.normalizeGeneratedName(decoded, expected) else decoded
+                val exactTarget = if (transitions.isEmpty() || freshNameReceipt) expected else retainProvedUnchangedName(expected, decoded,
+                    completedBaseline, transitions.flatMap { it.before }.map { it.bindingPrimaryId }.toSet(), mapper)
+                if (mapper.fingerprint(comparison) != mapper.fingerprint(exactTarget)) {
                     var kind: AndroidRowKind? = null
                     var component: com.patmanak.contako.data.android.mapping.AndroidComponent? = null
                     var difference: com.patmanak.contako.data.sync.AndroidComponentDifference? = null
@@ -202,6 +257,34 @@ internal class RoomAndroidProviderIdentityResolver(
                     )
                 }
                 if (!confirmObservation()) return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.OBSERVATION_CHANGED)
+                if (database.androidProjectionLedgerDao().get(account.value, canonicalContactId) != ledger ||
+                    database.androidProjectionLedgerDao().getAccount(account.value) != accountRow ||
+                    database.contactDao().get(account.value, canonicalContactId) != canonicalAggregate)
+                    return@withTransaction diagnostic.reject(AndroidBindingRecoveryReason.CONTEXT_CHANGED)
+                if (detached) {
+                    if (database.androidProjectionLedgerDao().compareAndSetRevision(account.value, canonicalContactId, ledger.revision) != 1)
+                        throw IdentityBindingTransactionDiverged()
+                    check(database.androidProjectionLedgerDao().update(ledger.copy(revision = Math.incrementExact(ledger.revision),
+                        canonicalProjectionFingerprint = expectedFingerprint.sha256Hex,
+                        pendingProjectionFingerprint = expectedFingerprint.sha256Hex, projectionState = "WRITE_PENDING")) == 1)
+                }
+                transitions.forEach { transition ->
+                    val primary = transition.before.single { it.role == PRIMARY_ROLE }
+                    if (dao.getBindingGroup(account.value, canonicalContactId, providerEpoch, raw.rawContactId,
+                            primary.canonicalValueId) != transition.before) throw IdentityBindingTransactionDiverged()
+                    val removed = transition.before.filter { it.role != PRIMARY_ROLE && it !in transition.after }
+                    val inserted = transition.after.filter { it.role != PRIMARY_ROLE && it !in transition.before }
+                    removed.forEach { row ->
+                        if (dao.deleteAttachedCompanion(row.accountId, row.canonicalContactId, row.providerEpoch,
+                                row.rawContactLocator, row.bindingPrimaryId, row.canonicalValueId, row.role, row.kind,
+                                row.androidAccountName, requireNotNull(row.dataRowLocator)) != 1)
+                            throw IdentityBindingTransactionDiverged()
+                    }
+                    val owners = inserted.filter { dao.getOwner(account.value, canonicalContactId, it.canonicalValueId) == null }
+                        .map { AndroidProviderIdentityOwnerEntity(account.value, canonicalContactId, it.canonicalValueId) }
+                    if (owners.isNotEmpty()) dao.insertOwners(owners)
+                    if (inserted.isNotEmpty()) dao.insertBindings(inserted)
+                }
                 moves.forEach { move ->
                     val updated = dao.relocateProjectionBindingGroup(
                         account.value, canonicalContactId, providerEpoch, raw.rawContactId,
@@ -626,6 +709,28 @@ internal class RoomAndroidProviderIdentityResolver(
         val id: String, val old: Long, val current: Long, val kind: AndroidRowKind, val rows: Int,
     ) {
         override fun toString(): String = "ProjectionBindingMove(REDACTED)"
+    }
+
+    private class ProjectionCompanionTransition(
+        val before: List<AndroidProviderRowBindingEntity>, val after: List<AndroidProviderRowBindingEntity>,
+    ) {
+        override fun toString() = "ProjectionCompanionTransition(REDACTED)"
+    }
+
+    /** Reuse an unchanged completed name receipt, never normalize a newly observed decomposition. */
+    private fun retainProvedUnchangedName(expected: AndroidContactSnapshot, observed: AndroidContactSnapshot,
+        baseline: AndroidContactSnapshot?, changedPrimaries: Set<String>, mapper: CanonicalAndroidContactMapper): AndroidContactSnapshot {
+        val desiredName = expected.rows.singleOrNull { it.kind == AndroidRowKind.STRUCTURED_NAME } ?: return expected
+        if (desiredName.identity.canonicalValueId in changedPrimaries) return expected
+        val oldName = baseline?.rows?.singleOrNull { it.kind == AndroidRowKind.STRUCTURED_NAME } ?: return expected
+        val actualName = observed.rows.singleOrNull { it.kind == AndroidRowKind.STRUCTURED_NAME } ?: return expected
+        if (oldName.identity != actualName.identity) return expected
+        fun snapshot(row: com.patmanak.contako.data.android.mapping.AndroidContactRow) =
+            AndroidContactSnapshot(expected.canonicalContactId, listOf(row))
+        if (mapper.fingerprint(snapshot(oldName)) != mapper.fingerprint(snapshot(actualName)) ||
+            mapper.fingerprint(mapper.normalizeGeneratedName(snapshot(oldName), snapshot(desiredName))) !=
+                mapper.fingerprint(snapshot(desiredName))) return expected
+        return expected.copy(rows = expected.rows.map { if (it === desiredName) oldName else it })
     }
 
     private companion object {
