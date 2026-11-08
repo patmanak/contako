@@ -300,7 +300,12 @@ Exercise exhausted transient writes with one explicit retry credit at the exact
 revision. Repeated taps, stale requests, cooldown, restart and another failure
 MUST preserve idempotency and the reconciliation flag. A blocked item MUST NOT
 prevent independent eligible work in later bounded drains. Assignments MUST
-wait only on proven current/removed group edges; legacy incomplete dependencies
+retain an omitted invalid email membership while delivering other verified
+members; no full ACK or false conflict is permitted. Controlled daily-clock probes
+after fast-budget exhaustion MUST honor server delays and share durable cooldown
+with manual requests; permanent failures and incomplete creation verification
+remain excluded. Dependency waits MUST retain the previous real diagnostic cause.
+Assignments MUST wait only on proven current/removed group edges; legacy incomplete dependencies
 require verified membership before this narrower scheduling is used.
 
 Inject HTTP 429 before event, inventory, card and deletion reads, and during

@@ -49,6 +49,18 @@ internal class RoomOutboxStore(private val database: ContakoDatabase) {
             blockedReason = mutation.blockedReasonFor(category),
             errorCategory = category.name,
         ) == 1
+        is RetryDecision.Exhausted -> database.withTransaction {
+            val updated = database.outboxDao().markActionRequired(mutation.accountId, mutation.aggregateType,
+                mutation.aggregateId, mutation.revision, mutation.blockedReasonFor(category), category.name,
+                decision.nextEligibleEpochMillis, decision.reconcileBeforeReplay) == 1
+            if (updated) database.mutationRetryRequestDao().upsert(MutationRetryRequestEntity(
+                mutation.accountId, mutation.aggregateType, mutation.aggregateId, mutation.revision,
+                decision.failedAtEpochMillis,
+                if (decision.failedAtEpochMillis > Long.MAX_VALUE - RoomMutationRetryRequestStore.COOLDOWN_MILLIS)
+                    Long.MAX_VALUE else decision.failedAtEpochMillis + RoomMutationRetryRequestStore.COOLDOWN_MILLIS,
+                consumedAtEpochMillis = decision.failedAtEpochMillis))
+            updated
+        }
         RetryDecision.Cancelled -> database.outboxDao().markRetry(
             mutation.accountId,
             mutation.aggregateType,

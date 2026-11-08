@@ -63,6 +63,7 @@ enum class MutationPreparationActionRequiredReason {
     AGGREGATE_MISSING,
     REVISION_MISMATCH,
     RECONCILIATION_REMOTE_IDENTITY_MISSING,
+    RECONCILIATION_CREATION_MATCH_UNVERIFIED,
     GROUP_REMOTE_IDENTITY_MISSING,
     GROUP_MEMBER_REMOTE_EMAIL_IDENTITY_MISSING,
     GROUP_MEMBER_LOCAL_EMAIL_MISSING,
@@ -96,6 +97,8 @@ interface MutationExecutionStore {
     suspend fun recoverInterrupted(accountId: String, nowEpochMillis: Long): Int
     suspend fun eligible(accountId: String, nowEpochMillis: Long, limit: Int): List<DurableMutationCommand>
     suspend fun claim(command: DurableMutationCommand, nowEpochMillis: Long): Boolean
+    suspend fun defer(command: DurableMutationCommand): Boolean =
+        recordFailure(command, GatewayFailureCategory.CANCELLED, RetryDecision.Cancelled)
     suspend fun recordFailure(
         command: DurableMutationCommand,
         category: GatewayFailureCategory,
@@ -224,7 +227,7 @@ class DurableMutationOrchestrator(
                     store.recordFailure(command, preparation.category, decision)
                     when (decision) {
                         is RetryDecision.RetryAt -> retryWaiting++
-                        RetryDecision.ActionRequired -> {
+                        RetryDecision.ActionRequired, is RetryDecision.Exhausted -> {
                             actionRequired++
                             observeActionRequired(
                                 MutationActionRequiredSource.PREPARATION_FAILURE,
@@ -268,7 +271,7 @@ class DurableMutationOrchestrator(
                                 store.recordFailure(command, upload.category, retry)
                                 when (retry) {
                                     is RetryDecision.RetryAt -> retryWaiting++
-                                    RetryDecision.ActionRequired -> {
+                                    RetryDecision.ActionRequired, is RetryDecision.Exhausted -> {
                                         actionRequired++
                                         observeActionRequired(
                                             MutationActionRequiredSource.UPLOAD_FAILURE,
@@ -300,7 +303,7 @@ class DurableMutationOrchestrator(
                     MutationPreparation.WaitingForDependencies -> {
                         // Release the claim without spending the failure/retry budget. The next
                         // bounded drain rechecks the dependency; no remote write was attempted.
-                        store.recordFailure(command, GatewayFailureCategory.CANCELLED, RetryDecision.Cancelled)
+                        store.defer(command)
                         progressPending++
                     }
                     is MutationPreparation.ActionRequired -> {

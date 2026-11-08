@@ -118,6 +118,13 @@ internal class RoomMutationExecutionStore(
     override suspend fun claim(command: DurableMutationCommand, nowEpochMillis: Long): Boolean =
         entity(command)?.let { store.claim(it, nowEpochMillis) } ?: false
 
+    override suspend fun defer(command: DurableMutationCommand): Boolean = database.withTransaction {
+        val current = entity(command) ?: return@withTransaction false
+        database.outboxDao().markRetry(current.accountId, current.aggregateType, current.aggregateId,
+            current.revision, current.attemptCount, current.nextAttemptAtEpochMillis,
+            current.errorCategory, current.requiresReconciliation) == 1
+    }
+
     override suspend fun recordFailure(
         command: DurableMutationCommand,
         category: GatewayFailureCategory,
@@ -125,7 +132,8 @@ internal class RoomMutationExecutionStore(
     ): Boolean = database.withTransaction {
         val current = entity(command) ?: return@withTransaction false
         if (!store.applyRetryDecision(current, category, decision)) return@withTransaction false
-        if (decision == RetryDecision.ActionRequired && command.aggregateType == AggregateType.CONTACT.name) {
+        if ((decision == RetryDecision.ActionRequired || decision is RetryDecision.Exhausted) &&
+            command.aggregateType == AggregateType.CONTACT.name) {
             database.contactConflictDao().invalidateChoice(command.accountId, command.aggregateId, command.revision)
         }
         if (decision == RetryDecision.DeleteConverged) {

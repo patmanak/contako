@@ -519,4 +519,6 @@
     <string name="sync_import_waiting">Einige Proton-Kontakte warten auf einen neuen Versuch.</string>
     <string name="sync_email_partial_title">Teilweise synchronisiert</string>
     <string name="sync_email_partial_body">E-Mail-Adressen müssen überprüft werden.</string>
+    <string name="sync_create_anyway">Trotzdem erstellen</string>
+    <string name="sync_create_anyway_warning">Die vorherige Erstellung konnte nicht bestätigt werden. Eine erneute Erstellung kann diesen Kontakt in Proton duplizieren.</string>
 </resources>

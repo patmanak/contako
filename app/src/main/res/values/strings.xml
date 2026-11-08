@@ -519,4 +519,6 @@
     <string name="sync_import_waiting">Some Proton contacts are waiting to retry.</string>
     <string name="sync_email_partial_title">Partially synchronized</string>
     <string name="sync_email_partial_body">Email addresses need review.</string>
+    <string name="sync_create_anyway">Create anyway</string>
+    <string name="sync_create_anyway_warning">The previous creation could not be verified. Creating again may duplicate this contact on Proton.</string>
 </resources>

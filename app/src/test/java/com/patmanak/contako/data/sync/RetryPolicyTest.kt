@@ -59,7 +59,7 @@ class RetryPolicyTest {
 
     @Test
     fun `an exhausted persisted attempt count cannot overflow into a retry`() {
-        assertEquals(RetryDecision.ActionRequired, policy.decide(TIMEOUT, UPDATE, Int.MAX_VALUE, 10_000))
+        assertTrue(policy.decide(TIMEOUT, UPDATE, Int.MAX_VALUE, 10_000) is RetryDecision.Exhausted)
     }
 
     @Test
@@ -75,9 +75,21 @@ class RetryPolicyTest {
 
     @Test
     fun `03-FAULT automatic attempts are bounded and deadlines saturate`() {
-        assertEquals(RetryDecision.ActionRequired, policy.decide(TIMEOUT, UPDATE, 3, 10_000))
+        assertTrue(policy.decide(TIMEOUT, UPDATE, 3, 10_000) is RetryDecision.Exhausted)
         val saturated = policy.decide(TIMEOUT, UPDATE, 0, Long.MAX_VALUE - 10) as RetryDecision.RetryAt
         assertEquals(Long.MAX_VALUE, saturated.nextEligibleEpochMillis)
+    }
+
+    @Test fun exhaustedNetworkAttemptsKeepServerMinimumWithoutOverflowOrAutomaticCreatePermission() {
+        val exhausted = policy.decide(TIMEOUT, CREATE, 3, 10_000, 120_000) as RetryDecision.Exhausted
+        assertEquals(130_000L, exhausted.nextEligibleEpochMillis)
+        assertEquals(10_000L, exhausted.failedAtEpochMillis)
+        assertTrue(exhausted.reconcileBeforeReplay)
+        val limit = policy.decide(RATE_LIMITED, UPDATE, 3, Long.MAX_VALUE - 10, 100) as RetryDecision.Exhausted
+        assertEquals(Long.MAX_VALUE, limit.nextEligibleEpochMillis)
+        assertFalse(limit.reconcileBeforeReplay)
+        assertEquals(RetryDecision.ActionRequired, policy.decide(GatewayFailureCategory.RECONCILIATION_INCOMPLETE,
+            CREATE, 3, 10_000))
     }
 
     private companion object {

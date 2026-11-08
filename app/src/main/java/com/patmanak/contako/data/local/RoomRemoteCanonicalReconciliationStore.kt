@@ -160,9 +160,11 @@ internal class RoomRemoteCanonicalReconciliationStore(
         checkLocalReconciliationInvariant(outbox != null && outbox.revision == local.pendingMutationRevision,
             LocalReconciliationInvariant.INTENT_REVISION)
         checkNotNull(outbox)
+        val deliveredProjection = if (verifiedUniqueCreation) RoomContactUploadOverlays(database).wireProjection(local) else null
         if (verifiedUniqueCreation && outbox.requiresReconciliation && outbox.remoteVersion == null &&
             outbox.operation == MutationOperation.UPSERT.name && !local.isDeleted &&
-            com.patmanak.contako.data.proton.equivalentContactSubmission(local, remote) &&
+            deliveredProjection != null &&
+            com.patmanak.contako.data.proton.equivalentContactSubmission(deliveredProjection, remote) &&
             canAdoptRemote(remote.copy(accountId = local.accountId, id = local.id))) {
             adoptRemote(local, remote, verified, remoteModifiedAtEpochSeconds)
             checkLocalReconciliationInvariant(database.outboxDao().deleteRevision(

@@ -3,12 +3,16 @@ package com.patmanak.contako.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.patmanak.contako.R
@@ -26,6 +30,7 @@ internal data class SyncIssueItem(
     val isDeleted: Boolean = false,
     val retry: SyncMutationRetry? = null,
     val importGeneration: String? = null,
+    val createAnywayRevision: Long? = null,
 ) {
     override fun toString() = "SyncIssueItem(REDACTED, scope=${advice.scope}, cause=${advice.cause})"
 }
@@ -39,7 +44,7 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
     fun add(key: String, id: String?, name: String?, problem: SyncProblem?, scope: SyncIssueScope,
         durable: Boolean = false, review: Boolean = false, deleted: Boolean = false,
         compare: Boolean = false, queuedChoice: Boolean = false, retry: SyncMutationRetry? = null,
-        importGeneration: String? = null) {
+        importGeneration: String? = null, createAnywayRevision: Long? = null) {
         val resolvedName = name?.takeIf(String::isNotBlank) ?: when (scope) {
             SyncIssueScope.CONTACT, SyncIssueScope.ANDROID_COPY -> contacts[id]?.resolvedDisplayName
             SyncIssueScope.GROUP -> groups[id]?.name?.takeIf(String::isNotBlank)
@@ -52,7 +57,7 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
                 canTarget = id != null && scope in setOf(SyncIssueScope.PROTON_IMPORT, SyncIssueScope.ANDROID_COPY),
                 knownValidationIssues = if (scope == SyncIssueScope.CONTACT) SyncValidationIssue.entries
                     .filter { it.name in contacts[id]?.actionRequiredReasons.orEmpty() }.toSet() else emptySet(),
-                retryReason = retry?.reason), review, deleted, retry, importGeneration)
+                retryReason = retry?.reason), review, deleted, retry, importGeneration, createAnywayRevision)
     }
     conflicts.forEach { conflict ->
         if (snapshot.blockedItems.any { it.id == conflict.contactId && it.type == SyncBlockedItemType.CONTACT &&
@@ -69,7 +74,8 @@ internal fun currentSyncIssues(state: ContactsUiState, conflicts: List<ContactCo
         val review = !item.isDeleted && if (group) groups.containsKey(item.id) else contacts.containsKey(item.id)
         add("blocked:${item.type}:${item.id}", item.id, item.displayName, item.problem,
             if (group) SyncIssueScope.GROUP else SyncIssueScope.CONTACT,
-            durable = true, review = review, deleted = item.isDeleted, retry = item.retry)
+            durable = true, review = review, deleted = item.isDeleted, retry = item.retry,
+            createAnywayRevision = item.createAnywayRevision)
     }
     snapshot.importProblems.forEach { item ->
         if (!item.isTransient && !item.ignored) add("import:${item.remoteId}", item.remoteId, item.displayName, item.problem,
@@ -138,6 +144,19 @@ internal fun syncIssueBodyResources(advice: SyncIssueAdvice): List<Int> {
 internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewModel: ContactsViewModel,
     onReauthenticate: () -> Unit) {
     val advice = item.advice
+    var confirmCreate by remember(item.key, item.createAnywayRevision) { mutableStateOf(false) }
+    if (confirmCreate && item.createAnywayRevision != null && item.targetId != null) {
+        AlertDialog(onDismissRequest = { confirmCreate = false },
+            title = { Text(stringResource(R.string.sync_create_anyway)) },
+            text = { Text(stringResource(R.string.sync_create_anyway_warning)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmCreate = false
+                    viewModel.confirmAmbiguousContactCreate(item.targetId, item.createAnywayRevision)
+                }, enabled = state.syncActivity == SyncActivity.IDLE) { Text(stringResource(R.string.sync_create_anyway)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmCreate = false }) { Text(stringResource(R.string.action_cancel)) } })
+    }
     val retry = item.retry
     val retryEligible by produceState(false, retry?.nextEligibleAtEpochMillis, retry?.queued) {
         val remaining = ((retry?.nextEligibleAtEpochMillis ?: 0L) - System.currentTimeMillis()).coerceAtLeast(0)
@@ -224,6 +243,11 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
             }))
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (item.createAnywayRevision != null && item.targetId != null) {
+                TextButton(onClick = { confirmCreate = true }, enabled = state.syncActivity == SyncActivity.IDLE) {
+                    Text(stringResource(R.string.sync_create_anyway))
+                }
+            }
             if (item.importGeneration != null && item.targetId != null && advice.cause == SyncIssueCause.CRYPTOGRAPHY) {
                 TextButton(onClick = { viewModel.ignoreImportProblem(item.targetId, item.importGeneration) },
                     enabled = state.syncActivity == SyncActivity.IDLE) {

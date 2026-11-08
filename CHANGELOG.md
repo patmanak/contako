@@ -4,6 +4,15 @@ Features and improvements by version.
 
 ## Unreleased
 
+- Bound import reads during persistent network outages while preserving per-contact
+  retry deadlines and healthy progress.
+- Synchronize valid group members while retaining a new invalid email locally.
+- Verify more uncertain creations per bounded scan, preserve partial email edits
+  after a lost acknowledgement, and offer an explicit duplicate-risk confirmation
+  when exhausted verification cannot establish absence.
+- Probe exhausted transient writes approximately daily without resetting retry
+  history or bypassing server delays; retain real failure causes during dependency waits.
+
 - Resume imports per contact with durable retry deadlines, without rereading healthy
   cards after a transient failure; keep independent work eligible.
 - Preserve uncertain-delivery evidence through rate limits, avoid identical-create

@@ -527,4 +527,6 @@
     <string name="sync_import_waiting">Alcuni contatti Proton attendono un nuovo tentativo.</string>
     <string name="sync_email_partial_title">Sincronizzato parzialmente</string>
     <string name="sync_email_partial_body">Alcuni indirizzi e-mail richiedono una verifica.</string>
+    <string name="sync_create_anyway">Crea comunque</string>
+    <string name="sync_create_anyway_warning">La creazione precedente non è stata verificata. Creare di nuovo potrebbe duplicare questo contatto su Proton.</string>
 </resources>

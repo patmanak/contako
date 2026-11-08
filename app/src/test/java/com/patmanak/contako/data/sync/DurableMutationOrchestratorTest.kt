@@ -497,7 +497,7 @@ private class FakeMutationStore(
                 nextEligibleEpochMillis = decision.nextEligibleEpochMillis,
                 requiresReconciliation = decision.reconcileBeforeReplay,
             )
-            RetryDecision.ActionRequired -> actionRequired = true
+            RetryDecision.ActionRequired, is RetryDecision.Exhausted -> actionRequired = true
             RetryDecision.Cancelled -> Unit
             RetryDecision.DeleteConverged -> commands.remove(command.aggregateId)
         }

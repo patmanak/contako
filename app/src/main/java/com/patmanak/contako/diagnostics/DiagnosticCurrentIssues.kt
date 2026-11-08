@@ -63,7 +63,7 @@ internal class DiagnosticIssueReducer {
     fun add(scope: DiagnosticIssueScope, state: DiagnosticIssueState, category: String?, reason: String?, attempts: Int = 0,
         operation: RemoteMutationOperation? = null) {
         val safeCategory = category?.takeIf { c -> GatewayFailureCategory.entries.any { it.name == c } } ?: "NONE"
-        val safeReason = reason?.takeIf { it in DiagnosticCurrentIssues.reasons } ?: "UNKNOWN"
+        val safeReason = if (reason == null) "NONE" else reason.takeIf { it in DiagnosticCurrentIssues.reasons } ?: "UNKNOWN"
         val key = "${scope.name}.${state.name}.${operation?.name ?: "NONE"}.$safeCategory.$safeReason.${DiagnosticCurrentIssues.attemptBand(attempts).name}"
         if (key !in counts && counts.size == DiagnosticCurrentIssues.MAX_ROWS) { truncated = true; return }
         counts[key] = ((counts[key] ?: 0) + 1).coerceAtMost(1_000)

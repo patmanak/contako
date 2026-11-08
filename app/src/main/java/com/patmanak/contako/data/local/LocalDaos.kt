@@ -366,7 +366,7 @@ internal interface OutboxDao {
         revision: Long,
         attemptCount: Int,
         nextAttemptAtEpochMillis: Long,
-        errorCategory: String,
+        errorCategory: String?,
         requiresReconciliation: Boolean,
     ): Int
 
@@ -374,7 +374,9 @@ internal interface OutboxDao {
         """
         UPDATE outbox_mutations
         SET state = 'ACTION_REQUIRED', blocked_reason = :blockedReason,
-          error_category = :errorCategory
+          error_category = :errorCategory,
+          next_attempt_at_epoch_millis = MAX(next_attempt_at_epoch_millis, COALESCE(:nextAttemptAtEpochMillis, next_attempt_at_epoch_millis)),
+          requires_reconciliation = (requires_reconciliation OR :requiresReconciliation)
         WHERE account_id = :accountId AND aggregate_type = :aggregateType
           AND aggregate_id = :aggregateId AND revision = :revision AND state = 'IN_FLIGHT'
         """,
@@ -386,6 +388,8 @@ internal interface OutboxDao {
         revision: Long,
         blockedReason: String,
         errorCategory: String,
+        nextAttemptAtEpochMillis: Long? = null,
+        requiresReconciliation: Boolean = false,
     ): Int
 
     @Query(

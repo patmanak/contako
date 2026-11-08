@@ -75,6 +75,7 @@ internal class RoomMutationRetryRequestStore(private val database: ContakoDataba
 
     /** Called only under the shared account runner, before selecting the next outbox batch. */
     suspend fun consume(account: AccountScope, nowEpochMillis: Long): Int = database.withTransaction {
+        if (nowEpochMillis < 0) return@withTransaction 0
         var reopened = 0
         dao.queued(account.value).forEach { request ->
             val intent = database.outboxDao().get(account.value, request.aggregateType, request.aggregateId)
@@ -88,6 +89,30 @@ internal class RoomMutationRetryRequestStore(private val database: ContakoDataba
                 // One grant produces one attempt. A failed exhausted attempt becomes terminal
                 // again under the unchanged retry policy; no count, deadline or ambiguity reset.
                 dao.upsert(request.copy(consumedAtEpochMillis = nowEpochMillis))
+                reopened++
+            }
+        }
+        // Natural sync grants at most one daily attempt per unchanged exhausted intent.
+        // The same durable record also anchors manual retries; neither path resets the
+        // attempt count, ambiguity bit or server minimum stored on the outbox row.
+        for (intent in database.outboxDao().getAll(account.value)) {
+            if (!eligible(intent) || intent.errorCategory !in MutationRetryPolicy.DAILY_RETRYABLE.map { it.name } ||
+                !current(intent)) continue
+            val previous = dao.get(account.value, intent.aggregateType, intent.aggregateId)
+            if (previous?.revision != intent.revision) {
+                // Older versions had no failure timestamp: establish a conservative
+                // restart-safe anchor, rather than treating unknown age as overdue.
+                dao.upsert(MutationRetryRequestEntity(account.value, intent.aggregateType, intent.aggregateId,
+                    intent.revision, nowEpochMillis, nowEpochMillis, consumedAtEpochMillis = nowEpochMillis))
+                continue
+            }
+            val consumedAt = previous.consumedAtEpochMillis ?: continue
+            val due = if (consumedAt > Long.MAX_VALUE - MutationRetryPolicy.DAILY_RETRY_MILLIS) Long.MAX_VALUE
+                else consumedAt + MutationRetryPolicy.DAILY_RETRY_MILLIS
+            if (nowEpochMillis < due || intent.nextAttemptAtEpochMillis > nowEpochMillis || reopened >= 100) continue
+            if (dao.reopen(account.value, intent.aggregateType, intent.aggregateId, intent.revision,
+                    requireNotNull(intent.errorCategory), nowEpochMillis) == 1) {
+                dao.upsert(previous.copy(consumedAtEpochMillis = nowEpochMillis))
                 reopened++
             }
         }

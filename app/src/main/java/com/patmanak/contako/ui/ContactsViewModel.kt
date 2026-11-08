@@ -792,6 +792,10 @@ class ContactsViewModel(
         launchMutation { syncRecoveryDataSource.requestMutationRetry(accountId, type, id, revision) }
     }
 
+    fun confirmAmbiguousContactCreate(id: String, revision: Long) {
+        launchMutation { syncRecoveryDataSource.confirmAmbiguousContactCreate(accountId, id, revision) }
+    }
+
     fun ignoreImportProblem(remoteId: String, generation: String) {
         launchMutation { syncRecoveryDataSource.ignoreImportProblem(accountId, remoteId, generation) }
     }

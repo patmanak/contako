@@ -99,6 +99,7 @@ class GatewayAndCurrentIssueDiagnosticsTest {
         val snapshot = reducer.snapshot()
         assertTrue(snapshot.rows.contains("OUTBOX_CONTACT.ACTION_REQUIRED.DELETE.TIMEOUT.REMOTE_ACTION_REQUIRED.EIGHT_OR_MORE.small"))
         assertTrue(snapshot.rows.any { it.startsWith("REMOTE_IMPORT.RETRY_WAITING.NONE.RATE_LIMITED.") })
+        assertTrue(snapshot.rows.any { it.startsWith("REMOTE_IMPORT.RETRY_WAITING.NONE.RATE_LIMITED.NONE.") })
         assertTrue(snapshot.rows.any { it.startsWith("ANDROID_PROJECTION.ACTION_REQUIRED.NONE.NONE.UNKNOWN.") })
         assertFalse(snapshot.rows.joinToString().contains("private"))
         assertFalse(snapshot.rows.joinToString().contains("password"))

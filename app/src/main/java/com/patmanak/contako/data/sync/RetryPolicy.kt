@@ -12,6 +12,9 @@ sealed interface RetryDecision {
     ) : RetryDecision
 
     data object ActionRequired : RetryDecision
+    /** Fast retries are exhausted; retain attention and allow a later daily probe. */
+    data class Exhausted(val failedAtEpochMillis: Long, val nextEligibleEpochMillis: Long,
+        val reconcileBeforeReplay: Boolean) : RetryDecision
     data object Cancelled : RetryDecision
     data object DeleteConverged : RetryDecision
 }
@@ -45,7 +48,11 @@ class MutationRetryPolicy(
             operation == RemoteMutationOperation.DELETE
         if (category !in RETRYABLE && !unverifiedDeleteAbsence) return RetryDecision.ActionRequired
 
-        if (previousAttemptCount >= maximumAutomaticAttempts) return RetryDecision.ActionRequired
+        if (previousAttemptCount >= maximumAutomaticAttempts) {
+            if (category !in DAILY_RETRYABLE) return RetryDecision.ActionRequired
+            return RetryDecision.Exhausted(nowEpochMillis,
+                saturatingAdd(nowEpochMillis, retryAfterMillis ?: 0L), category in AMBIGUOUS_DELIVERY)
+        }
         val attempt = previousAttemptCount + 1
         val exponent = (attempt - 1).coerceAtMost(62)
         val exponential = saturatingShift(baseDelayMillis, exponent).coerceAtMost(maximumDelayMillis)
@@ -65,6 +72,10 @@ class MutationRetryPolicy(
 
     companion object {
         const val DEFAULT_MAXIMUM_AUTOMATIC_ATTEMPTS = 8
+        const val DAILY_RETRY_MILLIS = 24 * 60 * 60 * 1_000L
+        internal val DAILY_RETRYABLE = setOf(GatewayFailureCategory.NETWORK_UNAVAILABLE,
+            GatewayFailureCategory.TIMEOUT, GatewayFailureCategory.RATE_LIMITED,
+            GatewayFailureCategory.REMOTE_SERVICE_FAILURE, GatewayFailureCategory.UNKNOWN)
         private val RETRYABLE = setOf(
             GatewayFailureCategory.RECONCILIATION_INCOMPLETE,
             GatewayFailureCategory.NETWORK_UNAVAILABLE,

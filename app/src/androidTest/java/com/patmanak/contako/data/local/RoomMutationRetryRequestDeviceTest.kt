@@ -161,6 +161,54 @@ class RoomMutationRetryRequestDeviceTest {
         assertNull(database.contactDao().getEntity(account.value, "captured")?.pendingMutationRevision)
     }
 
+    @Test fun exhaustedNetworkFailureAllowsOneDailyProbeAcrossRestartAndPreservesAmbiguity() = runBlocking {
+        val original = blocked("daily")
+        val execution = RoomMutationExecutionStore(database)
+        database.outboxDao().upsert(original.copy(state = "IN_FLIGHT", blockedReason = null))
+        val command = DurableMutationCommand(account.value, "CONTACT", "daily", original.revision,
+            RemoteMutationOperation.UPDATE, 8, NOW - 1, true, original.remoteIdentity, original.remoteVersion)
+        assertTrue(execution.recordFailure(command, GatewayFailureCategory.TIMEOUT,
+            RetryDecision.Exhausted(NOW, NOW, true)))
+        database.close(); open()
+        val day = MutationRetryPolicy.DAILY_RETRY_MILLIS
+        assertEquals(0, retries.consume(account, NOW + day - 1))
+        assertEquals(1, retries.consume(account, NOW + day))
+        assertEquals(0, retries.consume(account, NOW + day))
+        assertEquals(8, intent("daily").attemptCount)
+        assertTrue(intent("daily").requiresReconciliation)
+        assertEquals(original.remoteIdentity, intent("daily").remoteIdentity)
+        database.outboxDao().upsert(intent("daily").copy(state = "ACTION_REQUIRED", blockedReason = "REMOTE_ACTION_REQUIRED"))
+        assertEquals(0, retries.consume(account, NOW + day + 1))
+        assertEquals(1, retries.consume(account, NOW + day * 2))
+    }
+
+    @Test fun dailyProbesHonorLongServerDelayAndNeverReopenUnverifiedOrPermanentFailures() = runBlocking {
+        val day = MutationRetryPolicy.DAILY_RETRY_MILLIS
+        val original = blocked("server")
+        database.outboxDao().upsert(original.copy(nextAttemptAtEpochMillis = NOW + day * 3))
+        retries.consume(account, NOW) // Legacy row gets a durable conservative anchor.
+        assertEquals(0, retries.consume(account, NOW + day))
+        assertEquals(0, retries.consume(account, NOW + day * 3 - 1))
+        assertEquals(1, retries.consume(account, NOW + day * 3))
+        for (category in listOf("RECONCILIATION_INCOMPLETE", "VALIDATION_REJECTED", "CONFLICT", "AUTHENTICATION_REQUIRED")) {
+            blocked(category, category)
+        }
+        assertEquals(0, retries.consume(account, NOW + day * 4))
+        assertEquals(0, retries.consume(account, NOW + day * 5))
+        assertTrue(intent("RECONCILIATION_INCOMPLETE").requiresReconciliation)
+    }
+
+    @Test fun dependencyDeferralRetainsLastFailureAndDoesNotSpendRetryBudget() = runBlocking {
+        val original = blocked("deferred").copy(state = "IN_FLIGHT", blockedReason = null)
+        database.outboxDao().upsert(original)
+        val command = DurableMutationCommand(account.value, "CONTACT", "deferred", original.revision,
+            RemoteMutationOperation.UPDATE, original.attemptCount, original.nextAttemptAtEpochMillis, true,
+            original.remoteIdentity, original.remoteVersion)
+        assertTrue(RoomMutationExecutionStore(database).defer(command))
+        assertEquals(original.copy(state = "PENDING"), intent("deferred"))
+        assertFalse(RoomMutationExecutionStore(database).defer(command))
+    }
+
     private suspend fun blocked(id: String, category: String = "NETWORK_UNAVAILABLE"): OutboxMutationEntity {
         assertTrue(repository.saveContact(CanonicalContact(account.value, id, displayName = "Synthetic retry", remoteContactId = "remote-$id",
             remoteVersion = "baseline")) is SaveResult.Saved)

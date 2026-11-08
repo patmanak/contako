@@ -414,7 +414,7 @@ class DurableSequenceBenchTest {
             when (decision) {
                 is RetryDecision.RetryAt -> commands[command.aggregateId] = copy(command, decision.attemptCount,
                     decision.nextEligibleEpochMillis, decision.reconcileBeforeReplay)
-                RetryDecision.ActionRequired -> blocked += command.aggregateId
+                RetryDecision.ActionRequired, is RetryDecision.Exhausted -> blocked += command.aggregateId
                 RetryDecision.Cancelled -> Unit
                 RetryDecision.DeleteConverged -> error("No unproved absence is a convergence proof")
             }

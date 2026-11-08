@@ -608,10 +608,18 @@ untouched values independently on each peer:
   a new POST with 429: a captured older command MUST NOT restore obsolete ambiguity.
 - With many uncertain creations, bound full-card scans per pass. Crash after
   preparing the first but before claiming another; introduce the second UID on
-  Proton, then resume. Pending intents MUST retain ambiguity, and waiting for the
+  Proton, then resume. Only unchanged canonical/payload/outbox snapshots captured
+  before a complete stable scan may receive its absence proof (at most 25).
+  New or changed intentions MUST retain ambiguity; waiting for the
   scan budget MUST NOT spend automatic failure attempts. A verified identical
   creation converges without a second POST or a version-choice prompt. Duplicate
   UIDs, private-field differences and lost opaque properties MUST remain uncertain.
+  Place an unreadable card before a later known remote identity: continue reading
+  and recover that bound identity. An unbound visible UID candidate with incomplete
+  coverage MUST NOT be adopted as unique or offered a blind creation. Exhaust
+  incomplete verification without a visible match: show **Create anyway** with a
+  duplicate warning; cancel has no effect, confirmation survives restart and server
+  delay, and a local edit invalidates it. Never create without that confirmation.
 - On a large first import, fail a card transiently late in acquisition, then retry.
   Healthy committed cards MUST remain checkpointed; failed/unread cards become
   durable obligations before cursor acknowledgement. Respect Retry-After across
@@ -622,6 +630,14 @@ untouched values independently on each peer:
   item offers one explicit cooled retry; repeated taps do not reset attempts,
   identity, ambiguity or deadlines. A separately blocked item MUST NOT suppress
   healthy eligible work in later bounded batches or transient framework scheduling.
+  Advance the controlled clock across 24 hours and restart: one automatic probe
+  may run, not another immediate attempt; the next day's probe keeps the original
+  history and ambiguity. A longer server minimum wins. Authentication, validation,
+  crypto, real conflicts and incomplete creation verification stay excluded.
+  In a large import, simulate a sustained outage: at most the current hydration
+  window finishes after three consecutive transport failures; unread cards get
+  deadlines without spent attempts. A single timeout or malformed card still
+  allows healthy work. Include a 429 in the same window and retain its longer delay.
 - Edit one email to an invalid value while changing a phone/note. Verify the
   other fields on Proton, preserve the previous accepted email and every group,
   and retain the invalid input and partial state locally after restart/no-change.
@@ -635,6 +651,12 @@ untouched values independently on each peer:
   its older acknowledgement with new email identities. Only proven identities
   transfer; the newer content remains pending. A remote whole-contact deletion
   MUST retain an accessible draft and require an explicit recovery choice.
+  Put a newly omitted invalid email in a group alongside valid members, remove
+  one old valid member, restart and retry. Valid membership changes reach Proton;
+  the invalid occurrence and group intent remain durable without a false conflict
+  or full acknowledgement. Correction resumes the remaining membership. Repeat
+  with identical emails, different per-occurrence groups and a lost contact CREATE
+  acknowledgement; compare the verified submitted projection, not the invalid input.
 - Create organization-, nickname-, phonetic-, phone- and email-only contacts.
   Verify the generated display name without fabricated structured parts; change
   its source after a Proton round trip and restart, then set an explicit name.

@@ -46,6 +46,7 @@ data class SyncBlockedItem(
     val isDeleted: Boolean,
     val problem: SyncProblem,
     val retry: SyncMutationRetry? = null,
+    val createAnywayRevision: Long? = null,
 ) {
     override fun toString() = "SyncBlockedItem(REDACTED, type=$type, isDeleted=$isDeleted, problem=$problem)"
 }
@@ -100,6 +101,7 @@ enum class RepairStartResult { CONFIRMATION_REQUIRED, STARTED, RESUMED }
 
 /** Presentation-neutral recovery port implemented by the synchronization data adapter. */
 interface SyncRecoveryDataSource {
+    suspend fun confirmAmbiguousContactCreate(accountId: String, id: String, expectedRevision: Long): Boolean = false
     suspend fun requestMutationRetry(accountId: String, type: SyncBlockedItemType, id: String, expectedRevision: Long): Boolean = false
     suspend fun ignoreImportProblem(accountId: String, remoteId: String, generation: String): Boolean = false
     suspend fun resumeImportProblem(accountId: String, remoteId: String, generation: String): Boolean = false

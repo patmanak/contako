@@ -535,4 +535,6 @@
     <string name="sync_import_waiting">Niektóre kontakty Proton czekają na ponowną próbę.</string>
     <string name="sync_email_partial_title">Częściowo zsynchronizowano</string>
     <string name="sync_email_partial_body">Adresy e-mail wymagają sprawdzenia.</string>
+    <string name="sync_create_anyway">Utwórz mimo to</string>
+    <string name="sync_create_anyway_warning">Nie udało się potwierdzić poprzedniego utworzenia. Ponowne utworzenie może zduplikować ten kontakt w Proton.</string>
 </resources>

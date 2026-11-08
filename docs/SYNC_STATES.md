@@ -127,14 +127,32 @@ unique verified match with complete equivalent submitted content MAY converge
 without another POST or a conflict choice. Different content retains the existing
 choice; multiple matches or unreadable dependencies MUST NOT authorize another
 create. Positive identity proofs may cover a bounded set of pending intentions;
-absence MUST NOT clear ambiguity on another still-pending intention. This
+absence MAY clear ambiguity on a bounded set of other pending intentions only
+when each complete canonical/payload/outbox snapshot was captured before the scan
+and is revalidated unchanged in the same transaction. New or changed intentions
+MUST NOT inherit that proof. This
 exceptional reconciliation can read full cards, with one complete scan per pass;
 ordinary no-change synchronization MUST NOT do so. Earlier blocked unbound
 creations MAY reopen this verification once per fresh recovery generation.
 
+An unreadable card MUST NOT stop inspection of later cards, but MUST prevent
+absence and unbound UID-uniqueness proofs. A previously bound exact remote ID MAY
+still be verified. A visible unbound candidate with incomplete coverage MUST
+remain unresolved rather than be adopted or created again. After exhausted
+incomplete verification with no visible candidate, the user MAY explicitly
+confirm **Create anyway**, acknowledging duplicate risk. This permission MUST be
+revision-bound, invalidated by an edit and consumed only by the serialized
+preparation of that intent. It is not an automatic absence proof; retry/server
+deadlines and all ownership guards still apply.
+
 Per-card import failures MUST become durable obligations before the inventory/event
 checkpoint advances. Transient obligations retain deadlines and Retry-After and
 MUST NOT refetch before eligibility; already healthy cards remain checkpointed.
+Three consecutive transport/service failures MUST stop launching new hydration
+windows for that pass. Already started reads MAY finish; unread cards MUST receive
+durable deadlines without consuming attempts. A single card failure or malformed
+card MUST NOT trigger this circuit. A rate limit stops new windows immediately
+and retains the longest observed server minimum.
 An account-scoped server cooldown also survives event, inventory and deletion
 read failures. Manual requests and restart MUST NOT bypass that cooldown or
 consume untouched mutation attempts. Local/native work may still advance.
@@ -147,6 +165,14 @@ once, including a pending deletion. It MUST retain idempotency, attempts, remote
 baseline, ambiguous-delivery evidence and server delay. Duplicate requests are
 idempotent and new requests have a durable cooling period. The severity of one
 blocked item MUST NOT suppress independent eligible work or transient scheduling.
+Exhausted network, timeout, rate-limit, service and unknown transient failures
+MUST remain visible while permitting at most one automatic probe approximately
+daily through ordinary synchronization. The daily and manual paths MUST share
+durable cooldown evidence and preserve the attempt budget and ambiguity. Server
+minimum delays MAY postpone a probe further. Incomplete creation verification,
+validation, cryptographic refusal, authentication and real conflicts MUST NOT
+receive daily write permission. Dependency deferral MUST preserve the last real
+failure category rather than manufacture a cancellation.
 
 Rejected cryptographic imports remain outside verified canonical data and Android.
 Users MAY request a guarded recheck or ignore that exact obligation generation

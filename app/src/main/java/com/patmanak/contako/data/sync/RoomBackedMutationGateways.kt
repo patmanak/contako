@@ -1,5 +1,6 @@
 package com.patmanak.contako.data.sync
 
+import androidx.room.withTransaction
 import com.patmanak.contako.data.gateway.AccountScope
 import com.patmanak.contako.data.gateway.ContactGroupMutation
 import com.patmanak.contako.data.gateway.ContactMutation
@@ -179,15 +180,16 @@ internal class RoomBackedMutationPreparationGateway(
             return GatewayOutcome.Success(MutationPreparation.WaitingForDependencies)
         }
         var missingIdentityReason = MutationPreparationActionRequiredReason.GROUP_MEMBER_REMOTE_EMAIL_IDENTITY_MISSING
-        val desired = desiredEmailIds(group.accountId, group.id) { missingIdentityReason = it }
+        val projection = desiredEmailProjection(group.accountId, group.id) { missingIdentityReason = it }
             ?: return GatewayOutcome.Success(
                 MutationPreparation.ActionRequired(
                     missingIdentityReason,
                 ),
             )
         // The upload step reads current membership; its reconciled gateway also verifies
-        // immediately before/after writing. Only ambiguous delivery needs this extra read.
-        if (!command.requiresReconciliation) {
+        // immediately before/after writing. A partial group also needs this read to
+        // wait quietly once its accepted members are delivered.
+        if (!command.requiresReconciliation && !projection.hasDeferredMembers) {
             return GatewayOutcome.Success(MutationPreparation.UploadAllowed)
         }
         return when (val current = membershipReader.members(expectedAccount, groupId)) {
@@ -195,7 +197,10 @@ internal class RoomBackedMutationPreparationGateway(
             is GatewayOutcome.Success -> {
                 if (current.value.account != expectedAccount || current.value.groupId != groupId) {
                     GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE)
-                } else if (current.value.emailIds.toSet() == desired.toSet()) {
+                } else if (current.value.emailIds.toSet() == projection.emailIds.toSet()) {
+                    // Accepted members are delivered, but the local membership of an omitted
+                    // invalid occurrence is still durable. It is not a group conflict or ACK.
+                    if (projection.hasDeferredMembers) return GatewayOutcome.Success(MutationPreparation.WaitingForDependencies)
                     GatewayOutcome.Success(
                         MutationPreparation.AlreadyApplied(
                             RemoteMutationAcknowledgement(group.remoteLabelId, group.remoteVersion),
@@ -212,26 +217,52 @@ internal class RoomBackedMutationPreparationGateway(
         accountId: String,
         groupId: String,
         onMissing: (MutationPreparationActionRequiredReason) -> Unit = {},
-    ): List<RemoteEmailId>? {
-        val group = database.contactGroupDao().get(accountId, groupId) ?: return null
-        return group.memberships.map { membership ->
+    ): List<RemoteEmailId>? = desiredEmailProjection(accountId, groupId, onMissing)?.emailIds
+
+    internal data class GroupEmailProjection(val emailIds: List<RemoteEmailId>, val hasDeferredMembers: Boolean) {
+        override fun toString() = "GroupEmailProjection(REDACTED)"
+    }
+
+    /** Omit only occurrences whose current durable overlay authorizes omission from the contact PUT. */
+    internal suspend fun desiredEmailProjection(
+        accountId: String,
+        groupId: String,
+        onMissing: (MutationPreparationActionRequiredReason) -> Unit = {},
+    ): GroupEmailProjection? = database.withTransaction {
+        val group = database.contactGroupDao().get(accountId, groupId) ?: return@withTransaction null
+        val identities = mutableListOf<RemoteEmailId>()
+        var deferred = false
+        for (membership in group.memberships) {
             val value = database.contactDao().getValue(accountId, membership.contactId, membership.emailValueId)
                 ?: run {
                     onMissing(MutationPreparationActionRequiredReason.GROUP_MEMBER_LOCAL_EMAIL_MISSING)
-                    return null
+                    return@withTransaction null
                 }
             val remoteId = StringMapCodec.decode(value.metadataEncoding)["protonEmailId"]
-                ?.takeIf(String::isNotBlank) ?: run {
-                    val repeated = database.contactDao().get(accountId, membership.contactId)?.values.orEmpty().any {
-                        it.kind == "EMAIL" && it.id != value.id &&
-                            it.value.trim().equals(value.value.trim(), ignoreCase = true)
-                    }
-                    onMissing(if (repeated) MutationPreparationActionRequiredReason.GROUP_MEMBER_DUPLICATE_EMAIL_IDENTITY_MISSING
-                        else MutationPreparationActionRequiredReason.GROUP_MEMBER_REMOTE_EMAIL_IDENTITY_MISSING)
-                    return null
+                ?.takeIf(String::isNotBlank)
+            if (remoteId == null) {
+                val contact = database.contactDao().get(accountId, membership.contactId)?.toDomain()
+                val overlay = database.contactEmailUploadOverlayDao().getForContact(accountId, membership.contactId)
+                    .singleOrNull { it.valueId == membership.emailValueId }
+                if (contact != null && value.kind == "EMAIL" && overlay != null &&
+                    overlay.canonicalRevision == contact.revision && overlay.sourceEmailId == null &&
+                    overlay.acceptedValue == null && !overlay.requiresRemoteIdentity &&
+                    com.patmanak.contako.data.local.RoomContactUploadOverlays(database).wireProjection(contact)
+                        ?.values?.none { it.id == value.id } == true) {
+                    deferred = true
+                    continue
                 }
-            RemoteEmailId(remoteId)
-        }.distinct()
+                val repeated = database.contactDao().get(accountId, membership.contactId)?.values.orEmpty().any {
+                    it.kind == "EMAIL" && it.id != value.id &&
+                        it.value.trim().equals(value.value.trim(), ignoreCase = true)
+                }
+                onMissing(if (repeated) MutationPreparationActionRequiredReason.GROUP_MEMBER_DUPLICATE_EMAIL_IDENTITY_MISSING
+                    else MutationPreparationActionRequiredReason.GROUP_MEMBER_REMOTE_EMAIL_IDENTITY_MISSING)
+                return@withTransaction null
+            }
+            identities += RemoteEmailId(remoteId)
+        }
+        GroupEmailProjection(identities.distinct(), deferred)
     }
 }
 
@@ -343,15 +374,22 @@ internal class RoomBackedMutationUploadGateway(
             ?: return GatewayOutcome.Failure(GatewayFailureCategory.VALIDATION_REJECTED)
         val remoteGroupId = group.remoteLabelId?.let(::RemoteGroupId)
             ?: return GatewayOutcome.Failure(GatewayFailureCategory.VALIDATION_REJECTED)
-        val desired = preparation.desiredEmailIds(accountId, groupId)
+        val projection = preparation.desiredEmailProjection(accountId, groupId)
             ?: return GatewayOutcome.Failure(GatewayFailureCategory.VALIDATION_REJECTED)
+        val desired = projection.emailIds
         val current = when (val result = membershipReader.members(expectedAccount, remoteGroupId)) {
             is GatewayOutcome.Failure -> return result
-            is GatewayOutcome.Success -> result.value.emailIds
+            is GatewayOutcome.Success -> {
+                if (result.value.account != expectedAccount || result.value.groupId != remoteGroupId)
+                    return GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE)
+                result.value.emailIds
+            }
         }
         val missing = desired.filterNot(current.toSet()::contains)
         val extra = current.filterNot(desired.toSet()::contains)
         if (missing.isEmpty() && extra.isEmpty()) {
+            if (projection.hasDeferredMembers) return GatewayOutcome.Success(RemoteMutationAcknowledgement(
+                group.remoteLabelId, group.remoteVersion, fullyConverged = false, nextOperation = RemoteMutationOperation.ASSIGNMENTS))
             if (!com.patmanak.contako.data.local.RoomRemoteGroupAssignmentDependencies(database).acknowledgeVerifiedMembership(
                     expectedAccount, group.id, group.revision, remoteGroupId, current.toSet()))
                 return GatewayOutcome.Success(RemoteMutationAcknowledgement(group.remoteLabelId, group.remoteVersion,
@@ -378,7 +416,7 @@ internal class RoomBackedMutationUploadGateway(
                     }
                     if (confirmed.account != expectedAccount || confirmed.groupId != remoteGroupId || confirmed.emailIds.toSet() != desired.toSet())
                         return GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT)
-                    if (!com.patmanak.contako.data.local.RoomRemoteGroupAssignmentDependencies(database).acknowledgeVerifiedMembership(
+                    if (!projection.hasDeferredMembers && !com.patmanak.contako.data.local.RoomRemoteGroupAssignmentDependencies(database).acknowledgeVerifiedMembership(
                             expectedAccount, group.id, group.revision, remoteGroupId, confirmed.emailIds.toSet()))
                         return GatewayOutcome.Success(RemoteMutationAcknowledgement(group.remoteLabelId, group.remoteVersion,
                             fullyConverged = false, nextOperation = RemoteMutationOperation.ASSIGNMENTS))
@@ -387,8 +425,8 @@ internal class RoomBackedMutationUploadGateway(
                     RemoteMutationAcknowledgement(
                         group.remoteLabelId,
                         group.remoteVersion,
-                        fullyConverged = !remaining,
-                        nextOperation = if (remaining) RemoteMutationOperation.ASSIGNMENTS else null,
+                        fullyConverged = !remaining && !projection.hasDeferredMembers,
+                        nextOperation = if (remaining || projection.hasDeferredMembers) RemoteMutationOperation.ASSIGNMENTS else null,
                     ),
                 )
             }

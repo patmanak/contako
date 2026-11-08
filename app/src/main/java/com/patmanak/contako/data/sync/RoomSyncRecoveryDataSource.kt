@@ -42,6 +42,13 @@ internal class RoomSyncRecoveryDataSource(
     private val contactDetails = com.patmanak.contako.data.local.RoomContactSyncDetailStore(database)
     private val deletionRecovery = com.patmanak.contako.data.local.RoomDeletionRecoveryStore(database)
     private val retryRequests = com.patmanak.contako.data.local.RoomMutationRetryRequestStore(database)
+    private val createChoices = com.patmanak.contako.data.local.RoomAmbiguousContactCreateChoiceStore(database)
+
+    override suspend fun confirmAmbiguousContactCreate(accountId: String, id: String, expectedRevision: Long): Boolean {
+        val confirmed = createChoices.confirm(boundAccount(accountId), id, expectedRevision)
+        if (confirmed) runner.request(SyncTrigger.MANUAL, SyncScope.INCREMENTAL)
+        return confirmed
+    }
 
     override suspend fun requestMutationRetry(accountId: String, type: SyncBlockedItemType, id: String, expectedRevision: Long): Boolean {
         val account = boundAccount(accountId)
@@ -204,7 +211,9 @@ internal class RoomSyncRecoveryDataSource(
                     identities.toSet().size + snapshot.importProblems.count { !it.isTransient && !it.ignored }))
         }.combine(database.mutationRetryRequestDao().observe(boundAccount(accountId).value)) { snapshot, _ ->
             snapshot.copy(blockedItems = snapshot.blockedItems.map { item ->
-                item.copy(retry = retryRequests.availability(boundAccount(accountId), item.type.name, item.id))
+                item.copy(retry = retryRequests.availability(boundAccount(accountId), item.type.name, item.id),
+                    createAnywayRevision = if (item.type == SyncBlockedItemType.CONTACT)
+                        createChoices.offerRevision(boundAccount(accountId), item.id) else null)
             })
         }.combine(database.contactInventoryCheckpointDao().observeInitialImportProgress(boundAccount(accountId).value)) { snapshot, counts ->
             val progress = InitialImportSnapshot(counts.inventoryEstablished, counts.localContactCount,

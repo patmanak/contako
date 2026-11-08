@@ -47,6 +47,17 @@ internal class RoomAmbiguousContactCreateRecovery(
             listOf(command to current) + others
         }
         if (targets.isEmpty()) return stale()
+        // An explicit, revision-bound risk acknowledgement is not an absence proof.
+        // A local edit replaces the intent and drops this marker while retaining ambiguity.
+        if (targets.first().second.intent.errorCategory == RoomAmbiguousContactCreateChoiceStore.CONFIRMED) {
+            return database.withTransaction {
+                val before = targets.first().second
+                if (snapshot(command) != before || !RoomAmbiguousContactCreateChoiceStore(database)
+                        .confirmedStillCurrent(account, command.aggregateId, command.revision)) return@withTransaction stale()
+                database.outboxDao().upsert(before.intent.copy(requiresReconciliation = false, errorCategory = null))
+                GatewayOutcome.Success(MutationPreparation.UploadAllowed)
+            }
+        }
         if (!scanPermit()) return GatewayOutcome.Success(MutationPreparation.WaitingForDependencies)
         val uids = targets.map { (_, target) -> target.contact.contact.remoteVCardUid ?: target.contact.contact.id }.toSet()
         val context = currentCoroutineContext()
@@ -59,18 +70,31 @@ internal class RoomAmbiguousContactCreateRecovery(
         // Retain at most one card per bounded creation target. Another matching
         // identity establishes ambiguity without retaining its payload.
         val matches = mutableMapOf<String, VerifiedContactCard>()
+        val expectedRemoteIds = targets.mapNotNull { (_, target) -> target.intent.remoteIdentity }.toSet()
+        val boundMatches = mutableMapOf<String, VerifiedContactCard>()
         val duplicates = mutableSetOf<String>()
+        var incomplete: GatewayOutcome.Failure? = null
         for (metadata in first.contacts) {
             context.ensureActive()
             val card = when (val read = cards.fetch(account, metadata.id)) {
-                is GatewayOutcome.Failure -> return recoveryReadFailure(read)
+                is GatewayOutcome.Failure -> {
+                    val failure = recoveryReadFailure(read)
+                    // A malformed/unreadable card cannot prove absence, but must not hide a
+                    // later authenticated positive identity proof. Account/network failures
+                    // still stop this exceptional scan; they do not start one timeout per card.
+                    if (failure.category != GatewayFailureCategory.RECONCILIATION_INCOMPLETE) return failure
+                    if (incomplete == null) incomplete = failure
+                    continue
+                }
                 is GatewayOutcome.Success -> read.value
             }
             if (card.id != metadata.id || card.version == null || card.contact.accountId != account.value) {
-                return recoveryReadFailure(GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE,
+                if (incomplete == null) incomplete = recoveryReadFailure(GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE,
                     contactHydrationCategory = com.patmanak.contako.data.gateway.GatewayContactHydrationCategory.UID_ID_CONSISTENCY))
+                continue
             }
             val uid = card.contact.remoteVCardUid
+            if (card.id.value in expectedRemoteIds) boundMatches[card.id.value] = card
             if (uid != null && uid in uids) {
                 if (matches.putIfAbsent(uid, card) != null) duplicates += uid
             }
@@ -84,24 +108,35 @@ internal class RoomAmbiguousContactCreateRecovery(
         return database.withTransaction {
             context.ensureActive()
             var result: GatewayOutcome<MutationPreparation> = stale()
-            // Positive identity proofs can cover this bounded group. Absence applies only
-            // to the currently claimed intent, never to another durable PENDING mutation.
+            // Both kinds of proof are tied to a captured intent, canonical fields and payload.
+            // Apply them atomically after revalidation, never as a reusable absence cache for
+            // another revision/intent. Deadlines and retry history are left unchanged.
             for ((targetCommand, before) in targets) {
                 val isCurrent = targetCommand.aggregateId == command.aggregateId
                 val current = snapshot(targetCommand, allowPending = !isCurrent)
                 if (current != before) continue
                 val uid = before.contact.contact.remoteVCardUid ?: before.contact.contact.id
                 val owners = database.contactDao().getEntitiesByStableCreateUid(account.value, uid)
-                val safe = uid !in duplicates && owners.size == 1 && owners.single().id == targetCommand.aggregateId
-                val matched = matches[uid]
+                val knownIdentity = before.intent.remoteIdentity
+                val safe = (knownIdentity != null || uid !in duplicates) &&
+                    owners.size == 1 && owners.single().id == targetCommand.aggregateId
+                val matched = if (knownIdentity != null) boundMatches[knownIdentity] else matches[uid]
                 val outcome = if (!safe || (before.intent.remoteIdentity != null &&
                         (matched == null || matched.id.value != before.intent.remoteIdentity))) unidentified()
                 else if (matched == null) {
-                    if (!isCurrent) continue
+                    if (incomplete != null) {
+                        if (isCurrent) result = checkNotNull(incomplete)
+                        continue
+                    }
                     database.outboxDao().upsert(before.intent.copy(requiresReconciliation = false))
                     GatewayOutcome.Success(if (targetCommand.operation == RemoteMutationOperation.DELETE)
                         MutationPreparation.AlreadyApplied(RemoteMutationAcknowledgement(null, null))
                     else MutationPreparation.UploadAllowed)
+                } else if (incomplete != null && knownIdentity == null) {
+                    // An unreadable card could hide a duplicate UID. A visible candidate
+                    // is enough to forbid a blind create, not enough to choose its identity.
+                    GatewayOutcome.Success(MutationPreparation.ActionRequired(
+                        MutationPreparationActionRequiredReason.RECONCILIATION_CREATION_MATCH_UNVERIFIED))
                 } else if (database.contactDao().getEntitiesByRemoteContactId(account.value, matched.id.value)
                         .any { it.id != targetCommand.aggregateId }) unidentified()
                 else {

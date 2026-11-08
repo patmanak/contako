@@ -12,6 +12,18 @@ import org.junit.Test
 class SyncIssueItemsTest {
     private val contact = CanonicalContact("synthetic-owner", "one", displayName = "Chloë Groß")
 
+    @Test fun ambiguousCreateChoiceIsScopedToTheBlockedContactRevision() {
+        val blocked = SyncBlockedItem(contact.id, SyncBlockedItemType.CONTACT, contact.resolvedDisplayName,
+            false, SyncProblem.INTERNAL_FAILURE, createAnywayRevision = 17L)
+        val state = ContactsUiState(actionContacts = listOf(contact), syncDashboard = SyncDashboardSnapshot(
+            SyncDashboardState.BLOCKED, blockedItems = listOf(blocked)))
+        val issue = currentSyncIssues(state, emptyList()).single()
+        assertEquals(contact.id, issue.targetId)
+        assertEquals(17L, issue.createAnywayRevision)
+        val changed = state.copy(syncDashboard = state.syncDashboard.copy(blockedItems = listOf(blocked.copy(createAnywayRevision = null))))
+        assertNull(currentSyncIssues(changed, emptyList()).single().createAnywayRevision)
+    }
+
     @Test fun blankIssueNamesUseTheCanonicalGeneratedContactNameForBlockedAndAndroidIssues() {
         val unnamed = contact.copy(displayName = "", values = listOf(
             ContactValue("org", ContactValueKind.ORGANIZATION, "Atelier Café", order = 0),

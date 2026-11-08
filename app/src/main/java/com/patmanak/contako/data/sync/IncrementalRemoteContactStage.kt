@@ -251,7 +251,8 @@ internal class IncrementalRemoteContactStage(
         val hydrationBatches = readable.chunked(hydrationBatchSize)
         val durableLabels = mutableSetOf<RemoteContactId>()
         val durableDeletions = mutableSetOf<RemoteContactId>()
-        var sharedRateLimit: GatewayOutcome.Failure? = null
+        var sharedReadFailure: GatewayOutcome.Failure? = null
+        var consecutiveServiceFailures = 0
         val batchCount = maxOf(1, hydrationBatches.size)
         repeat(batchCount) { batchIndex ->
             if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
@@ -259,14 +260,14 @@ internal class IncrementalRemoteContactStage(
             val hydrationBatch = hydrationBatches.getOrNull(batchIndex).orEmpty()
             hydrationBatch.chunked(hydrationReadConcurrency).forEach { window ->
                 if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
-                val rateLimitAtWindowStart = sharedRateLimit
+                val readFailureAtWindowStart = sharedReadFailure
                 val hydratedWindow = coroutineScope {
                     window.map { contactId ->
                         async {
                             contactId to if (isCancellationRequested()) {
                                 GatewayOutcome.Failure(GatewayFailureCategory.CANCELLED)
-                            } else if (rateLimitAtWindowStart != null) {
-                                rateLimitAtWindowStart
+                            } else if (readFailureAtWindowStart != null) {
+                                readFailureAtWindowStart
                             } else {
                                 observe(RemoteImportPhase.CARD_READ_START)
                                 cardGateway.fetch(account, contactId).also { observe(RemoteImportPhase.CARD_READ_DONE) }
@@ -283,15 +284,30 @@ internal class IncrementalRemoteContactStage(
                                 return mapFailure(RemoteContactActionRequiredBoundary.HYDRATION, hydrated)
                             }
                             // The obligation MUST precede cursor acknowledgement. Never import an unverified card.
-                            if (rateLimitAtWindowStart != null) {
+                            if (readFailureAtWindowStart != null) {
                                 obligations.postpone(account, baselines.getValue(contactId), hydrated)
                             } else obligations.defer(account, baselines.getValue(contactId), hydrated)
                             deferredHydrations += contactId
                             if (hydrated.category.isTransientHydrationFailure) retryHydrations += contactId
                             mapFailure(RemoteContactActionRequiredBoundary.HYDRATION, hydrated)
-                            if (hydrated.category == GatewayFailureCategory.RATE_LIMITED) sharedRateLimit = hydrated
+                            if (readFailureAtWindowStart == null) {
+                                consecutiveServiceFailures = if (hydrated.category in SHARED_SERVICE_FAILURES)
+                                    consecutiveServiceFailures + 1 else 0
+                                // A single timeout can be card-specific. Repeated transport/service
+                                // failures indicate an outage: finish only this already-started window
+                                // and durably postpone the unread cards without spending their attempts.
+                                if (hydrated.category == GatewayFailureCategory.RATE_LIMITED ||
+                                    consecutiveServiceFailures >= SERVICE_FAILURE_CIRCUIT_THRESHOLD) {
+                                    val previous = sharedReadFailure
+                                    val next = if (hydrated.category == GatewayFailureCategory.RATE_LIMITED)
+                                        hydrated else previous ?: hydrated
+                                    sharedReadFailure = next.copy(retryAfterMillis = maxOf(
+                                        previous?.retryAfterMillis ?: 0L, hydrated.retryAfterMillis ?: 0L))
+                                }
+                            }
                         }
                         is GatewayOutcome.Success -> {
+                            consecutiveServiceFailures = 0
                             if (hydrated.value.id != contactId) {
                                 if (obligations == null) return actionRequired(RemoteContactActionRequiredBoundary.HYDRATED_IDENTITY)
                                 obligations.defer(account, baselines.getValue(contactId),
@@ -406,6 +422,10 @@ internal class IncrementalRemoteContactStage(
     private companion object {
         const val HYDRATION_BATCH_SIZE = 25
         const val HYDRATION_READ_CONCURRENCY = 10
+        const val SERVICE_FAILURE_CIRCUIT_THRESHOLD = 3
+        val SHARED_SERVICE_FAILURES = setOf(GatewayFailureCategory.NETWORK_UNAVAILABLE,
+            GatewayFailureCategory.TIMEOUT, GatewayFailureCategory.REMOTE_SERVICE_FAILURE,
+            GatewayFailureCategory.UNKNOWN)
         val ISOLATABLE_CARD_FAILURES = setOf(GatewayFailureCategory.MALFORMED_RESPONSE,
             GatewayFailureCategory.VALIDATION_REJECTED, GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED,
             GatewayFailureCategory.NOT_FOUND, GatewayFailureCategory.CONFLICT)

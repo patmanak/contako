@@ -29,6 +29,104 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IncrementalRemoteContactStageTest {
+    @Test fun sustainedOutageStopsNewWindowsAndResumesOnlyDurablyDeferredCardsAfterDeadline() = runTest {
+        for (category in listOf(GatewayFailureCategory.NETWORK_UNAVAILABLE, GatewayFailureCategory.TIMEOUT,
+            GatewayFailureCategory.REMOTE_SERVICE_FAILURE, GatewayFailureCategory.UNKNOWN)) {
+            val inventory = (1..300).map { metadata(it.toString().padStart(4, '0'), 1) }
+            val checkpoint = FakeCheckpointStore()
+            var now = 100_000L
+            val deferred = OutageObligations { now }
+            val reads = mutableListOf<RemoteContactId>()
+            val persisted = mutableSetOf<RemoteContactId>()
+            var outage = true
+            fun candidate() = IncrementalRemoteContactStage(
+                pagedGateway { pages(inventory, 100) },
+                ProtonVerifiedContactCardGateway { _, id ->
+                    reads += id
+                    if (outage && id.value.toInt() > 25) GatewayOutcome.Failure(category, retryAfterMillis = 30_000)
+                    else success(card(id, 1))
+                }, PersistentContactInventoryPlanner(checkpoint),
+                RemoteCanonicalReconciliationStore { _, _, cards, labels, deletions ->
+                    persisted += cards.map { it.id }
+                    CanonicalReconciliationReceipt(cards.map { it.id }.toSet(), labels, deletions)
+                }, obligations = deferred,
+            )
+
+            assertEquals(category.name, RemoteContactStageResult.Partial(275, 275), candidate().run(ACCOUNT))
+            assertEquals(35, reads.size) // 25 committed, then only the already-started ten-request window.
+            assertEquals(inventory.take(25).map { it.id }.toSet(), persisted)
+            assertEquals(inventory.drop(25).map { it.id }.toSet(), deferred.rows.keys)
+            assertEquals(10, deferred.rows.values.sumOf { it.attempts })
+            assertTrue(deferred.rows.values.all { it.deadline == 130_000L })
+            assertEquals(300, checkpoint.current!!.checkpoint.entries.size)
+            assertEquals(inventory.map { it.id }.toSet(), persisted + deferred.rows.keys)
+
+            // A new stage models restart: unread coverage and deadlines are durable inputs.
+            reads.clear()
+            now = 129_999L
+            outage = false
+            assertEquals(RemoteContactStageResult.Partial(275, 275), candidate().run(ACCOUNT))
+            assertTrue(reads.isEmpty())
+            now++
+            assertTrue(candidate().run(ACCOUNT) is RemoteContactStageResult.Success)
+            assertEquals(inventory.drop(25).map { it.id }, reads)
+            assertTrue(deferred.rows.isEmpty())
+            assertEquals(inventory.map { it.id }.toSet(), persisted)
+            reads.clear()
+            assertTrue(candidate().run(ACCOUNT) is RemoteContactStageResult.Success)
+            assertTrue(reads.isEmpty())
+        }
+    }
+
+    @Test fun serialOutageIsBoundedButIsolatedTimeoutsAndMalformedCardsDoNotStopHealthyReads() = runTest {
+        val inventory = (1..30).map { metadata(it.toString().padStart(4, '0'), 1) }
+        suspend fun run(failure: (RemoteContactId) -> GatewayFailureCategory?): Pair<Int, Set<RemoteContactId>> {
+            var reads = 0
+            val persisted = mutableSetOf<RemoteContactId>()
+            val result = IncrementalRemoteContactStage(pagedGateway { pages(inventory, 30) },
+                ProtonVerifiedContactCardGateway { _, id ->
+                    reads++
+                    failure(id)?.let { GatewayOutcome.Failure(it) } ?: success(card(id, 1))
+                }, PersistentContactInventoryPlanner(FakeCheckpointStore()),
+                RemoteCanonicalReconciliationStore { _, _, cards, labels, deletions ->
+                    persisted += cards.map { it.id }
+                    CanonicalReconciliationReceipt(cards.map { it.id }.toSet(), labels, deletions)
+                }, hydrationReadConcurrency = 1, obligations = OutageObligations { 0L }).run(ACCOUNT)
+            assertTrue(result is RemoteContactStageResult.Partial)
+            return reads to persisted
+        }
+        assertEquals(3 to emptySet<RemoteContactId>(), run { GatewayFailureCategory.TIMEOUT })
+        val (reads, persisted) = run { id -> when (id.value.toInt() % 4) {
+            1, 2 -> GatewayFailureCategory.TIMEOUT
+            3 -> GatewayFailureCategory.MALFORMED_RESPONSE
+            else -> null
+        } }
+        assertEquals(30, reads)
+        assertEquals(inventory.filter { it.id.value.toInt() % 4 == 0 }.map { it.id }.toSet(), persisted)
+    }
+
+    @Test fun rateLimitInAnAlreadyStartedOutageWindowKeepsTheLongestServerDelayForUnreadCards() = runTest {
+        val inventory = (1..30).map { metadata(it.toString().padStart(4, '0'), 1) }
+        var reads = 0
+        val deferred = OutageObligations { 100_000L }
+        val result = IncrementalRemoteContactStage(pagedGateway { pages(inventory, 30) },
+            ProtonVerifiedContactCardGateway { _, id ->
+                reads++
+                GatewayOutcome.Failure(if (id.value == "0001") GatewayFailureCategory.RATE_LIMITED
+                    else GatewayFailureCategory.TIMEOUT, retryAfterMillis = if (id.value == "0001") 90_000L else 5_000L)
+            }, PersistentContactInventoryPlanner(FakeCheckpointStore()),
+            RemoteCanonicalReconciliationStore { _, _, cards, labels, deletions ->
+                CanonicalReconciliationReceipt(cards.map { it.id }.toSet(), labels, deletions)
+            }, obligations = deferred).run(ACCOUNT)
+        assertEquals(RemoteContactStageResult.Partial(30, 30), result)
+        assertEquals(10, reads)
+        inventory.drop(10).forEach { metadata ->
+            assertEquals(GatewayFailureCategory.RATE_LIMITED, deferred.rows.getValue(metadata.id).failure.category)
+            assertEquals(190_000L, deferred.rows.getValue(metadata.id).deadline)
+            assertEquals(0, deferred.rows.getValue(metadata.id).attempts)
+        }
+    }
+
     @Test fun localInvariantFailuresReportOnlyClosedCodesAndNeverAdvanceCheckpoint() = runTest {
         LocalReconciliationInvariant.entries.forEach { invariant ->
             val checkpoint = FakeCheckpointStore()
@@ -520,6 +618,30 @@ class IncrementalRemoteContactStageTest {
     private companion object {
         val ACCOUNT = AccountScope("account")
         val AUTHORITY = ContactInventorySnapshotAuthority.AUTHORITATIVE_REMOTE_REVISION
+    }
+
+    private class OutageObligations(private val clock: () -> Long) : RemoteHydrationObligationStore {
+        data class Row(val failure: GatewayOutcome.Failure, val deadline: Long, val attempts: Int)
+        val rows = mutableMapOf<RemoteContactId, Row>()
+        override suspend fun pending(account: AccountScope) = rows.keys.toSet()
+        override suspend fun defer(account: AccountScope, baseline: com.patmanak.contako.data.proton.ContactInventoryBaseline,
+            failure: GatewayOutcome.Failure) = save(baseline, failure, attempted = true)
+        override suspend fun postpone(account: AccountScope, baseline: com.patmanak.contako.data.proton.ContactInventoryBaseline,
+            failure: GatewayOutcome.Failure) = save(baseline, failure, attempted = false)
+        private fun save(baseline: com.patmanak.contako.data.proton.ContactInventoryBaseline,
+            failure: GatewayOutcome.Failure, attempted: Boolean) {
+            val previous = rows[baseline.id]
+            rows[baseline.id] = Row(failure, maxOf(previous?.deadline ?: 0L,
+                clock() + maxOf(5_000L, failure.retryAfterMillis ?: 0L)),
+                (previous?.attempts ?: 0) + if (attempted) 1 else 0)
+        }
+        override suspend fun readDisposition(account: AccountScope,
+            baseline: com.patmanak.contako.data.proton.ContactInventoryBaseline,
+            sourceChanged: Boolean): RemoteHydrationReadDisposition = when {
+            rows[baseline.id]?.deadline?.let { it > clock() } == true -> RemoteHydrationReadDisposition.RETRY_WAITING
+            else -> RemoteHydrationReadDisposition.READ
+        }
+        override suspend fun resolved(account: AccountScope, ids: Set<RemoteContactId>) { ids.forEach(rows::remove) }
     }
 }
 
