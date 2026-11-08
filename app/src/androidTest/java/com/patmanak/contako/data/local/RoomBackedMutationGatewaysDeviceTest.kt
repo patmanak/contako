@@ -299,6 +299,9 @@ class RoomBackedMutationGatewaysDeviceTest {
         val add = orchestrator().drain(ACCOUNT.value, 1_000)
         assertEquals(1, add.progressPending)
         assertEquals(1, remote.assignmentWrites)
+        // An unmapped remote member keeps the dependency catalog incomplete. With no
+        // contact intent left, that conservative state must not forbid replacement.
+        assertEquals(false, database.remoteGroupAssignmentDependencyDao().baseline(ACCOUNT.value, "group")?.complete)
         assertEquals(
             setOf(RemoteEmailId("email-extra"), RemoteEmailId("email-desired")),
             remote.memberships,
@@ -345,12 +348,14 @@ class RoomBackedMutationGatewaysDeviceTest {
         val store = RoomMutationExecutionStore(database)
         val local = requireNotNull(database.contactDao().get(ACCOUNT.value, "contact")).toDomain()
         saveContact(local.copy(displayName = "Local choice"))
-        assertTrue(store.eligible(ACCOUNT.value, 1_000, 20).all { it.aggregateType == "CONTACT" })
-        // Bypass selection only to exercise the preparation guard on the exact current intent.
+        // A legacy baseline is eligible for the verified GET that qualifies its dependencies.
+        assertTrue(store.eligible(ACCOUNT.value, 1_000, 20).any { it.aggregateType == "GROUP" })
+        remote.memberships = linkedSetOf(RemoteEmailId("removed-email"))
         val groupCommand = pendingAssignmentCommand("group")
         val preparation = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote).prepare(groupCommand)
         assertEquals(com.patmanak.contako.data.sync.MutationPreparation.WaitingForDependencies,
             (preparation as GatewayOutcome.Success).value)
+        assertTrue(store.eligible(ACCOUNT.value, 1_000, 20).all { it.aggregateType == "CONTACT" })
         assertEquals(0, remote.assignmentWrites)
 
         // A previous build already attempted an assignment against the deleted service identity.
@@ -384,11 +389,14 @@ class RoomBackedMutationGatewaysDeviceTest {
         val store = RoomMutationExecutionStore(database)
         saveContact(requireNotNull(database.contactDao().get(ACCOUNT.value, "contact")).toDomain()
             .copy(displayName = "Local choice"))
-        assertTrue(store.eligible(ACCOUNT.value, 1_000, 20).all { it.aggregateType == "CONTACT" })
+        assertTrue(store.eligible(ACCOUNT.value, 1_000, 20).any { it.aggregateType == "GROUP" })
+        // The removed remote edge, not the empty desired set, proves the dependency.
+        remote.memberships = linkedSetOf(RemoteEmailId("removed-email"))
         val groupCommand = pendingAssignmentCommand("group")
         val preparation = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote)
         assertEquals(com.patmanak.contako.data.sync.MutationPreparation.WaitingForDependencies,
             (preparation.prepare(groupCommand) as GatewayOutcome.Success).value)
+        assertTrue(store.eligible(ACCOUNT.value, 1_000, 20).all { it.aggregateType == "CONTACT" })
         assertEquals(0, remote.assignmentWrites)
         val contactCommand = store.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "CONTACT" }
         assertTrue(store.claim(contactCommand, 1_000))
@@ -397,6 +405,35 @@ class RoomBackedMutationGatewaysDeviceTest {
         assertEquals(com.patmanak.contako.data.sync.MutationPreparation.UploadAllowed,
             (preparation.prepare(groupCommand) as GatewayOutcome.Success).value)
         assertEquals(emptyList<RemoteEmailId>(), preparation.desiredEmailIds(ACCOUNT.value, "group"))
+    }
+
+    @Test
+    fun unmappedRemoteGroupMemberWaitsForAllContactWritesThenAllowsVerifiedReplacement() = runBlocking {
+        saveContact(CanonicalContact(ACCOUNT.value, "unrelated", displayName = "Pending contact"))
+        saveGroup(ContactGroup(ACCOUNT.value, "group", "Legacy group", remoteLabelId = "remote-group"))
+        val pending = requireNotNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        database.outboxDao().upsert(pending.copy(operation = MutationOperation.ASSIGNMENTS.name))
+        remote.memberships = linkedSetOf(RemoteEmailId("unmapped-email"))
+        val preparation = RoomBackedMutationPreparationGateway(ACCOUNT, database, remote)
+        val command = pendingAssignmentCommand("group")
+
+        assertEquals(com.patmanak.contako.data.sync.MutationPreparation.WaitingForDependencies,
+            (preparation.prepare(command) as GatewayOutcome.Success).value)
+        assertEquals(false, database.remoteGroupAssignmentDependencyDao().baseline(ACCOUNT.value, "group")?.complete)
+        assertEquals(0, remote.assignmentWrites)
+
+        cleanContact("unrelated", "unrelated-remote")
+        assertEquals(com.patmanak.contako.data.sync.MutationPreparation.UploadAllowed,
+            (preparation.prepare(command) as GatewayOutcome.Success).value)
+        // The fallback is not proof of mapping, nor a premature acknowledgement.
+        assertEquals(false, database.remoteGroupAssignmentDependencyDao().baseline(ACCOUNT.value, "group")?.complete)
+        assertTrue(database.outboxDao().get(ACCOUNT.value, "GROUP", "group") != null)
+        val result = orchestrator().drain(ACCOUNT.value, 1_000)
+        assertEquals(1, result.uploaded)
+        assertEquals(1, remote.assignmentWrites)
+        assertTrue(remote.memberships.isEmpty())
+        assertEquals(true, database.remoteGroupAssignmentDependencyDao().baseline(ACCOUNT.value, "group")?.complete)
+        assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
     }
 
     @Test

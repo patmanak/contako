@@ -71,6 +71,8 @@ internal interface RemoteGroupAssignmentDependencyDao {
     suspend fun pendingContactIds(accountId: String): List<String>
 }
 
+internal enum class VerifiedGroupMembershipRecord { STALE, MAPPED, INCOMPLETE }
+
 /** Account-owned dependency evidence; no text matching or provider aggregation is used as identity. */
 internal class RoomRemoteGroupAssignmentDependencies(private val database: ContakoDatabase) {
     private val dao get() = database.remoteGroupAssignmentDependencyDao()
@@ -123,13 +125,20 @@ internal class RoomRemoteGroupAssignmentDependencies(private val database: Conta
 
     /** Records only a fresh account/group-scoped verified read, under the exact expected local revision. */
     suspend fun recordVerifiedMembership(account: AccountScope, groupId: String, expectedGroupRevision: Long,
-        remoteLabelId: RemoteGroupId, remoteEmailIds: Set<RemoteEmailId>): Boolean = database.withTransaction {
-        val group = database.contactGroupDao().get(account.value, groupId)?.group ?: return@withTransaction false
-        if (group.revision != expectedGroupRevision || group.remoteLabelId != remoteLabelId.value) return@withTransaction false
+        remoteLabelId: RemoteGroupId, remoteEmailIds: Set<RemoteEmailId>): Boolean =
+        recordVerifiedMembershipForPreparation(account, groupId, expectedGroupRevision, remoteLabelId, remoteEmailIds) ==
+            VerifiedGroupMembershipRecord.MAPPED
+
+    suspend fun recordVerifiedMembershipForPreparation(account: AccountScope, groupId: String, expectedGroupRevision: Long,
+        remoteLabelId: RemoteGroupId, remoteEmailIds: Set<RemoteEmailId>): VerifiedGroupMembershipRecord = database.withTransaction {
+        val group = database.contactGroupDao().get(account.value, groupId)?.group
+            ?: return@withTransaction VerifiedGroupMembershipRecord.STALE
+        if (group.revision != expectedGroupRevision || group.remoteLabelId != remoteLabelId.value)
+            return@withTransaction VerifiedGroupMembershipRecord.STALE
         val mapped = mapRemoteEdges(account, groupId, remoteEmailIds)
         dao.upsertBaseline(RemoteGroupDependencyBaselineEntity(account.value, groupId, remoteLabelId.value, mapped != null))
         if (mapped != null) dao.upsertEdges(mapped)
-        mapped != null
+        if (mapped != null) VerifiedGroupMembershipRecord.MAPPED else VerifiedGroupMembershipRecord.INCOMPLETE
     }
 
     suspend fun hasPendingContactWriteForGroup(account: AccountScope, groupId: String): Boolean = database.withTransaction {

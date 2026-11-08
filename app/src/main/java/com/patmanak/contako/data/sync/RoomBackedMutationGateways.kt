@@ -53,9 +53,15 @@ internal class RoomBackedMutationPreparationGateway(
         }
         val currentIntent = database.outboxDao().get(command.accountId, command.aggregateType, command.aggregateId)
             ?.takeIf { it.revision == command.revision }
+        // A durable explicit choice must reach the fresh-card conflict guard. Recovery scans
+        // cannot decide that choice, and prepare() invalidates it if the remote card changed.
+        val chosenConflict = database.contactConflictDao().get(command.accountId, command.aggregateId)?.let {
+            it.choice != null && it.localRevision == command.revision &&
+                it.remoteId == contact.remoteContactId && !it.remoteDeleted
+        } == true
         if ((currentIntent?.requiresReconciliation ?: command.requiresReconciliation) && (contact.remoteContactId == null ||
                 (contact.remoteVersion == null && contact.conflictState ==
-                    com.patmanak.contako.data.local.RoomContactConflictStore.CONFLICT))) {
+                    com.patmanak.contako.data.local.RoomContactConflictStore.CONFLICT && !chosenConflict))) {
             return createRecovery?.prepare(command) ?: GatewayOutcome.Success(
                 MutationPreparation.ActionRequired(
                     MutationPreparationActionRequiredReason.RECONCILIATION_REMOTE_IDENTITY_MISSING,
@@ -153,10 +159,8 @@ internal class RoomBackedMutationPreparationGateway(
                 ),
             )
         // Contact PUTs can replace email identities and restore labels from their vCard.
-        // Removed edges are absent from desired memberships, and email-label metadata may
-        // predate independent group edits. Without a durable negative-edge baseline, wait
-        // for all account contact writes before reconciling assignments (including empty
-        // groups). A blocked contact retains group intent instead of acknowledging it early.
+        // Retained edges qualify current/removed dependencies. An incomplete legacy read
+        // falls back to all pending contact writes, including for an empty desired group.
         val dependencies = com.patmanak.contako.data.local.RoomRemoteGroupAssignmentDependencies(database)
         if (dependencies.requiresVerifiedMembership(expectedAccount, group.id)) {
             when (val members = membershipReader.members(expectedAccount, groupId)) {
@@ -164,7 +168,9 @@ internal class RoomBackedMutationPreparationGateway(
                 is GatewayOutcome.Success -> {
                     if (members.value.account != expectedAccount || members.value.groupId != groupId)
                         return GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE)
-                    if (!dependencies.recordVerifiedMembership(expectedAccount, group.id, group.revision, groupId, members.value.emailIds.toSet()))
+                    if (dependencies.recordVerifiedMembershipForPreparation(expectedAccount, group.id, group.revision,
+                            groupId, members.value.emailIds.toSet()) ==
+                        com.patmanak.contako.data.local.VerifiedGroupMembershipRecord.STALE)
                         return GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT)
                 }
             }

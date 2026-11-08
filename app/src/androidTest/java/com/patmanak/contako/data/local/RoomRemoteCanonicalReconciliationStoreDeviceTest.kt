@@ -67,6 +67,9 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
     private var elapsedClock = 2_001_000L
     private var remote = listOf(remoteFixture("remote", "Remote One", 1, 10_000, "stable-uid"))
     private var hydrationCount = 0
+    private var recoveryInventoryCount = 0
+    private var mutationVerificationCount = 0
+    private var mutationReadOverride: VerifiedContactCard? = null
 
     @Before
     fun setUp() {
@@ -329,7 +332,13 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         recoverInterruptedCreate(SyncScope.FULL_REPAIR, resumeAfterProjection = true)
     }
 
-    private suspend fun recoverInterruptedCreate(scope: SyncScope, resumeAfterProjection: Boolean = false) {
+    @Test
+    fun recoveredCreateProtonChoiceRequiresFreshVerificationAndRejectsANewerRemoteVersion() = runBlocking {
+        recoverInterruptedCreate(SyncScope.INCREMENTAL, remoteChangesAfterChoice = true)
+    }
+
+    private suspend fun recoverInterruptedCreate(scope: SyncScope, resumeAfterProjection: Boolean = false,
+        remoteChangesAfterChoice: Boolean = false) {
         remote = emptyList()
         stage().run(ACCOUNT)
         wallClock = 10_500_000
@@ -360,7 +369,9 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         assertEquals(DurableMutationState.IN_FLIGHT.name, claimed.state)
         assertFalse(claimed.requiresReconciliation)
         // Proton accepted the create, but the process stopped before its acknowledgement.
-        remote = listOf(remoteFixture("remote-created", "Pending Create", 1, 12_000, "local-uid"))
+        // Different submitted content requires a real choice; identical delivered content
+        // belongs to the separate verified-equivalence recovery journey.
+        remote = listOf(remoteFixture("remote-created", "Remote accepted create", 1, 12_000, "local-uid"))
         database.close()
         openDatabase()
         if (resumeAfterProjection) {
@@ -402,7 +413,32 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
         val conflicts = RoomContactConflictStore(database)
         val detail = requireNotNull(conflicts.detail(ACCOUNT.value, "local-uid"))
         assertTrue(conflicts.choose(ACCOUNT.value, detail.summary, ContactConflictChoice.PROTON))
+        assertNull(repository.getContact(ACCOUNT.value, "local-uid")?.remoteVersion)
+        val scansBeforeChoice = recoveryInventoryCount
+        if (remoteChangesAfterChoice) {
+            val newer = remoteFixture("remote-created", "A newer remote version", 2, 13_000, "local-uid")
+            // The inventory still describes the chosen version. A later targeted GET
+            // observes the concurrent edit and must invalidate that choice itself.
+            mutationReadOverride = newer.card
+            val beforeStaleVerification = mutationVerificationCount
+            assertEquals(SyncPassOutcome.ACTION_REQUIRED, restarted.execute(passRequest(scope)))
+            assertEquals(beforeStaleVerification + 1, mutationVerificationCount)
+            val invalidated = requireNotNull(conflicts.detail(ACCOUNT.value, "local-uid"))
+            assertNull(invalidated.summary.choice)
+            assertEquals("version-2", invalidated.summary.remoteVersion)
+            assertFalse(invalidated.summary.generation == detail.summary.generation)
+            assertEquals("Pending Create", repository.getContact(ACCOUNT.value, "local-uid")?.displayName)
+            assertTrue(database.outboxDao().getAll(ACCOUNT.value).single().requiresReconciliation)
+            remote = listOf(newer)
+            mutationReadOverride = null
+            assertTrue(conflicts.choose(ACCOUNT.value, invalidated.summary, ContactConflictChoice.PROTON))
+        }
+        val verificationsBeforeChoice = mutationVerificationCount
         assertEquals(SyncPassOutcome.SUCCESS, restarted.execute(passRequest(scope)))
+        assertEquals(scansBeforeChoice, recoveryInventoryCount)
+        assertEquals(verificationsBeforeChoice + 1, mutationVerificationCount)
+        assertEquals(remote.single().card.contact.displayName,
+            repository.getContact(ACCOUNT.value, "local-uid")?.displayName)
         assertNull(repository.getContact(ACCOUNT.value, "local-uid")?.pendingMutationRevision)
         assertTrue(database.outboxDao().getAll(ACCOUNT.value).isEmpty())
         val hydrated = hydrationCount
@@ -603,8 +639,15 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
                 ACCOUNT, database,
                 ProtonEmailGroupMembershipReader { _, _ -> error("No group intent") },
                 verifiedCards = ProtonVerifiedContactCardGateway { _, id ->
-                    GatewayOutcome.Success(remote.single { it.metadata.id == id }.card)
+                    mutationVerificationCount++
+                    GatewayOutcome.Success(mutationReadOverride?.takeIf { it.id == id }
+                        ?: remote.single { it.metadata.id == id }.card)
                 },
+                createRecovery = RoomAmbiguousContactCreateRecovery(ACCOUNT, database,
+                    inventoryGateway(inventoryFailure) { recoveryInventoryCount++ },
+                    ProtonVerifiedContactCardGateway { _, id ->
+                        GatewayOutcome.Success(remote.single { it.metadata.id == id }.card)
+                    }),
             ),
             MutationUploadGateway { error("An accepted create must never be replayed") },
         ),
@@ -628,7 +671,21 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
     )
 
     private fun stage(inventoryFailure: () -> GatewayFailureCategory? = { null }): IncrementalRemoteContactStage {
-        val inventoryGateway = ProtonContactInventoryGateway { _, cursor ->
+        val cardGateway = ProtonVerifiedContactCardGateway { _, id ->
+            hydrationCount++
+            GatewayOutcome.Success(remote.single { it.metadata.id == id }.card)
+        }
+        return IncrementalRemoteContactStage(
+            inventoryGateway(inventoryFailure),
+            cardGateway,
+            PersistentContactInventoryPlanner(RoomContactInventoryCheckpointStore(database)),
+            RoomRemoteCanonicalReconciliationStore(database),
+        )
+    }
+
+    private fun inventoryGateway(inventoryFailure: () -> GatewayFailureCategory? = { null },
+        onRead: () -> Unit = {}) = ProtonContactInventoryGateway { _, cursor ->
+            onRead()
             check(cursor == null)
             val failure = inventoryFailure()
             if (failure != null) GatewayOutcome.Failure(failure) else GatewayOutcome.Success(
@@ -641,17 +698,6 @@ class RoomRemoteCanonicalReconciliationStoreDeviceTest {
                 ),
             )
         }
-        val cardGateway = ProtonVerifiedContactCardGateway { _, id ->
-            hydrationCount++
-            GatewayOutcome.Success(remote.single { it.metadata.id == id }.card)
-        }
-        return IncrementalRemoteContactStage(
-            inventoryGateway,
-            cardGateway,
-            PersistentContactInventoryPlanner(RoomContactInventoryCheckpointStore(database)),
-            RoomRemoteCanonicalReconciliationStore(database),
-        )
-    }
 
     private suspend fun save(contact: CanonicalContact): CanonicalContact = when (val result = repository.saveContact(contact)) {
         is SaveResult.Saved -> result.value
