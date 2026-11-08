@@ -15,6 +15,9 @@ import com.patmanak.contako.data.sync.MutationPreparation
 import com.patmanak.contako.data.sync.MutationPreparationActionRequiredReason
 import com.patmanak.contako.data.sync.RemoteMutationAcknowledgement
 import com.patmanak.contako.data.sync.RemoteMutationOperation
+import com.patmanak.contako.data.sync.MutationRetryPolicy
+import com.patmanak.contako.data.sync.LocalReconciliationInvariant
+import com.patmanak.contako.data.sync.checkLocalReconciliationInvariant
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
@@ -25,6 +28,8 @@ internal class RoomAmbiguousContactCreateRecovery(
     inventory: ProtonContactInventoryGateway,
     private val cards: ProtonVerifiedContactCardGateway,
     private val scanPermit: () -> Boolean = { true },
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val retryPolicy: MutationRetryPolicy = MutationRetryPolicy(),
 ) {
     private val inventoryReader = BoundedContactInventoryReader(inventory)
 
@@ -33,11 +38,14 @@ internal class RoomAmbiguousContactCreateRecovery(
         if (command.aggregateType != AggregateType.CONTACT.name || !command.requiresReconciliation ||
             command.operation !in setOf(RemoteMutationOperation.CREATE, RemoteMutationOperation.UPDATE,
                 RemoteMutationOperation.DELETE)) return stale()
+        var scanTime = clock()
         val targets = database.withTransaction {
             val current = snapshot(command) ?: return@withTransaction emptyList<Pair<DurableMutationCommand, Snapshot>>()
+            scanTime = current.intent.lastAttemptAtEpochMillis ?: scanTime
             val others = database.outboxDao().getAll(account.value).asSequence()
                 .filter { it.aggregateType == AggregateType.CONTACT.name && it.aggregateId != command.aggregateId &&
-                    it.state == DurableMutationState.PENDING.name && it.requiresReconciliation && it.remoteVersion == null }
+                    it.state == DurableMutationState.PENDING.name && it.blockedReason == null &&
+                    it.nextAttemptAtEpochMillis <= scanTime && it.requiresReconciliation && it.remoteVersion == null }
                 .take(MAX_RECOVERY_TARGETS - 1).toList().map { intent ->
                     val other = DurableMutationCommand(account.value, intent.aggregateType, intent.aggregateId,
                         intent.revision, intent.remoteOperation(), intent.attemptCount, intent.nextAttemptAtEpochMillis,
@@ -110,7 +118,8 @@ internal class RoomAmbiguousContactCreateRecovery(
             var result: GatewayOutcome<MutationPreparation> = stale()
             // Both kinds of proof are tied to a captured intent, canonical fields and payload.
             // Apply them atomically after revalidation, never as a reusable absence cache for
-            // another revision/intent. Deadlines and retry history are left unchanged.
+            // another revision/intent. Shared failures use the ordinary retry lifecycle;
+            // identity proofs do not reset retained deadlines or retry history.
             for ((targetCommand, before) in targets) {
                 val isCurrent = targetCommand.aggregateId == command.aggregateId
                 val current = snapshot(targetCommand, allowPending = !isCurrent)
@@ -126,6 +135,18 @@ internal class RoomAmbiguousContactCreateRecovery(
                 else if (matched == null) {
                     if (incomplete != null) {
                         if (isCurrent) result = checkNotNull(incomplete)
+                        else {
+                            // This one verification inspected every captured target. Charge
+                            // only that exact due snapshot, using the ordinary CAS lifecycle;
+                            // never charge the claimed command twice or spend a future credit.
+                            checkLocalReconciliationInvariant(RoomOutboxStore(database).claim(before.intent, scanTime),
+                                LocalReconciliationInvariant.INTENT_REVISION)
+                            val failure = checkNotNull(incomplete)
+                            val decision = retryPolicy.decide(failure.category, targetCommand.operation,
+                                before.intent.attemptCount, scanTime, failure.retryAfterMillis)
+                            checkLocalReconciliationInvariant(RoomMutationExecutionStore(database).recordFailure(
+                                targetCommand, failure.category, decision), LocalReconciliationInvariant.INTENT_REVISION)
+                        }
                         continue
                     }
                     database.outboxDao().upsert(before.intent.copy(requiresReconciliation = false))

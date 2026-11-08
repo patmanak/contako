@@ -620,6 +620,12 @@ untouched values independently on each peer:
   incomplete verification without a visible match: show **Create anyway** with a
   duplicate warning; cancel has no effect, confirmation survives restart and server
   delay, and a local edit invalidates it. Never create without that confirmation.
+  Repeat with 25 ambiguous creations and one unreadable unrelated card. A stable
+  scan consumes one verification attempt per unchanged due target, reaching the
+  existing retry limit together rather than rescanning separately for each target.
+  The claimed target is charged once; future, blocked, changed-payload/revision
+  and newly added intentions are untouched. Abort before the second inventory
+  with a network/429 error: no distributed attempt consumption is permitted.
 - On a large first import, fail a card transiently late in acquisition, then retry.
   Healthy committed cards MUST remain checkpointed; failed/unread cards become
   durable obligations before cursor acknowledgement. Respect Retry-After across

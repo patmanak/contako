@@ -12,6 +12,7 @@ import com.patmanak.contako.data.sync.MutationPreparationGateway
 import com.patmanak.contako.data.sync.MutationUploadGateway
 import com.patmanak.contako.data.sync.RemoteMutationAcknowledgement
 import com.patmanak.contako.data.sync.RemoteMutationOperation
+import com.patmanak.contako.data.sync.MutationRetryPolicy
 import com.patmanak.contako.domain.model.CanonicalContact
 import com.patmanak.contako.domain.model.ContactValue
 import com.patmanak.contako.domain.model.ContactValueKind
@@ -476,7 +477,7 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
         afterCardRead = {
             database.outboxDao().upsert(otherIntent.copy(nextAttemptAtEpochMillis = 99_000))
         }
-        assertSame(MutationPreparation.UploadAllowed, success(recovery().prepare(command())))
+        assertSame(MutationPreparation.UploadAllowed, success(recovery(clock = { 88_000 }).prepare(command())))
         val untouched = requireNotNull(database.outboxDao().get(ACCOUNT.value, AggregateType.CONTACT.name, other.id))
         assertTrue(untouched.requiresReconciliation)
         assertEquals(99_000L, untouched.nextAttemptAtEpochMillis)
@@ -552,7 +553,147 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
         assertEquals(0, inventoryReads)
     }
 
-    private fun recovery(permit: () -> Boolean = { true }) = RoomAmbiguousContactCreateRecovery(ACCOUNT, database,
+    @Test fun oneStableIncompleteScanChargesEachCapturedCreateOnceAndExhaustsTheBatchTogether() = runBlocking {
+        val local = seed()
+        database.outboxDao().upsert(intent().copy(state = DurableMutationState.PENDING.name))
+        repeat(24) { seedSibling(local, "batch-$it") }
+        remote = listOf(card("unreadable", "unrelated-uid"))
+        cardFailure = GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED
+        var now = 1_000L
+        repeat(8) { pass ->
+            var available = true
+            val helper = recovery(clock = { now }) { available.also { available = false } }
+            val runner = DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+                MutationPreparationGateway { helper.prepare(it) }, MutationUploadGateway { error("No blind POST") })
+            runner.drain(ACCOUNT.value, now)
+            val rows = database.outboxDao().getAll(ACCOUNT.value)
+            assertEquals(25, rows.size)
+            rows.forEach { row ->
+                assertEquals((pass + 2).coerceAtMost(8), row.attemptCount)
+                assertEquals(now, row.lastAttemptAtEpochMillis)
+                assertTrue(row.requiresReconciliation)
+                assertEquals(GatewayFailureCategory.RECONCILIATION_INCOMPLETE.name, row.errorCategory)
+                assertEquals(if (pass == 7) DurableMutationState.ACTION_REQUIRED.name else DurableMutationState.PENDING.name, row.state)
+            }
+            assertEquals((pass + 1) * 2, inventoryReads)
+            assertEquals(pass + 1, cardReads)
+            runner.drain(ACCOUNT.value, now)
+            assertEquals(rows, database.outboxDao().getAll(ACCOUNT.value)) // No second charge in the same pass.
+            if (pass < 7) {
+                val due = rows.maxOf { it.nextAttemptAtEpochMillis }
+                assertTrue(due > now)
+                database.close()
+                database = ContakoDatabase.create(context, DATABASE)
+                val beforeDue = DurableMutationOrchestrator(RoomMutationExecutionStore(database),
+                    MutationPreparationGateway { error("No scan before the retained deadline") },
+                    MutationUploadGateway { error("No blind POST") })
+                assertEquals(0, beforeDue.drain(ACCOUNT.value, now).examined)
+                now = due
+            }
+        }
+        assertEquals(16, inventoryReads)
+        assertEquals(8, cardReads)
+        database.outboxDao().getAll(ACCOUNT.value).forEach { row ->
+            assertEquals(row.revision, RoomAmbiguousContactCreateChoiceStore(database).offerRevision(ACCOUNT, row.aggregateId))
+        }
+    }
+
+    @Test fun sharedIncompleteFailureExcludesChangedFutureBlockedNewAndVisibleCandidates() = runBlocking {
+        val local = seed()
+        database.outboxDao().upsert(intent().copy(lastAttemptAtEpochMillis = 1_000))
+        val before = linkedMapOf<String, OutboxMutationEntity>()
+        for (id in listOf("unchanged", "canonical", "payload", "intent", "future", "blocked", "action", "visible")) {
+            val row = seedSibling(local, id).copy(
+                nextAttemptAtEpochMillis = if (id == "future") 2_000 else 0,
+                state = if (id == "action") DurableMutationState.ACTION_REQUIRED.name else DurableMutationState.PENDING.name,
+                blockedReason = if (id == "blocked" || id == "action") "REMOTE_ACTION_REQUIRED" else null)
+            database.outboxDao().upsert(row)
+            before[id] = row
+        }
+        remote = listOf(card("unreadable", "unrelated-uid"), card("visible-match", "$UID-visible"))
+        cardFailures = mapOf("unreadable" to GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED)
+        var mutated = false
+        afterCardRead = {
+            if (!mutated) {
+                mutated = true
+                val canonical = requireNotNull(database.contactDao().getEntity(ACCOUNT.value, "canonical"))
+                database.contactDao().upsert(canonical.copy(displayName = "Changed without revision bump"))
+                database.contactPayloadDao().upsert(PreservationEnvelope(mapOf("X-OPAQUE" to "Changed preserved payload"))
+                    .toEntity(ACCOUNT.value, "payload"))
+                database.outboxDao().upsert(before.getValue("intent").copy(nextAttemptAtEpochMillis = 99_000))
+                seedSibling(local, "new-after-cut")
+            }
+        }
+        val outcome = recovery(clock = { 90_000 }).prepare(command()) as GatewayOutcome.Failure
+        assertEquals(GatewayFailureCategory.RECONCILIATION_INCOMPLETE, outcome.category)
+        val charged = requireNotNull(database.outboxDao().get(ACCOUNT.value, "CONTACT", "unchanged"))
+        assertEquals(2, charged.attemptCount)
+        assertEquals(1_000L, charged.lastAttemptAtEpochMillis) // The claimed scan time, not the later wall clock.
+        assertTrue(charged.nextAttemptAtEpochMillis > 1_000)
+        for (id in listOf("canonical", "payload", "future", "blocked", "action")) {
+            assertEquals(before.getValue(id), database.outboxDao().get(ACCOUNT.value, "CONTACT", id))
+        }
+        assertEquals(before.getValue("intent").copy(nextAttemptAtEpochMillis = 99_000),
+            database.outboxDao().get(ACCOUNT.value, "CONTACT", "intent"))
+        assertEquals(1, database.outboxDao().get(ACCOUNT.value, "CONTACT", "new-after-cut")!!.attemptCount)
+        assertEquals(1, database.outboxDao().get(ACCOUNT.value, "CONTACT", "visible")!!.attemptCount)
+        assertTrue(database.outboxDao().get(ACCOUNT.value, "CONTACT", "visible")!!.requiresReconciliation)
+        assertNull(database.contactDao().getEntity(ACCOUNT.value, "visible")!!.remoteContactId)
+        assertEquals(1, intent().attemptCount) // Current failure belongs to the orchestrator, not the scan helper.
+        assertEquals(2, inventoryReads)
+        assertEquals(2, cardReads)
+    }
+
+    @Test fun oneScanNeverChargesMoreThanTwentyFiveExactCapturedCreates() = runBlocking {
+        val local = seed()
+        repeat(30) { seedSibling(local, "bounded-$it") }
+        remote = listOf(card("unreadable", "unrelated-uid"))
+        cardFailure = GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED
+        val before = database.outboxDao().getAll(ACCOUNT.value)
+        assertEquals(GatewayFailureCategory.RECONCILIATION_INCOMPLETE,
+            (recovery().prepare(command()) as GatewayOutcome.Failure).category)
+        val after = database.outboxDao().getAll(ACCOUNT.value)
+        val changed = after.filter { row -> row != before.single { it.aggregateId == row.aggregateId } }
+        assertEquals(24, changed.size) // The 25th target is the current claim, charged only by its orchestrator.
+        assertTrue(changed.all { it.attemptCount == 2 && it.requiresReconciliation })
+        assertEquals(7, after.count { it.attemptCount == 1 })
+        assertEquals(2, inventoryReads)
+        assertEquals(1, cardReads)
+    }
+
+    @Test fun networkAccountRateLimitAndUnstableInventoryFailuresNeverChargeOtherCapturedCreates() = runBlocking {
+        for (category in listOf(GatewayFailureCategory.TIMEOUT, GatewayFailureCategory.NETWORK_UNAVAILABLE,
+                GatewayFailureCategory.AUTHENTICATION_REQUIRED, GatewayFailureCategory.RATE_LIMITED,
+                GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED)) {
+            database.clearAllTables()
+            val local = seed()
+            val untouched = seedSibling(local, "untouched")
+            inventoryReads = 0; cardReads = 0; failInventoryOn = 0
+            remote = listOf(card("unreadable", "unrelated-uid"))
+            cardFailure = category
+            // An incomplete card followed by a rejected second index is not stable scan evidence.
+            if (category == GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED) failInventoryOn = 2
+            assertEquals(if (category == GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED)
+                GatewayFailureCategory.RATE_LIMITED else category, (recovery().prepare(command()) as GatewayOutcome.Failure).category)
+            assertEquals(untouched, database.outboxDao().get(ACCOUNT.value, "CONTACT", "untouched"))
+            assertEquals(1, intent().attemptCount)
+            assertTrue(intent().requiresReconciliation)
+        }
+    }
+
+    private suspend fun seedSibling(local: CanonicalContact, id: String): OutboxMutationEntity {
+        val other = local.copy(id = id, remoteVCardUid = "$UID-$id",
+            preservationEnvelope = PreservationEnvelope(mapOf("X-OPAQUE" to "Preserved $id")))
+        database.contactDao().upsert(other.toEntity())
+        database.contactDao().upsertValues(other.values.map { it.toEntity(other) })
+        database.contactPayloadDao().upsert(requireNotNull(other.preservationEnvelope).toEntity(ACCOUNT.value, id))
+        val row = intent().copy(aggregateId = id, idempotencyKey = "intent-$id", state = DurableMutationState.PENDING.name)
+        database.outboxDao().upsert(row)
+        return row
+    }
+
+    private fun recovery(clock: () -> Long = { 1_000 }, retryPolicy: MutationRetryPolicy = MutationRetryPolicy(),
+        permit: () -> Boolean = { true }) = RoomAmbiguousContactCreateRecovery(ACCOUNT, database,
         ProtonContactInventoryGateway { _, cursor ->
             assertNull(cursor)
             inventoryReads++
@@ -573,7 +714,7 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
                 afterCardRead()
                 GatewayOutcome.Success(card)
             }
-        }, scanPermit = permit)
+        }, scanPermit = permit, clock = clock, retryPolicy = retryPolicy)
 
     private suspend fun seed(deleted: Boolean = false): CanonicalContact {
         val contact = CanonicalContact(ACCOUNT.value, LOCAL_ID, displayName = "Newer local name",

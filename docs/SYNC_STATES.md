@@ -134,6 +134,12 @@ MUST NOT inherit that proof. This
 exceptional reconciliation can read full cards, with one complete scan per pass;
 ordinary no-change synchronization MUST NOT do so. Earlier blocked unbound
 creations MAY reopen this verification once per fresh recovery generation.
+If that stable scan is incomplete because of unreadable cards, each unchanged,
+due and unblocked captured intent without a visible candidate MAY consume one
+verification attempt through the same claim/retry lifecycle. The already claimed
+intent MUST NOT be charged twice. Future, changed or newly created intentions
+MUST remain untouched, and interrupted network/account scans MUST NOT distribute
+failure credits without the second stable inventory.
 
 An unreadable card MUST NOT stop inspection of later cards, but MUST prevent
 absence and unbound UID-uniqueness proofs. A previously bound exact remote ID MAY

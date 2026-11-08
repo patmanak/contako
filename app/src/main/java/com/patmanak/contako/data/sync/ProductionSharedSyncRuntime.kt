@@ -302,6 +302,7 @@ internal fun composeProductionSharedSyncRuntime(
         })
     val groupCatalogAvailable = java.util.concurrent.atomic.AtomicBoolean(false)
     val recoveryScanAvailable = java.util.concurrent.atomic.AtomicBoolean(true)
+    val mutationRetryPolicy = MutationRetryPolicy()
     val deletionRecoveryStore = com.patmanak.contako.data.local.RoomDeletionRecoveryStore(database)
     val deletedContactRecovery = DeletedContactRecovery(RoomDeletedContactRecoveryExecutionStore(deletionRecoveryStore),
         dependencies.existence, ProductionDeletedContactNativeCleanup(database, deletionRecoveryStore, androidPreflight,
@@ -311,7 +312,7 @@ internal fun composeProductionSharedSyncRuntime(
             dependencies.verifiedCards, dependencies.existence,
             com.patmanak.contako.data.local.RoomAmbiguousContactCreateRecovery(
                 account, database, dependencies.inventory, dependencies.verifiedCards,
-                scanPermit = { recoveryScanAvailable.getAndSet(false) })))
+                scanPermit = { recoveryScanAvailable.getAndSet(false) }, retryPolicy = mutationRetryPolicy)))
     val mutationOrchestrator = DurableMutationOrchestrator(
         RoomMutationExecutionStore(database, dependencies.existence,
             recoveryGeneration = dependencies.capabilityInvalidationGeneration),
@@ -328,6 +329,7 @@ internal fun composeProductionSharedSyncRuntime(
             dependencies.membershipReader,
             dependencies.emailLabels,
         ),
+        retryPolicy = mutationRetryPolicy,
         actionRequiredObserver = mutationActionRequiredObserver,
         gatewayFailureObserver = GatewayFailureObserver { boundary, failure, operation ->
             passStageObserver.onGatewayFailure(boundary, failure, operation)

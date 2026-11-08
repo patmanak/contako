@@ -12,6 +12,8 @@ Features and improvements by version.
 - Verify more uncertain creations per bounded scan, preserve partial email edits
   after a lost acknowledgement, and offer an explicit duplicate-risk confirmation
   when exhausted verification cannot establish absence.
+- Share incomplete verification attempts across unchanged eligible creations in
+  the same bounded scan, preserving retry budgets and deadlines.
 - Probe exhausted transient writes approximately daily without resetting retry
   history or bypassing server delays; retain real failure causes during dependency waits.
 
