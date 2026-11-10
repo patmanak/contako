@@ -2155,6 +2155,58 @@ class ContactsViewModelTest {
         assertEquals(group.id, model.uiState.value.navigation.current.selectedId)
     }
 
+    @Test fun reviewingABlockedLegacyGroupDoesNotSaveOrRetryUntilAnExplicitSave() = runTest(dispatcher) {
+        val group = ContactGroup(LOCAL_ACCOUNT_ID, "legacy-group", "Synthetic group", revision = 7, pendingMutationRevision = 7)
+        val repository = FakeRepository(emptyList(), listOf(group))
+        val recovery = FakeSyncRecoveryDataSource()
+        val before = SyncDashboardSnapshot(SyncDashboardState.BLOCKED,
+            blockedItems = listOf(com.patmanak.contako.domain.sync.SyncBlockedItem(group.id,
+                com.patmanak.contako.domain.sync.SyncBlockedItemType.GROUP, group.name, false,
+                com.patmanak.contako.domain.sync.SyncProblem.GROUP_REVIEW_REQUIRED)))
+        recovery.status.value = before
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        advanceUntilIdle()
+        model.openAffectedGroup(group.id)
+        advanceUntilIdle()
+        assertEquals(group.id, model.uiState.value.navigation.current.selectedId)
+        assertEquals(0, repository.groupSaveCount)
+        assertEquals(before, recovery.status.value)
+        assertTrue(recovery.syncRequestedAccounts.isEmpty())
+        model.editGroup(group)
+        advanceUntilIdle()
+        assertEquals(0, repository.groupSaveCount)
+        model.saveGroup()
+        advanceUntilIdle()
+        assertEquals(1, repository.groupSaveCount)
+        assertEquals(group, repository.savedGroup)
+    }
+
+    @Test fun lateGroupReviewCannotNavigateToAnotherOwnerOrADeletedGroup() = runTest(dispatcher) {
+        for (group in listOf(ContactGroup("foreign-owner", "group", "Foreign group"),
+            ContactGroup(LOCAL_ACCOUNT_ID, "group", "Deleted group", isDeleted = true))) {
+            val model = ContactsViewModel(FakeRepository(emptyList(), listOf(group)), directoryDispatcher = dispatcher)
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+            advanceUntilIdle()
+            val before = model.uiState.value.navigation
+            model.openAffectedGroup(group.id)
+            advanceUntilIdle()
+            assertEquals(before, model.uiState.value.navigation)
+        }
+        val group = ContactGroup(LOCAL_ACCOUNT_ID, "retired-owner-group", "Previous group")
+        val gate = AccountLifecycleAdmission()
+        val model = ContactsViewModel(FakeRepository(emptyList(), listOf(group)), mutationAdmission = gate,
+            directoryDispatcher = dispatcher)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        advanceUntilIdle()
+        gate.cleanup { }
+        advanceUntilIdle()
+        val before = model.uiState.value.navigation
+        model.openAffectedGroup(group.id)
+        advanceUntilIdle()
+        assertEquals(before, model.uiState.value.navigation)
+    }
+
     @Test fun targetedPreviewIsReadOnlyAndRepeatedConfirmQueuesTheExactPreviewOnce() = runTest(dispatcher) {
         val kind = com.patmanak.contako.domain.sync.TargetedRecoveryKind.ANDROID_COPY
         val preview = com.patmanak.contako.domain.sync.TargetedRecoveryPreview(kind, "target", "proof", 4, 2)

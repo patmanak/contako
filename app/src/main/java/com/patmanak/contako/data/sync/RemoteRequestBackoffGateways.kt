@@ -29,6 +29,11 @@ internal fun ProductionSyncDependencies.withRemoteRequestBackoff(store: RemoteRe
     verifiedCards = ProtonVerifiedContactCardGateway { account, id -> store.guarded(account) { verifiedCards.fetch(account, id) } },
     existence = ProtonContactExistenceGateway { account, id -> store.guarded(account) { existence.check(account, id) } },
     events = events?.let { delegate -> ProtonContactEventsGateway { account, cursor -> store.guarded(account) { delegate.read(account, cursor) } } },
+    eventResources = eventResources?.let { delegate -> object : com.patmanak.contako.data.proton.ProtonContactEventResourceGateway {
+        override suspend fun contact(account: AccountScope, id: RemoteContactId) = store.guarded(account) { delegate.contact(account, id) }
+        override suspend fun emailOwner(account: AccountScope, id: RemoteEmailId) = store.guarded(account) { delegate.emailOwner(account, id) }
+        override suspend fun groups(account: AccountScope, ids: Set<RemoteGroupId>) = store.guarded(account) { delegate.groups(account, ids) }
+    } },
     contactMutations = object : ProtonContactMutationGateway {
         override suspend fun apply(account: AccountScope, mutation: ContactMutation) =
             store.guarded(account) { contactMutations.apply(account, mutation) }

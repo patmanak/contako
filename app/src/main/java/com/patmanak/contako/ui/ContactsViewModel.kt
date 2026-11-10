@@ -755,7 +755,8 @@ class ContactsViewModel(
 
     /** Resolve affected groups outside the current directory search filter. */
     fun openAffectedGroup(groupId: String) {
-        val group = allGroups.value.firstOrNull { it.id == groupId } ?: return
+        if (!acceptsMutation()) return
+        val group = allGroups.value.firstOrNull { it.id == groupId && it.accountId == accountId && !it.isDeleted } ?: return
         selectDestination(RootDestination.GROUPS)
         selectGroup(group)
     }

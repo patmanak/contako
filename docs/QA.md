@@ -45,6 +45,8 @@ app/build/qa-results/<local-run>/RESULT.md. Results MUST identify actual source
 and dirty-tree state, APK identity when applicable, case/variant, intended changes,
 unchanged-field oracle, separate observations in each peer, trigger, pending/
 attention counters, cleanup and limitations. Raw evidence remains ignored.
+When retaining a source manifest, report the SHA-256 of the exact saved file
+bytes. A normalized digest of its entries MUST be labeled separately.
 
 Distinguish PASS, FAIL, NOT RUN, OWNER-VALIDATED and KNOWN LIMITATION.
 An accepted limitation is not fixed; a later successful repair does not turn a

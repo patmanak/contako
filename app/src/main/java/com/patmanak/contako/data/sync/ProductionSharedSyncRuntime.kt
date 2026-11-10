@@ -99,6 +99,7 @@ internal data class ProductionSyncDependencies(
     val hasNoCoreAccount: suspend () -> Boolean = { false },
     val isAccountReady: suspend () -> Boolean = { false },
     val capabilityInvalidationGeneration: () -> Long = { 0 },
+    val eventResources: com.patmanak.contako.data.proton.ProtonContactEventResourceGateway? = null,
 )
 
 /** Production composition only wires dormant gateways; I/O starts when the shared runner executes. */
@@ -152,6 +153,7 @@ internal fun composeProductionSharedSyncRuntime(
             gateD.membershipReader,
             proton.session as ProtonLocalSessionCleanupGateway,
             events = gateD.events,
+            eventResources = gateD.eventResources,
             existence = gateD.existence,
             releaseOwnerAfterLocalDataCleared = proton.releaseOwnerAfterLocalDataCleared,
             invalidateGroupCapabilities = { proton.invalidateGroupCapabilities(
@@ -225,6 +227,10 @@ internal fun composeProductionSharedSyncRuntime(
     val account = dependencies.account
     val repository = RoomContactRepository(database)
     val checkpointStore: ContactInventoryCheckpointStore = RoomContactInventoryCheckpointStore(database)
+    val inventoryPlanner = PersistentContactInventoryPlanner(checkpointStore)
+    val eventSession = dependencies.events?.let { events -> dependencies.eventResources?.let { resources ->
+        EventDrivenRemoteReadSession(inventoryPlanner, events, resources)
+    } }
     val contentResolver = applicationContext.contentResolver
     val contactsReader = AndroidContactsProviderReader(contentResolver)
     val groupsReader = AndroidGroupsProviderReader(contentResolver)
@@ -342,6 +348,7 @@ internal fun composeProductionSharedSyncRuntime(
     var completionDetails: com.patmanak.contako.domain.sync.SyncPassCompletionDetailsSource? = null
     val executor = ContakoSyncPassExecutor(
         onPassStarted = { request ->
+            eventSession?.reset()
             recoveryScanAvailable.set(true)
             androidPreflight.reset()
             androidDegradation.set(null)
@@ -384,13 +391,14 @@ internal fun composeProductionSharedSyncRuntime(
         remoteStage = IncrementalRemoteContactStage(
             dependencies.inventory,
             dependencies.verifiedCards,
-            PersistentContactInventoryPlanner(checkpointStore),
+            inventoryPlanner,
             // Remote image references remain canonical references. Synchronization MUST NOT make
             // automatic requests to arbitrary contact-controlled hosts.
             RoomRemoteCanonicalReconciliationStore(database),
             obligations = com.patmanak.contako.data.local.RoomRemoteHydrationObligationStore(database),
             existenceGateway = dependencies.existence,
             eventsGateway = dependencies.events,
+            eventSession = eventSession,
             hydrationBatchSize = 25,
             hydrationReadConcurrency = 10,
             importObserver = passStageObserver,
@@ -418,6 +426,7 @@ internal fun composeProductionSharedSyncRuntime(
             gatewayFailureObserver = GatewayFailureObserver { boundary, failure, operation ->
                 passStageObserver.onGatewayFailure(boundary, failure, operation)
             },
+            eventSession = eventSession,
         ),
         statusPublisher = RoomSyncPassStatusPublisher(
             account.value,

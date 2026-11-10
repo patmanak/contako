@@ -410,6 +410,8 @@
     <string name="sync_issue_unknown">Die Ursache ist nicht bekannt. Öffne die lokale Diagnose für den technischen Verlauf.</string>
     <string name="sync_issue_saved">Der ausstehende Vorgang ist auf diesem Gerät gespeichert.</string>
     <string name="sync_issue_review">Element prüfen</string>
+    <string name="sync_issue_group_review_body">Prüfe die Mitglieder dieser Gruppe.</string>
+    <string name="sync_issue_group_review_action">Gruppe prüfen</string>
     <string name="sync_issue_diagnostics">Diagnose ansehen</string>
     <string name="targeted_proton_title">Diese Proton-Karte erneut prüfen</string>
     <string name="targeted_android_title">Diese Android-Kopie fortsetzen</string>

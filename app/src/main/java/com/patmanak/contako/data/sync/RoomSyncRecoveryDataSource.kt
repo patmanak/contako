@@ -182,6 +182,8 @@ internal class RoomSyncRecoveryDataSource(
                             item.errorCategory == "PERMISSION_OR_PLAN_DENIED") SyncProblem.REMOTE_PERMISSION_REQUIRED
                             else SyncProblem.GROUP_CAPABILITY_REQUIRED
                         "REMOTE_PERMISSION_REQUIRED" -> SyncProblem.REMOTE_PERMISSION_REQUIRED
+                        "PARTIAL_GROUP_SCOPE_UNVERIFIED" -> if (item.aggregateType == "GROUP")
+                            SyncProblem.GROUP_REVIEW_REQUIRED else SyncProblem.INTERNAL_FAILURE
                         else -> when {
                             item.blockedReason?.contains("INVALID") == true ||
                                 item.blockedReason?.contains("MISSING") == true -> SyncProblem.VALIDATION_REJECTED
@@ -193,7 +195,7 @@ internal class RoomSyncRecoveryDataSource(
             }
             val priority = listOf(SyncProblem.AUTHENTICATION_REQUIRED, SyncProblem.INTERACTIVE_AUTHENTICATION_REQUIRED,
                 SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED, SyncProblem.VALIDATION_REJECTED,
-                SyncProblem.GROUP_CAPABILITY_REQUIRED, SyncProblem.REMOTE_PERMISSION_REQUIRED,
+                SyncProblem.GROUP_CAPABILITY_REQUIRED, SyncProblem.REMOTE_PERMISSION_REQUIRED, SyncProblem.GROUP_REVIEW_REQUIRED,
                 SyncProblem.CONFLICT_RECOVERY_REQUIRED, SyncProblem.INTERNAL_FAILURE)
             val blockedProblem = priority.firstOrNull { problem -> items.any { it.problem == problem } }
             val authentication = snapshot.state == SyncDashboardState.AUTHENTICATION_REQUIRED || blockedProblem in

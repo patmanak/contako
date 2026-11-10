@@ -834,11 +834,12 @@ internal class ProtonGateCRuntime private constructor(
                 ),
             )
             val contactCreateStages = ProtonContactCreateStageMonitor()
+            val contactRemote = ContactRemoteDataSourceImpl(network.apiProvider)
             val publicContactGateway = ProtonPublicContactGateway(
                 expectedAccount = accountScope,
                 userProvider = readyUserProvider,
                 remote = ProtonCoreContactRemotePort(
-                    ContactRemoteDataSourceImpl(network.apiProvider),
+                    contactRemote,
                     rawGateDWire,
                     contactCreateStages,
                     inventoryLoader = ProtonBoundedContactInventory(network.apiProvider)::read,
@@ -860,6 +861,12 @@ internal class ProtonGateCRuntime private constructor(
             }
             val gateD = ProtonGateDComposition(
                 events = ProtonContactEventReader(rawGateDWire),
+                eventResources = ProtonContactEventResourceReader(
+                    expectedAccount = accountScope,
+                    userProvider = readyUserProvider,
+                    contactLoader = contactRemote::getContactWithCards,
+                    transport = rawGateDWire,
+                ),
                 existence = publicContactGateway,
                 inventory = publicContactGateway,
                 verifiedCards = publicContactGateway,

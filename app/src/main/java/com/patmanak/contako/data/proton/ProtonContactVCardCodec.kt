@@ -689,6 +689,16 @@ internal class ProtonContactVCardCodec(
         return contact.copy(values = normalized)
     }
 
+    /** A source reference alone does not prove that an editable value still matches its source. */
+    internal fun hasUnchangedPreservedValue(contact: CanonicalContact, value: ContactValue): Boolean = try {
+        value.preservationKey != null && value.preservationKey in unchangedImportedPreservationKeys(
+            contact, contact.preservationEnvelope?.valueSourceCards().orEmpty())
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        false
+    }
+
     /** Imported out-of-limit values remain read-only only while their hydrated payload is exact. */
     private fun unchangedImportedPreservationKeys(
         contact: CanonicalContact,

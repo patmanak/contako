@@ -81,6 +81,7 @@ class SyncIssuePresentationTest {
             SyncProblem.CONFLICT_RECOVERY_REQUIRED to (SyncIssueCause.CONFLICT to SyncIssueAction.VIEW_DIAGNOSTICS),
             SyncProblem.CRYPTOGRAPHIC_VERIFICATION_FAILED to (SyncIssueCause.CRYPTOGRAPHY to SyncIssueAction.VIEW_DIAGNOSTICS),
             SyncProblem.GROUP_CAPABILITY_REQUIRED to (SyncIssueCause.GROUP_CAPABILITY to SyncIssueAction.RETRY_SYNC),
+            SyncProblem.GROUP_REVIEW_REQUIRED to (SyncIssueCause.GROUP_REVIEW to SyncIssueAction.VIEW_DIAGNOSTICS),
             SyncProblem.REMOTE_PERMISSION_REQUIRED to (SyncIssueCause.REMOTE_PERMISSION to SyncIssueAction.VIEW_DIAGNOSTICS),
             SyncProblem.ANDROID_INTEROPERABILITY_DEGRADED to (SyncIssueCause.ANDROID to SyncIssueAction.VIEW_DIAGNOSTICS),
             SyncProblem.ANDROID_CONTACTS_PARTIALLY_PROJECTED to (SyncIssueCause.ANDROID to SyncIssueAction.VIEW_DIAGNOSTICS),
@@ -160,6 +161,18 @@ class SyncIssuePresentationTest {
             canReview = true).cause)
         assertEquals(SyncIssueAction.VIEW_DIAGNOSTICS, policy.present(SyncProblem.INTERNAL_FAILURE,
             SyncIssueScope.CONTACT, canReview = true).action)
+    }
+
+    @Test fun unverifiedGroupScopeRequiresAnAvailableGroupAndNeverOffersAnAutomaticRetry() {
+        for (scope in SyncIssueScope.entries) for (canReview in listOf(false, true)) {
+            val advice = policy.present(SyncProblem.GROUP_REVIEW_REQUIRED, scope,
+                hasDurableIntent = true, canReview = canReview)
+            assertEquals(SyncIssueCause.GROUP_REVIEW, advice.cause)
+            assertEquals(if (scope == SyncIssueScope.GROUP && canReview) SyncIssueAction.REVIEW_ITEM
+                else SyncIssueAction.VIEW_DIAGNOSTICS, advice.action)
+            assertTrue(advice.localIntentSaved)
+            assertTrue(advice.validationIssues.isEmpty())
+        }
     }
 
     @Test fun offlineWithoutADataCausePermitsExistingRetryButCannotReclassifyAKnownFailure() {

@@ -410,6 +410,8 @@
     <string name="sync_issue_unknown">The cause has not been identified. Open local diagnostics for the technical history.</string>
     <string name="sync_issue_saved">The pending operation is saved on this device.</string>
     <string name="sync_issue_review">Review item</string>
+    <string name="sync_issue_group_review_body">Review this group’s members.</string>
+    <string name="sync_issue_group_review_action">Review group</string>
     <string name="sync_issue_diagnostics">View diagnostics</string>
     <string name="targeted_proton_title">Recheck this Proton card</string>
     <string name="targeted_android_title">Retry this Android copy</string>

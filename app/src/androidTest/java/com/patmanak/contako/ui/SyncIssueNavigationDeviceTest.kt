@@ -1,6 +1,7 @@
 package com.patmanak.contako.ui
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -26,6 +27,43 @@ import org.junit.Test
 /** UI-only evidence. No Android account, provider, credentials or remote service. */
 class SyncIssueNavigationDeviceTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun unverifiedPartialGroupOffersOneReviewActionWithoutSyncOrSaving() {
+        val group = ContactGroup("synthetic-owner", "legacy-group", "Synthetic group", revision = 7, pendingMutationRevision = 7)
+        val snapshot = SyncDashboardSnapshot(SyncDashboardState.BLOCKED, actionRequiredCount = 1,
+            problem = SyncProblem.GROUP_REVIEW_REQUIRED,
+            blockedItems = listOf(com.patmanak.contako.domain.sync.SyncBlockedItem(group.id,
+                com.patmanak.contako.domain.sync.SyncBlockedItemType.GROUP, group.name, false,
+                SyncProblem.GROUP_REVIEW_REQUIRED)))
+        val repository = object : ContactRepository by NoWrites {
+            override fun observeGroups(accountId: String) = flowOf(listOf(group))
+        }
+        val recovery = object : SyncRecoveryDataSource by EmptySyncRecoveryDataSource {
+            val status = MutableStateFlow<SyncDashboardSnapshot?>(snapshot)
+            override fun observeStatus(accountId: String) = status
+            override suspend fun requestSync(accountId: String) = error("Review must not synchronize")
+        }
+        val owner = object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() }
+        val model = ViewModelProvider(owner, ContactsViewModel.factory(repository, recovery,
+            accountId = group.accountId, navigationState = SavedStateHandle()))[ContactsViewModel::class.java]
+        val state = ContactsUiState(actionGroups = listOf(group), syncDashboard = snapshot)
+        val item = currentSyncIssues(state, emptyList()).single()
+        compose.setContent { ContakoTheme {
+            val observed = model.uiState.collectAsState().value
+            SyncIssueCard(item, observed, model) { error("No sign-in from group review") }
+        } }
+        compose.onNodeWithText(compose.activity.getString(R.string.sync_issue_group_review_body)).assertIsDisplayed()
+        assertEquals(0, compose.onAllNodesWithText(compose.activity.getString(R.string.sync_issue_saved)).fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodesWithText(compose.activity.getString(R.string.sync_issue_diagnostics)).fetchSemanticsNodes().size)
+        compose.onNodeWithText(compose.activity.getString(R.string.sync_issue_group_review_action)).performClick()
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(group.id, model.uiState.value.navigation.current.selectedId)
+            assertEquals(RootDestination.GROUPS, model.uiState.value.navigation.destination)
+            assertEquals(snapshot, recovery.status.value)
+            owner.viewModelStore.clear()
+        }
+    }
 
     @Test fun knownLocalValidationRendersBothCorrectionsInsteadOfUnknownFieldAdvice() {
         val contact = CanonicalContact("synthetic-owner", "invalid", actionRequiredReasons = setOf("MISSING_NAME", "INVALID_EMAIL"),

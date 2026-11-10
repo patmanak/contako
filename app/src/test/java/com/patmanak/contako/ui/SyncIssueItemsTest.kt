@@ -163,6 +163,24 @@ class SyncIssueItemsTest {
         assertEquals(SyncIssueAction.REVIEW_ITEM, issue.advice.action)
     }
 
+    @Test fun unverifiedPartialGroupHasOneScopedReviewTargetAndConciseSpecificAdvice() {
+        val group = ContactGroup("synthetic-owner", "legacy-group", "Synthetic group")
+        val state = ContactsUiState(actionGroups = listOf(group), syncDashboard = SyncDashboardSnapshot(
+            SyncDashboardState.BLOCKED, problem = SyncProblem.GROUP_REVIEW_REQUIRED,
+            blockedItems = listOf(SyncBlockedItem(group.id, SyncBlockedItemType.GROUP, group.name, false,
+                SyncProblem.GROUP_REVIEW_REQUIRED))))
+        val before = state.syncDashboard
+        val issue = currentSyncIssues(state, emptyList()).single()
+        assertEquals(group.id, issue.targetId)
+        assertEquals(SyncIssueScope.GROUP, issue.advice.scope)
+        assertEquals(SyncIssueCause.GROUP_REVIEW, issue.advice.cause)
+        assertEquals(SyncIssueAction.REVIEW_ITEM, issue.advice.action)
+        assertEquals(listOf(R.string.sync_issue_group_review_body), syncIssueBodyResources(issue.advice))
+        assertEquals(before, state.syncDashboard)
+        val missing = currentSyncIssues(state.copy(actionGroups = emptyList()), emptyList()).single()
+        assertEquals(SyncIssueAction.VIEW_DIAGNOSTICS, missing.advice.action)
+    }
+
     @Test fun independentIssuesSurviveAnAccountAuthenticationBanner() {
         val state = ContactsUiState(actionContacts = listOf(contact), syncDashboard = SyncDashboardSnapshot(
             SyncDashboardState.AUTHENTICATION_REQUIRED, problem = SyncProblem.AUTHENTICATION_REQUIRED,

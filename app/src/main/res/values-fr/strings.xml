@@ -417,6 +417,8 @@
     <string name="sync_issue_unknown">La cause n’a pas été identifiée. Ouvrez le diagnostic local pour consulter l’historique technique.</string>
     <string name="sync_issue_saved">L’opération en attente est enregistrée sur cet appareil.</string>
     <string name="sync_issue_review">Examiner l’élément</string>
+    <string name="sync_issue_group_review_body">Vérifiez les membres de ce groupe.</string>
+    <string name="sync_issue_group_review_action">Revoir le groupe</string>
     <string name="sync_issue_diagnostics">Voir le diagnostic</string>
     <string name="targeted_proton_title">Revérifier cette fiche Proton</string>
     <string name="targeted_android_title">Reprendre cette copie Android</string>

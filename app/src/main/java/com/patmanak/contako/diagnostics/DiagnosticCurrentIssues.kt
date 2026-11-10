@@ -5,7 +5,7 @@ import com.patmanak.contako.data.gateway.GatewayFailureCategory
 import com.patmanak.contako.data.sync.*
 
 enum class DiagnosticIssueScope { OUTBOX_CONTACT, OUTBOX_GROUP, REMOTE_IMPORT, ANDROID_INGEST, ANDROID_PROJECTION, REMOTE_REQUEST }
-enum class DiagnosticIssueState { PENDING, IN_FLIGHT, ACTION_REQUIRED, RETRY_WAITING, IGNORED }
+enum class DiagnosticIssueState { PENDING, IN_FLIGHT, ACTION_REQUIRED, RETRY_WAITING, IGNORED, PARTIAL }
 enum class DiagnosticAttemptBand { NONE, ONE_TO_THREE, FOUR_TO_SEVEN, EIGHT_OR_MORE }
 enum class DiagnosticIssueRead { AVAILABLE, UNAVAILABLE }
 
@@ -25,7 +25,8 @@ data class DiagnosticCurrentIssues internal constructor(
             setOf("NONE", "UNKNOWN", "MISSING_NAME", "INVALID_EMAIL", "REMOTE_ACTION_REQUIRED",
                 "AUTHENTICATION_REQUIRED", "INTERACTIVE_AUTHENTICATION_REQUIRED", "CRYPTOGRAPHIC_VERIFICATION_FAILED",
                 "VALIDATION_REJECTED", "GROUP_CAPABILITY_REQUIRED", "REMOTE_PERMISSION_REQUIRED",
-                "CONFLICT_RECOVERY_REQUIRED", "EDIT_DELETE_RECOVERY_REQUIRED", "REMOTE_DELETION_RECOVERY_REQUIRED") +
+                "CONFLICT_RECOVERY_REQUIRED", "EDIT_DELETE_RECOVERY_REQUIRED", "REMOTE_DELETION_RECOVERY_REQUIRED",
+                "PARTIAL_GROUP_SCOPE_UNVERIFIED") +
                 MutationPreparationActionRequiredReason.entries.map { it.name } +
                 GatewayContactHydrationCategory.entries.map { it.name } +
                 AndroidProjectionRepairCategory.entries.map { it.name } +

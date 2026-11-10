@@ -33,11 +33,18 @@ internal class VersionedContactInventoryCheckpoint(
     }
 }
 
-internal class ContactInventoryCheckpoint(entries: List<ContactInventoryBaseline>, val eventCursor: String? = null) {
+internal class ContactInventoryCheckpoint(
+    entries: List<ContactInventoryBaseline>,
+    val eventCursor: String? = null,
+    val eventStrategyVersion: Int = 0,
+    val lastFullScanAtEpochMillis: Long? = null,
+) {
     val entries: List<ContactInventoryBaseline> = entries.sortedBy { it.id.value }
 
     init {
         eventCursor?.let(::validateContactEventCursor)
+        require(eventStrategyVersion >= 0)
+        require(lastFullScanAtEpochMillis == null || lastFullScanAtEpochMillis >= 0)
         require(this.entries.size <= com.patmanak.contako.data.gateway.ContactInventoryPage.MAX_INVENTORY_TOTAL)
         require(this.entries.map(ContactInventoryBaseline::id).distinct().size == this.entries.size)
     }
@@ -110,6 +117,13 @@ internal class ContactInventoryPlan private constructor(
     override fun toString(): String =
         "ContactInventoryPlan(hydrate=${hydrate.size}, labelOnly=${labelOnly.size}, deleted=${deleted.size})"
 
+    /** Retains the exact reconciliation/CAS obligations; changes only the next cursor metadata. */
+    fun withEventState(cursor: String?, strategyVersion: Int, lastFullScanAtEpochMillis: Long?): ContactInventoryPlan {
+        require(completedSource == null)
+        return pending(account, expectedCheckpointGeneration, hydrate, labelOnly, deleted,
+            ContactInventoryCheckpoint(nextCheckpoint.entries, cursor, strategyVersion, lastFullScanAtEpochMillis))
+    }
+
     fun completedAfterDurableReconciliation(
         hydrated: Set<RemoteContactId>,
         labelReconciled: Set<RemoteContactId>,
@@ -174,6 +188,7 @@ internal class PersistentContactInventoryPlanner(
     private val checkpointStore: ContactInventoryCheckpointStore,
 ) {
     suspend fun eventCursor(account: AccountScope): String? = checkpointStore.load(account)?.checkpoint?.eventCursor
+    suspend fun checkpoint(account: AccountScope): VersionedContactInventoryCheckpoint? = checkpointStore.load(account)
 
     suspend fun plan(
         account: AccountScope,
@@ -182,13 +197,24 @@ internal class PersistentContactInventoryPlanner(
         events: ContactEventsDelta? = null,
         identityRepairContacts: Set<RemoteContactId> = emptySet(),
     ): ContactInventoryPlan {
+        return planSnapshot(account, inventory, checkpointStore.load(account), forceHydration, events, identityRepairContacts)
+    }
+
+    fun planSnapshot(
+        account: AccountScope,
+        inventory: ValidatedCompleteInventory,
+        loadedCheckpoint: VersionedContactInventoryCheckpoint?,
+        forceHydration: Boolean = false,
+        events: ContactEventsDelta? = null,
+        identityRepairContacts: Set<RemoteContactId> = emptySet(),
+    ): ContactInventoryPlan {
         requireAuthoritative(inventory)
-        val loadedCheckpoint = checkpointStore.load(account)
         val previous = loadedCheckpoint?.checkpoint?.entries.orEmpty().associateBy(ContactInventoryBaseline::id)
         val current = inventory.contacts.associate { metadata -> metadata.id to metadata.toBaseline() }
 
         // An event newer than the directory MUST NOT be consumed before its card can be read.
-        if (events != null && !events.refreshAll && !current.keys.containsAll(events.changedContacts)) {
+        if (events != null && !events.refreshAll && (!current.keys.containsAll(events.changedContacts) ||
+                events.deletedContacts.any { it in current })) {
             throw StaleContactInventoryPlan()
         }
 
@@ -220,7 +246,9 @@ internal class PersistentContactInventoryPlanner(
         }.keys
         // An interrupted initial import can leave a deferred card before the first inventory
         // checkpoint. Its later deletion still needs the normal targeted absence proof.
-        val deleted = (previous.keys + identityRepairContacts) - current.keys
+        // A local creation may have been acknowledged after the last inventory checkpoint.
+        // Its subsequent explicit remote deletion must not disappear during a full-read fallback.
+        val deleted = (previous.keys + identityRepairContacts + events?.deletedContacts.orEmpty()) - current.keys
         val checkpoint = ContactInventoryCheckpoint(current.values.toList(), events?.nextCursor ?: loadedCheckpoint?.checkpoint?.eventCursor)
         return ContactInventoryPlan.pending(
             account,
@@ -230,6 +258,29 @@ internal class PersistentContactInventoryPlanner(
             deleted,
             checkpoint,
         )
+    }
+
+    /** A targeted delta never claims that a merged cache is an authoritative remote inventory. */
+    fun planDelta(
+        account: AccountScope,
+        snapshot: VersionedContactInventoryCheckpoint,
+        updated: List<ContactInventoryMetadata>,
+        deleted: Set<RemoteContactId>,
+        events: ContactEventsDelta,
+        identityRepairContacts: Set<RemoteContactId> = emptySet(),
+    ): ContactInventoryPlan {
+        require(updated.map { it.id }.distinct().size == updated.size)
+        require(updated.none { it.id in deleted })
+        require(updated.all { it.coverage == ContactInventoryCoverage.PUBLIC_DIRECTORY_FIELDS_ONLY &&
+            it.versionProvenance == ContactInventoryVersionProvenance.LOCAL_INDEX_FINGERPRINT })
+        val current = snapshot.checkpoint.entries.associateBy { it.id }.toMutableMap()
+        deleted.forEach(current::remove)
+        updated.forEach { current[it.id] = it.toBaseline() }
+        return ContactInventoryPlan.pending(account, snapshot.generation,
+            (updated.map { it.id }.toSet() + identityRepairContacts).intersect(current.keys),
+            emptySet(), deleted,
+            ContactInventoryCheckpoint(current.values.toList(), events.nextCursor,
+                snapshot.checkpoint.eventStrategyVersion, snapshot.checkpoint.lastFullScanAtEpochMillis))
     }
 
     /** Called only after every planned hydration/deletion/label reconciliation commits durably. */

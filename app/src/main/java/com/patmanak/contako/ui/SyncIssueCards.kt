@@ -133,6 +133,7 @@ internal fun syncIssueBodyResources(advice: SyncIssueAdvice): List<Int> {
         SyncIssueCause.VALIDATION -> R.string.sync_issue_validation
         SyncIssueCause.CRYPTOGRAPHY -> R.string.sync_issue_crypto
         SyncIssueCause.GROUP_CAPABILITY -> R.string.sync_issue_groups
+        SyncIssueCause.GROUP_REVIEW -> R.string.sync_issue_group_review_body
         SyncIssueCause.REMOTE_PERMISSION -> R.string.sync_issue_remote_permission
         SyncIssueCause.ANDROID -> R.string.sync_issue_android_body
         SyncIssueCause.VERIFICATION -> R.string.sync_retry_verification
@@ -192,7 +193,7 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
     InfoCard(item.name?.takeIf(String::isNotBlank) ?: scopeLabel) {
         Text(scopeLabel, style = MaterialTheme.typography.labelMedium)
         syncIssueBodyResources(advice).forEach { Text(stringResource(it)) }
-        if (advice.localIntentSaved) Text(stringResource(R.string.sync_issue_saved),
+        if (advice.localIntentSaved && advice.cause != SyncIssueCause.GROUP_REVIEW) Text(stringResource(R.string.sync_issue_saved),
             style = MaterialTheme.typography.bodySmall)
         if (item.isDeleted) Text(stringResource(R.string.sync_deletion_pending))
         targetedStatus?.let { TargetedRecoveryStatusText(it) }
@@ -236,7 +237,8 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
                 SyncIssueAction.RETRY_SYNC -> R.string.sync_now
                 SyncIssueAction.RETRY_ITEM -> R.string.sync_item_retry
                 SyncIssueAction.COMPARE_VERSIONS -> R.string.conflict_review
-                SyncIssueAction.REVIEW_ITEM -> R.string.sync_issue_review
+                SyncIssueAction.REVIEW_ITEM -> if (advice.cause == SyncIssueCause.GROUP_REVIEW)
+                    R.string.sync_issue_group_review_action else R.string.sync_issue_review
                 SyncIssueAction.VIEW_DIAGNOSTICS -> R.string.sync_issue_diagnostics
                 SyncIssueAction.PREVIEW_TARGETED_RECOVERY -> if (targetedKind == TargetedRecoveryKind.PROTON_CARD)
                     R.string.targeted_proton_title else R.string.targeted_android_title
@@ -274,7 +276,8 @@ internal fun SyncIssueCard(item: SyncIssueItem, state: ContactsUiState, viewMode
             if (item.canReview && actionAdvice.action != SyncIssueAction.REVIEW_ITEM) {
                 TextButton(onClick = ::review) { Text(stringResource(R.string.sync_issue_review)) }
             }
-            if (targetIsPrimary || actionAdvice.action != SyncIssueAction.VIEW_DIAGNOSTICS) {
+            if (advice.cause != SyncIssueCause.GROUP_REVIEW &&
+                (targetIsPrimary || actionAdvice.action != SyncIssueAction.VIEW_DIAGNOSTICS)) {
                 TextButton(onClick = ::diagnostics) { Text(stringResource(R.string.sync_issue_diagnostics)) }
             }
         }

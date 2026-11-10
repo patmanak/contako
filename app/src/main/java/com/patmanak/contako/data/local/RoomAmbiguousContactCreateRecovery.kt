@@ -42,9 +42,12 @@ internal class RoomAmbiguousContactCreateRecovery(
         val targets = database.withTransaction {
             val current = snapshot(command) ?: return@withTransaction emptyList<Pair<DurableMutationCommand, Snapshot>>()
             scanTime = current.intent.lastAttemptAtEpochMillis ?: scanTime
+            // Another intent's scan cannot consume or reclassify the user's revision-bound
+            // duplicate-risk choice; only that intent's own claimed preparation may do so.
             val others = database.outboxDao().getAll(account.value).asSequence()
                 .filter { it.aggregateType == AggregateType.CONTACT.name && it.aggregateId != command.aggregateId &&
                     it.state == DurableMutationState.PENDING.name && it.blockedReason == null &&
+                    it.errorCategory != RoomAmbiguousContactCreateChoiceStore.CONFIRMED &&
                     it.nextAttemptAtEpochMillis <= scanTime && it.requiresReconciliation && it.remoteVersion == null }
                 .take(MAX_RECOVERY_TARGETS - 1).toList().map { intent ->
                     val other = DurableMutationCommand(account.value, intent.aggregateType, intent.aggregateId,

@@ -380,6 +380,9 @@ internal fun classifyGateCDataMutation(
         requestClass == GateCRequestClass.OTHER
     ) return null
     val normalizedPath = pathSegments.map(String::lowercase)
+    // Proton's targeted label read uses POST. Only this exact read route is exempt from write audit.
+    if (normalizedMethod == "POST" && normalizedPath == listOf("core", "v4", "labels", "by-ids"))
+        return null
     if (normalizedMethod == "PUT" && normalizedPath ==
         listOf("contacts", "v4", "contacts", "emails", "label")
     ) return GateCDataMutationClass.EMAIL_LABEL_ASSIGN

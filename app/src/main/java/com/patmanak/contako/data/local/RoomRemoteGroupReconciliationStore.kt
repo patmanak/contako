@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.patmanak.contako.data.gateway.AccountScope
 import com.patmanak.contako.data.gateway.AvailableContactGroups
 import com.patmanak.contako.data.gateway.RemoteContactGroup
+import com.patmanak.contako.data.gateway.RemoteGroupId
 import com.patmanak.contako.data.sync.RemoteGroupReconciliationStore
 import com.patmanak.contako.domain.model.ContactGroup
 import com.patmanak.contako.domain.model.ContactGroupDefaults
@@ -13,6 +14,9 @@ import java.security.MessageDigest
 internal class RoomRemoteGroupReconciliationStore(
     private val database: ContakoDatabase,
 ) : RemoteGroupReconciliationStore {
+    override suspend fun knownRemoteIds(account: AccountScope): Set<RemoteGroupId> =
+        database.contactGroupDao().knownActiveRemoteIds(account.value).mapTo(mutableSetOf(), ::RemoteGroupId)
+
     override suspend fun commit(account: AccountScope, groups: AvailableContactGroups) {
         database.withTransaction {
             val remoteById = groups.groups.associateBy { it.id.value }
@@ -27,6 +31,26 @@ internal class RoomRemoteGroupReconciliationStore(
             }
             stored.filter { it.group.remoteLabelId != null && it.group.remoteLabelId !in remoteById }
                 .forEach { reconcileAbsent(it) }
+        }
+    }
+
+    override suspend fun commitDelta(
+        account: AccountScope,
+        upserts: AvailableContactGroups,
+        deletedIds: Set<RemoteGroupId>,
+    ) {
+        require(upserts.groups.none { it.id in deletedIds })
+        database.withTransaction {
+            val stored = database.contactGroupDao().getAll(account.value)
+            val storedByRemoteId = stored.mapNotNull { row ->
+                row.group.remoteLabelId?.let { it to row }
+            }.toMap()
+            upserts.groups.forEach { remote ->
+                val local = storedByRemoteId[remote.id.value]
+                if (local == null) importRemote(account, remote) else reconcilePresent(local, remote)
+            }
+            val deleted = deletedIds.mapTo(mutableSetOf()) { it.value }
+            stored.filter { it.group.remoteLabelId in deleted }.forEach { reconcileAbsent(it) }
         }
     }
 
@@ -66,9 +90,24 @@ internal class RoomRemoteGroupReconciliationStore(
             return
         }
         check(outbox != null && outbox.revision == pendingRevision)
-        if (outbox.remoteVersion == fingerprint) return
-        if (outbox.operation == MutationOperation.DELETE.name) {
-            block(group, outbox, "GROUP_EDIT_DELETE_RECOVERY_REQUIRED")
+        val partial = RoomPartialGroupMutationStore(database)
+        partial.ensureScoped(local)
+        // Qualification can park an unverifiable legacy intention for explicit review.
+        // Continue only from the resulting row, never the previously captured PARTIAL state.
+        val currentIntent = requireNotNull(database.outboxDao().get(group.accountId, AggregateType.GROUP.name, group.id))
+        check(currentIntent.revision == pendingRevision)
+        if (partial.isDeferredOnly(group.accountId, group.id, group.revision) && !group.isDeleted && group.conflictState == null) {
+            // Only deferred links remain local intent. Delivered metadata follows Proton again.
+            check(database.outboxDao().updateDeferredGroupRemoteBaseline(group.accountId, group.id,
+                currentIntent.revision, currentIntent.state, currentIntent.remoteVersion, remote.id.value, fingerprint) == 1)
+            database.contactGroupDao().upsert(group.copy(name = remote.name,
+                color = remote.color ?: DEFAULT_COLOR, remoteVersion = fingerprint).toEntity())
+            return
+        }
+        if (currentIntent.state !in setOf(DurableMutationState.PENDING.name, DurableMutationState.PARTIAL.name)) return
+        if (currentIntent.remoteVersion == fingerprint) return
+        if (currentIntent.operation == MutationOperation.DELETE.name) {
+            block(group, currentIntent, "GROUP_EDIT_DELETE_RECOVERY_REQUIRED")
         } else {
             // No remote group timestamp is comparable, so D-024 deterministically preserves local.
             check(
@@ -76,7 +115,7 @@ internal class RoomRemoteGroupReconciliationStore(
                     group.accountId,
                     AggregateType.GROUP.name,
                     group.id,
-                    outbox.revision,
+                    currentIntent.revision,
                     remote.id.value,
                     fingerprint,
                 ) == 1,
@@ -87,6 +126,9 @@ internal class RoomRemoteGroupReconciliationStore(
 
     private suspend fun reconcileAbsent(local: ContactGroupWithMemberships) {
         val group = local.toDomain()
+        // Replayed tombstones must not create fresh revisions after an already durable deletion.
+        // A newly queued local intent still needs the normal absence/conflict resolution below.
+        if (group.isDeleted && group.pendingMutationRevision == null) return
         val pendingRevision = group.pendingMutationRevision
         val outbox = pendingRevision?.let {
             database.outboxDao().get(group.accountId, AggregateType.GROUP.name, group.id)
@@ -123,6 +165,13 @@ internal class RoomRemoteGroupReconciliationStore(
 
     private suspend fun block(group: ContactGroup, outbox: OutboxMutationEntity, reason: String) {
         database.contactGroupDao().upsert(group.copy(conflictState = reason).toEntity())
+        if (outbox.state == DurableMutationState.ACTION_REQUIRED.name) {
+            // A newly verified group deletion can refine an already blocked intention;
+            // it must not require or manufacture a transport retry first.
+            check(database.outboxDao().get(group.accountId, AggregateType.GROUP.name, group.id) == outbox)
+            database.outboxDao().upsert(outbox.copy(errorCategory = "CONFLICT", blockedReason = reason))
+            return
+        }
         check(
             database.outboxDao().blockConflict(
                 group.accountId,

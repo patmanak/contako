@@ -312,18 +312,28 @@ internal class RoomRemoteCanonicalReconciliationStore(
             contact.remoteVersion, kind, evidenceClock())
     }
 
-    internal suspend fun canAdoptRemote(contact: CanonicalContact): Boolean {
-        val local = database.contactDao().get(contact.accountId, contact.id)?.toDomain() ?: return pendingMembershipsFor(contact) != null
-        return pendingMembershipsFor(RoomContactUploadOverlays(database).overlayRemote(local, contact)) != null
+    internal suspend fun canAdoptRemote(contact: CanonicalContact, discardContactWriteMemberships: Boolean = false): Boolean {
+        val local = database.contactDao().get(contact.accountId, contact.id)?.toDomain()
+            ?: return pendingMembershipsFor(contact, discardContactWriteMemberships) != null
+        return pendingMembershipsFor(RoomContactUploadOverlays(database).overlayRemote(local, contact), discardContactWriteMemberships) != null
     }
 
-    private suspend fun pendingMembershipsFor(contact: CanonicalContact): List<GroupMembershipEntity>? {
+    private suspend fun pendingMembershipsFor(contact: CanonicalContact,
+        discardContactWriteMemberships: Boolean = false): List<GroupMembershipEntity>? {
         val oldEmails = database.contactDao().get(contact.accountId, contact.id)?.toDomain()
             ?.valuesOf(ContactValueKind.EMAIL).orEmpty().associateBy { it.id }
         val newEmails = contact.valuesOf(ContactValueKind.EMAIL)
         return database.contactGroupDao().getAll(contact.accountId)
             .filter { it.group.pendingMutationRevision != null }
-            .flatMap { stored -> stored.memberships.filter { it.contactId == contact.id } }
+            .flatMap { stored ->
+                val partial = RoomPartialGroupMutationStore(database)
+                partial.ensureScoped(stored)
+                val deferred = if (partial.isDeferredOnly(contact.accountId, stored.group.id, stored.group.revision))
+                    partial.deferredMemberships(contact.accountId, stored.group.id,
+                        includeContactWriteMemberships = !discardContactWriteMemberships) else null
+                stored.memberships.filter { it.contactId == contact.id &&
+                    (deferred == null || GroupMembership(it.contactId, it.emailValueId) in deferred) }
+            }
             .map { membership ->
                 val old = oldEmails[membership.emailValueId] ?: return null
                 val replacement = repeatedEmailReplacement(old, oldEmails.values.toList(), newEmails)
@@ -361,6 +371,8 @@ internal class RoomRemoteCanonicalReconciliationStore(
             database.contactPayloadDao().upsert(it.toEntity(contact.accountId, contact.id))
         }
         reconcileGroupMemberships(contact)
+        RoomPartialGroupMutationStore(database).remapMemberships(contact.accountId, contact.id, pendingMemberships,
+            oldEmails, contact.valuesOf(ContactValueKind.EMAIL))
         database.contactGroupDao().insertMemberships(pendingMemberships)
         repairedGroups.forEach { id ->
             val group = database.contactGroupDao().get(contact.accountId, id) ?: return@forEach
@@ -393,7 +405,13 @@ internal class RoomRemoteCanonicalReconciliationStore(
         val groupDao = database.contactGroupDao()
         // Proton labels are remote identifiers; canonical groups key on their own id.
         val byRemoteLabel = groupDao.getAll(contact.accountId)
-            .filter { it.group.pendingMutationRevision == null }
+            .filter { stored ->
+                val partial = RoomPartialGroupMutationStore(database)
+                partial.ensureScoped(stored)
+                !stored.group.isDeleted && stored.group.conflictState == null &&
+                    (stored.group.pendingMutationRevision == null ||
+                        partial.isDeferredOnly(contact.accountId, stored.group.id, stored.group.revision))
+            }
             .mapNotNull { stored -> stored.group.remoteLabelId?.let { it to stored.toDomain() } }
             .toMap()
         if (byRemoteLabel.isEmpty()) return

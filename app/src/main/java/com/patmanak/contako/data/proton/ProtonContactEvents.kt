@@ -5,6 +5,7 @@ import com.patmanak.contako.data.gateway.GatewayFailureCategory
 import com.patmanak.contako.data.gateway.GatewayOutcome
 import com.patmanak.contako.data.gateway.RemoteContactId
 import com.patmanak.contako.data.gateway.RemoteEmailId
+import com.patmanak.contako.data.gateway.RemoteGroupId
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -24,8 +25,17 @@ internal class ContactEventsDelta(
     val changedContacts: Set<RemoteContactId>,
     val refreshAll: Boolean,
     val changedEmails: Set<RemoteEmailId> = emptySet(),
+    val deletedContacts: Set<RemoteContactId> = emptySet(),
+    val deletedEmails: Set<RemoteEmailId> = emptySet(),
+    val changedGroups: Set<RemoteGroupId> = emptySet(),
+    val deletedGroups: Set<RemoteGroupId> = emptySet(),
 ) {
-    init { validateContactEventCursor(nextCursor) }
+    init {
+        validateContactEventCursor(nextCursor)
+        require(changedContacts.intersect(deletedContacts).isEmpty())
+        require(changedEmails.intersect(deletedEmails).isEmpty())
+        require(changedGroups.intersect(deletedGroups).isEmpty())
+    }
     override fun toString(): String = "ContactEventsDelta(REDACTED)"
 }
 
@@ -41,7 +51,8 @@ internal interface ProtonContactEventsTransport {
 /**
  * Contacts-only v6 feed used by Proton Web; no mail/account payload acquisition.
  * Wire reference: ProtonMail/WebClients, packages/shared/lib/api/events.ts.
- * Empty live responses omit collections, despite the TypeScript nullable declaration.
+ * Empty live responses omit collections, despite the TypeScript nullable declaration. Contact-group
+ * Labels were also observed on this contacts feed; their actions MUST NOT be discarded.
  */
 internal class ProtonContactEventReader(private val transport: ProtonContactEventsTransport) : ProtonContactEventsGateway {
     override suspend fun read(account: AccountScope, cursor: String?): GatewayOutcome<ContactEventsDelta> = try {
@@ -63,7 +74,8 @@ internal class ProtonContactEventReader(private val transport: ProtonContactEven
         var position: String = cursor
         val visited = mutableSetOf(position)
         val actions = mutableMapOf<RemoteContactId, Int>()
-        val changedEmails = mutableSetOf<RemoteEmailId>()
+        val emailActions = mutableMapOf<RemoteEmailId, Int>()
+        val groupActions = mutableMapOf<RemoteGroupId, Int>()
         var refresh = false
         repeat(MAX_PAGES) {
             val page = parse(transport.events(account, position))
@@ -79,11 +91,23 @@ internal class ProtonContactEventReader(private val transport: ProtonContactEven
             }
             // Resolve these through the current/previous directory, never through email text.
             page.items("ContactEmails").forEach {
-                it.action()
-                changedEmails += RemoteEmailId(it.identifier())
-                require(changedEmails.size <= 100_000)
+                emailActions[RemoteEmailId(it.identifier())] = it.action()
+                require(emailActions.size <= 100_000)
             }
-            if (!more) return ContactEventsDelta(next, actions.filterValues { it != 0 }.keys, refresh, changedEmails)
+            page.items("Labels").forEach {
+                groupActions[RemoteGroupId(it.identifier())] = it.action()
+                require(groupActions.size <= 100_000)
+            }
+            if (!more) return ContactEventsDelta(
+                nextCursor = next,
+                changedContacts = actions.filterValues { it != 0 }.keys,
+                refreshAll = refresh,
+                changedEmails = emailActions.filterValues { it != 0 }.keys,
+                deletedContacts = actions.filterValues { it == 0 }.keys,
+                deletedEmails = emailActions.filterValues { it == 0 }.keys,
+                changedGroups = groupActions.filterValues { it != 0 }.keys,
+                deletedGroups = groupActions.filterValues { it == 0 }.keys,
+            )
             require(next != position && visited.add(next))
             position = next
         }

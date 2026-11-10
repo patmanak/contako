@@ -818,6 +818,10 @@ internal class RoomContactRepository(
     ) {
         groupIds.distinct().forEach { groupId ->
             val stored = database.contactGroupDao().get(accountId, groupId) ?: return@forEach
+            val partial = RoomPartialGroupMutationStore(database)
+            partial.ensureScoped(stored)
+            if (database.outboxDao().get(accountId, AggregateType.GROUP.name, groupId)?.blockedReason ==
+                "PARTIAL_GROUP_SCOPE_UNVERIFIED") return@forEach
             checkpoint(checkpoints.beforeGroup)
             val revised = stored.group.copy(
                 revision = stored.group.revision + 1L,
@@ -825,6 +829,7 @@ internal class RoomContactRepository(
                 pendingMutationRevision = stored.group.revision + 1L,
             )
             database.contactGroupDao().upsert(revised)
+            partial.advanceScope(accountId, groupId, stored.group.revision, revised.revision)
             checkpoint(checkpoints.afterGroup)
             val currentIntent = database.outboxDao().get(accountId, AggregateType.GROUP.name, groupId)
             val operation = if (revised.remoteLabelId == null || currentIntent?.operation == MutationOperation.UPSERT.name) {

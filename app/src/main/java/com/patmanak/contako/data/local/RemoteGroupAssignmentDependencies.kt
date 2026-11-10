@@ -22,6 +22,7 @@ internal data class RemoteGroupDependencyBaselineEntity(
     @ColumnInfo(name = "group_id") val groupId: String,
     @ColumnInfo(name = "remote_label_id") val remoteLabelId: String?,
     val complete: Boolean,
+    @ColumnInfo(name = "deferred_only_revision") val deferredOnlyRevision: Long? = null,
 ) { override fun toString() = "RemoteGroupDependencyBaselineEntity(REDACTED)" }
 
 /** No value FK: removed email occurrences must retain their remote binding until verified acknowledgement. */
@@ -35,6 +36,7 @@ internal data class RemoteGroupDependencyEdgeEntity(
     /** Empty means a durable local dependency with no acknowledged remote binding yet. */
     @ColumnInfo(name = "remote_email_id") val remoteEmailId: String,
     @ColumnInfo(name = "captured_revision") val capturedRevision: Long,
+    @ColumnInfo(name = "is_deferred_intent", defaultValue = "0") val isDeferredIntent: Boolean = false,
 ) { override fun toString() = "RemoteGroupDependencyEdgeEntity(REDACTED)" }
 
 internal data class RemoteGroupEmailBindingRecord(
@@ -82,6 +84,11 @@ internal class RoomRemoteGroupAssignmentDependencies(private val database: Conta
         check(database.inTransaction())
         val group = database.contactGroupDao().get(account.value, groupId)?.group
         val existing = dao.baseline(account.value, groupId)
+        // An explicit group/membership edit replaces the previous deferred-only intention.
+        if (existing?.deferredOnlyRevision != null) {
+            dao.upsertBaseline(existing.copy(deferredOnlyRevision = null))
+            dao.upsertEdges(dao.edges(account.value, groupId).map { it.copy(isDeferredIntent = false) })
+        }
         if (existing == null || existing.remoteLabelId != group?.remoteLabelId) {
             // A legacy remote group remains unqualified until a verified membership read.
             dao.upsertBaseline(RemoteGroupDependencyBaselineEntity(account.value, groupId, group?.remoteLabelId,
@@ -101,6 +108,9 @@ internal class RoomRemoteGroupAssignmentDependencies(private val database: Conta
         check(database.inTransaction())
         require(previous.accountId == account.value)
         val groups = database.contactGroupDao().getAll(account.value)
+        // Qualify legacy parked intent while its original omission overlay still exists,
+        // before local value replacement can remove the evidence of which link was deferred.
+        groups.forEach { RoomPartialGroupMutationStore(database).ensureScoped(it) }
         val remoteGroups = groups.filter { it.group.remoteLabelId != null }
             .groupBy { requireNotNull(it.group.remoteLabelId) }
         val edges = mutableListOf<RemoteGroupDependencyEdgeEntity>()
@@ -114,7 +124,10 @@ internal class RoomRemoteGroupAssignmentDependencies(private val database: Conta
             linked.forEach { groupId -> edges += RemoteGroupDependencyEdgeEntity(account.value, groupId,
                 previous.id, value.id, value.metadata[PROTON_EMAIL_ID_KEY].orEmpty(), previous.revision) }
         }
-        dao.upsertEdges(edges)
+        val deferred = edges.groupBy { it.groupId }.flatMap { (groupId, _) -> dao.edges(account.value, groupId) }
+            .filter { it.isDeferredIntent }.map { Triple(it.groupId, it.contactId, it.emailValueId) }.toSet()
+        dao.upsertEdges(edges.map { edge -> edge.copy(isDeferredIntent =
+            Triple(edge.groupId, edge.contactId, edge.emailValueId) in deferred) })
     }
 
     suspend fun requiresVerifiedMembership(account: AccountScope, groupId: String): Boolean = database.withTransaction {
@@ -136,8 +149,14 @@ internal class RoomRemoteGroupAssignmentDependencies(private val database: Conta
         if (group.revision != expectedGroupRevision || group.remoteLabelId != remoteLabelId.value)
             return@withTransaction VerifiedGroupMembershipRecord.STALE
         val mapped = mapRemoteEdges(account, groupId, remoteEmailIds)
-        dao.upsertBaseline(RemoteGroupDependencyBaselineEntity(account.value, groupId, remoteLabelId.value, mapped != null))
-        if (mapped != null) dao.upsertEdges(mapped)
+        val retainedRevision = dao.baseline(account.value, groupId)?.deferredOnlyRevision?.takeIf { it == group.revision }
+        dao.upsertBaseline(RemoteGroupDependencyBaselineEntity(account.value, groupId, remoteLabelId.value, mapped != null,
+            retainedRevision))
+        if (mapped != null) {
+            val deferred = dao.edges(account.value, groupId).filter { it.isDeferredIntent }
+                .map { it.contactId to it.emailValueId }.toSet()
+            dao.upsertEdges(mapped.map { it.copy(isDeferredIntent = (it.contactId to it.emailValueId) in deferred) })
+        }
         if (mapped != null) VerifiedGroupMembershipRecord.MAPPED else VerifiedGroupMembershipRecord.INCOMPLETE
     }
 

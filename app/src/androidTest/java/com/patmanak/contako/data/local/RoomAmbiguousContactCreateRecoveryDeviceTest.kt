@@ -535,6 +535,91 @@ class RoomAmbiguousContactCreateRecoveryDeviceTest {
         assertNull(choices.offerRevision(ACCOUNT, LOCAL_ID))
     }
 
+    @Test fun sharedIncompleteScanPreservesAnotherConfirmedChoiceAtItsRetryBudgetAndAfterRestart() = runBlocking {
+        val local = seed()
+        database.outboxDao().upsert(intent().copy(lastAttemptAtEpochMillis = 1_000))
+        val other = seedSibling(local, "confirmed-other").copy(
+            state = DurableMutationState.ACTION_REQUIRED.name, blockedReason = "REMOTE_ACTION_REQUIRED",
+            errorCategory = "RECONCILIATION_INCOMPLETE", attemptCount = 8,
+            nextAttemptAtEpochMillis = 900, lastAttemptAtEpochMillis = 500)
+        database.outboxDao().upsert(other)
+        assertTrue(RoomAmbiguousContactCreateChoiceStore(database).confirm(ACCOUNT, other.aggregateId, 3))
+        val confirmed = requireNotNull(database.outboxDao().get(ACCOUNT.value, "CONTACT", other.aggregateId))
+        val unchangedContact = database.contactDao().get(ACCOUNT.value, other.aggregateId)
+        val unchangedPayload = database.contactPayloadDao().get(ownerKey(ACCOUNT.value, other.aggregateId))
+        remote = listOf(card("unreadable", "unrelated-uid"))
+        cardFailure = GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED
+
+        assertEquals(GatewayFailureCategory.RECONCILIATION_INCOMPLETE,
+            (recovery().prepare(command()) as GatewayOutcome.Failure).category)
+        assertEquals(confirmed, database.outboxDao().get(ACCOUNT.value, "CONTACT", other.aggregateId))
+        assertEquals(unchangedContact, database.contactDao().get(ACCOUNT.value, other.aggregateId))
+        assertEquals(unchangedPayload, database.contactPayloadDao().get(ownerKey(ACCOUNT.value, other.aggregateId)))
+        assertEquals(2, inventoryReads)
+        assertEquals(1, cardReads)
+
+        database.close(); database = ContakoDatabase.create(context, DATABASE)
+        assertTrue(RoomOutboxStore(database).claim(confirmed, 1_000))
+        val otherCommand = DurableMutationCommand(ACCOUNT.value, "CONTACT", other.aggregateId, 3,
+            RemoteMutationOperation.CREATE, confirmed.attemptCount, confirmed.nextAttemptAtEpochMillis,
+            requiresReconciliation = true)
+        assertSame(MutationPreparation.UploadAllowed,
+            success(recovery(permit = { error("A confirmed choice must not scan") }).prepare(otherCommand)))
+        val consumed = requireNotNull(database.outboxDao().get(ACCOUNT.value, "CONTACT", other.aggregateId))
+        assertFalse(consumed.requiresReconciliation)
+        assertNull(consumed.errorCategory)
+        assertEquals(8, consumed.attemptCount)
+        assertEquals(900L, consumed.nextAttemptAtEpochMillis)
+        assertEquals(unchangedContact, database.contactDao().get(ACCOUNT.value, other.aggregateId))
+        assertEquals(unchangedPayload, database.contactPayloadDao().get(ownerKey(ACCOUNT.value, other.aggregateId)))
+        assertEquals(2, inventoryReads)
+        assertEquals(1, cardReads)
+    }
+
+    @Test fun choiceConfirmedDuringAnotherScanIsNotReclassifiedByItsCapturedFailure() = runBlocking {
+        val local = seed()
+        val other = seedSibling(local, "confirmed-during-read").copy(attemptCount = 8)
+        database.outboxDao().upsert(other)
+        remote = listOf(card("readable", "unrelated-readable"), card("unreadable", "unrelated-unreadable"))
+        cardFailures = mapOf("unreadable" to GatewayFailureCategory.CRYPTOGRAPHIC_VERIFICATION_FAILED)
+        var confirmed: OutboxMutationEntity? = null
+        afterCardRead = {
+            database.outboxDao().upsert(other.copy(state = DurableMutationState.ACTION_REQUIRED.name,
+                blockedReason = "REMOTE_ACTION_REQUIRED", errorCategory = "RECONCILIATION_INCOMPLETE"))
+            assertTrue(RoomAmbiguousContactCreateChoiceStore(database).confirm(ACCOUNT, other.aggregateId, 3))
+            confirmed = database.outboxDao().get(ACCOUNT.value, "CONTACT", other.aggregateId)
+        }
+
+        assertEquals(GatewayFailureCategory.RECONCILIATION_INCOMPLETE,
+            (recovery().prepare(command()) as GatewayOutcome.Failure).category)
+        assertNotNull(confirmed)
+        assertEquals(confirmed, database.outboxDao().get(ACCOUNT.value, "CONTACT", other.aggregateId))
+        assertEquals(RoomAmbiguousContactCreateChoiceStore.CONFIRMED, confirmed!!.errorCategory)
+        assertEquals(8, confirmed!!.attemptCount)
+        assertEquals(2, inventoryReads)
+        assertEquals(2, cardReads)
+    }
+
+    @Test fun uidCollisionAfterExplicitConfirmationStillPreventsConsumingThatChoice() = runBlocking {
+        seed()
+        database.outboxDao().upsert(intent().copy(state = DurableMutationState.ACTION_REQUIRED.name,
+            blockedReason = "REMOTE_ACTION_REQUIRED", errorCategory = "RECONCILIATION_INCOMPLETE", attemptCount = 8))
+        assertTrue(RoomAmbiguousContactCreateChoiceStore(database).confirm(ACCOUNT, LOCAL_ID, 3))
+        val original = requireNotNull(database.contactDao().getEntity(ACCOUNT.value, LOCAL_ID))
+        database.contactDao().upsert(original.copy(id = "new-uid-collision",
+            ownerKey = ownerKey(ACCOUNT.value, "new-uid-collision")))
+        assertTrue(RoomOutboxStore(database).claim(intent(), 1_000))
+        val claimed = intent()
+
+        assertReason(MutationPreparationActionRequiredReason.REVISION_MISMATCH,
+            recovery().prepare(command()))
+        assertEquals(claimed, intent())
+        assertTrue(intent().requiresReconciliation)
+        assertEquals(RoomAmbiguousContactCreateChoiceStore.CONFIRMED, intent().errorCategory)
+        assertEquals(0, inventoryReads)
+        assertEquals(0, cardReads)
+    }
+
     @Test fun localEditInvalidatesConfirmedCreateChoiceWithoutClearingDeliveryAmbiguity() = runBlocking {
         seed()
         database.outboxDao().upsert(intent().copy(state = DurableMutationState.ACTION_REQUIRED.name,

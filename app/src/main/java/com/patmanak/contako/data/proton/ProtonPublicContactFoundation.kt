@@ -176,7 +176,7 @@ internal class ProtonPublicContactGateway(
                     throw ProtonMalformedContactResponse()
                 }
                 generation++
-                InventorySnapshot(generation, contacts.map(::toInventoryMetadata)).also { snapshot = it }
+                InventorySnapshot(generation, contacts.map(::toPublicContactInventoryMetadata)).also { snapshot = it }
             } else {
                 snapshot?.takeIf { it.nextCursor == cursor } ?: throw ProtonInvalidInventoryCursor()
             }
@@ -354,31 +354,6 @@ internal class ProtonPublicContactGateway(
             throw ProtonInvalidContactMutation()
     }
 
-    private fun toInventoryMetadata(contact: Contact): ContactInventoryMetadata {
-        require(contact.id.id.isNotBlank())
-        require(contact.contactEmails.size <= ContactInventoryMetadata.MAX_REFERENCES_PER_CONTACT)
-        val emailIds = contact.contactEmails.map { RemoteEmailId(it.id.id) }
-        val groupIds = contact.contactEmails.flatMap { it.labelIds }.distinct().map(::RemoteGroupId)
-        val memberships = contact.contactEmails.map { email ->
-            RemoteEmailGroupMembership(
-                emailId = RemoteEmailId(email.id.id),
-                groupIds = email.labelIds.distinct().map(::RemoteGroupId),
-            )
-        }
-        return ContactInventoryMetadata(
-            id = RemoteContactId(contact.id.id),
-            displayName = contact.name,
-            version = fingerprint(contact),
-            sizeBytes = null,
-            modifiedAtEpochSeconds = null,
-            emailIds = emailIds,
-            groupIds = groupIds,
-            versionProvenance = ContactInventoryVersionProvenance.LOCAL_INDEX_FINGERPRINT,
-            coverage = ContactInventoryCoverage.PUBLIC_DIRECTORY_FIELDS_ONLY,
-            emailGroupMemberships = memberships,
-        )
-    }
-
     private fun validateHydrationBounds(contact: ContactWithCards) {
         if (contact.contactCards.isEmpty() || contact.contactCards.size > MAX_CARDS_PER_CONTACT ||
             contact.contactEmails.size > ContactInventoryMetadata.MAX_REFERENCES_PER_CONTACT
@@ -493,6 +468,32 @@ internal class ProtonPublicContactGroupGateway(
         const val DEFAULT_GROUP_COLOR = ContactGroupDefaults.CREATE_COLOR
         val GROUP_COLOR = Regex("^#[0-9A-Fa-f]{6}$")
     }
+}
+
+/** Identical public metadata mapping for complete inventories and event-targeted reads. */
+internal fun toPublicContactInventoryMetadata(contact: Contact): ContactInventoryMetadata {
+    require(contact.id.id.isNotBlank())
+    require(contact.contactEmails.size <= ContactInventoryMetadata.MAX_REFERENCES_PER_CONTACT)
+    val emailIds = contact.contactEmails.map { RemoteEmailId(it.id.id) }
+    val groupIds = contact.contactEmails.flatMap { it.labelIds }.distinct().map(::RemoteGroupId)
+    val memberships = contact.contactEmails.map { email ->
+        RemoteEmailGroupMembership(
+            emailId = RemoteEmailId(email.id.id),
+            groupIds = email.labelIds.distinct().map(::RemoteGroupId),
+        )
+    }
+    return ContactInventoryMetadata(
+        id = RemoteContactId(contact.id.id),
+        displayName = contact.name,
+        version = fingerprint(contact),
+        sizeBytes = null,
+        modifiedAtEpochSeconds = null,
+        emailIds = emailIds,
+        groupIds = groupIds,
+        versionProvenance = ContactInventoryVersionProvenance.LOCAL_INDEX_FINGERPRINT,
+        coverage = ContactInventoryCoverage.PUBLIC_DIRECTORY_FIELDS_ONLY,
+        emailGroupMemberships = memberships,
+    )
 }
 
 private fun fingerprint(contact: Contact): RemoteVersion {

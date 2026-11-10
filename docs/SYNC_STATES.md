@@ -154,6 +154,8 @@ confirm **Create anyway**, acknowledging duplicate risk. This permission MUST be
 revision-bound, invalidated by an edit and consumed only by the serialized
 preparation of that intent. It is not an automatic absence proof; retry/server
 deadlines and all ownership guards still apply.
+Another creation's shared verification scan MUST NOT consume, exhaust or
+reclassify this confirmed choice, including after database reopen.
 
 Per-card import failures MUST become durable obligations before the inventory/event
 checkpoint advances. Transient obligations retain deadlines and Retry-After and
@@ -181,6 +183,28 @@ It MUST NOT count as a queued write, immediate progress or retryable I/O; sign-o
 MUST still count the retained intent. Correction or a relevant accepted email
 identity change MUST reactivate guarded preparation. Unchanged ordinary passes
 MUST NOT reread the group's remote membership solely for that retained input.
+After delivery, retained authority MUST cover only the deferred links, with a
+durable revision-bound scope. Remote additions/removals of already delivered
+members MUST remain authoritative. A later correction of a deferred link MUST
+merge it additively with fresh remote memberships, not replay the old complete
+snapshot. An explicit group-membership edit replaces that restricted intent with
+the newly saved user choice. Retry, process death and contact identity remapping
+MUST retain the distinction; missing legacy proof MUST NOT invent delivery.
+Before updating a delivered contact in a deferred-only group, Contako MUST
+observe current remote membership and retain only that contact's proven
+restoration links. Both the outgoing card and post-acknowledgement assignment
+MUST respect that observation; a stale clear category MUST NOT resurrect a
+remote removal. Unknown categories and independent group intents MUST survive.
+An explicitly edited category MUST NOT be erased as a stale imported value.
+If its relationship cannot be reconciled safely, the PUT MUST remain blocked
+with the user's values intact.
+Lost acknowledgements and identity remapping MUST retain the exact restoration
+scope, without reopening a permanent refusal or resetting retry history.
+When legacy deferred scope cannot be verified, the issue MUST offer review of
+the affected owned group. Opening it MUST NOT mutate intent; only an explicit
+save MAY replace its scope with the user's current selection.
+Sanitized current-issue reports MUST include PARTIAL group work independently
+of the contact validation cause, without exporting group/contact identities.
 Exhausted network, timeout, rate-limit, service and unknown transient failures
 MUST remain visible while permitting at most one automatic probe approximately
 daily through ordinary synchronization. The daily and manual paths MUST share

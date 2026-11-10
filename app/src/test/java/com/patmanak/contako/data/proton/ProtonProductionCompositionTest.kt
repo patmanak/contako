@@ -103,6 +103,19 @@ class ProtonProductionCompositionTest {
     }
 
     @Test
+    fun `targeted group lookup is a read while nearby writes retain their audit classification`() {
+        val path = listOf("core", "v4", "labels", "by-ids")
+        assertEquals(GateCRequestClass.GROUP, classifyGateCRequest("POST", path))
+        assertEquals(null, classifyGateCDataMutation("POST", path))
+        assertEquals(GateCDataMutationClass.GROUP_CREATE,
+            classifyGateCDataMutation("POST", listOf("core", "v4", "labels")))
+        assertEquals(GateCDataMutationClass.GROUP_CREATE,
+            classifyGateCDataMutation("POST", path + "extra"))
+        assertEquals(GateCDataMutationClass.GROUP_UPDATE, classifyGateCDataMutation("PUT", path))
+        assertEquals(GateCDataMutationClass.GROUP_DELETE, classifyGateCDataMutation("DELETE", path))
+    }
+
+    @Test
     fun `Gate D wire routes distinguish maintained reads from replaceable legacy mutations`() {
         val api = ProtonGateDWireApi::class.java
         assertEquals("contacts/v4/contacts", requireNotNull(api.methods.single { it.name == "createContacts" }
@@ -111,6 +124,10 @@ class ProtonProductionCompositionTest {
             .getAnnotation(GET::class.java)).value)
         assertEquals("contacts/v4/contacts/emails", requireNotNull(api.methods.single { it.name == "getContactEmails" }
             .getAnnotation(GET::class.java)).value)
+        assertEquals("contacts/v4/contacts/emails/{emailId}", requireNotNull(api.methods.single { it.name == "contactEmail" }
+            .getAnnotation(GET::class.java)).value)
+        assertEquals("core/v4/labels/by-ids", requireNotNull(api.methods.single { it.name == "contactGroupsByIds" }
+            .getAnnotation(POST::class.java)).value)
         assertEquals("contacts/v4/contacts/emails/label", api.methods.single { it.name == "labelContactEmails" }
             .getAnnotation(PUT::class.java).let(::requireNotNull).value)
         assertEquals("contacts/v4/contacts/emails/unlabel", api.methods.single { it.name == "unlabelContactEmails" }

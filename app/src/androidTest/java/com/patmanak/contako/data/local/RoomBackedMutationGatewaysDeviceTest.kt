@@ -1,6 +1,7 @@
 package com.patmanak.contako.data.local
 
 import android.content.Context
+import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.patmanak.contako.data.gateway.AccountScope
@@ -20,6 +21,10 @@ import com.patmanak.contako.data.gateway.RemoteContactId
 import com.patmanak.contako.data.gateway.RemoteEmailId
 import com.patmanak.contako.data.gateway.RemoteGroupId
 import com.patmanak.contako.data.gateway.RemoteVersion
+import com.patmanak.contako.data.gateway.VerifiedContactCard
+import com.patmanak.contako.data.proton.ProtonContactVCardCodec
+import com.patmanak.contako.data.proton.ProtonPlainContactCard
+import com.patmanak.contako.data.proton.parseSingleCompleteVCard
 import com.patmanak.contako.data.proton.AuthoritativeEmailGroupMembership
 import com.patmanak.contako.data.proton.ProtonEmailGroupMembershipReader
 import com.patmanak.contako.data.sync.RoomBackedMutationPreparationGateway
@@ -526,6 +531,500 @@ class RoomBackedMutationGatewaysDeviceTest {
         assertEquals("healthy-second", repository.getContact(ACCOUNT.value, "healthy")!!.values[1].metadata["protonEmailId"])
     }
 
+    @Test fun parkedGroupAcceptsRemoteMemberRemovalAndAdditionWithoutRestoringItsOldSnapshot() = runBlocking {
+        createDeferredOnlyGroup()
+        val parked = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+        remote.memberships.clear()
+        adoptRemoteMembership("healthy", false)
+        remote.memberships += RemoteEmailId("external-email")
+        adoptRemoteMembership("external", true)
+        val members = database.contactGroupDao().get(ACCOUNT.value, "group")!!.toDomain().memberships.toSet()
+        assertEquals(setOf(GroupMembership("partial", "unfinished"), GroupMembership("external", "external-email-value")), members)
+        assertEquals(parked, database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        val reads = remote.membershipReads
+        val writes = remote.assignmentWrites
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        assertEquals(reads, remote.membershipReads)
+        assertEquals(writes, remote.assignmentWrites)
+        assertEquals(setOf(RemoteEmailId("external-email")), remote.memberships)
+        assertEquals("Retained private note", repository.getContact(ACCOUNT.value, "healthy")!!.valuesOf(ContactValueKind.NOTE).single().value)
+    }
+
+    @Test fun editingADeliveredMemberBeforeCardRefreshPreservesItsGroupAcrossTwoPasses() = runBlocking {
+        createDeferredOnlyGroup()
+        val healthy = repository.getContact(ACCOUNT.value, "healthy")!!
+        assertTrue(healthy.valuesOf(ContactValueKind.CATEGORY).isEmpty())
+        remote.seedVerifiedContact(healthy)
+        remote.applyClearCategoriesOnContactPut = true
+        saveContact(healthy.copy(values = healthy.values +
+            ContactValue("phone", ContactValueKind.PHONE, "+33 1 23 45 67 89", order = 0)))
+        repeat(2) { repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) } }
+        val remoteHealthy = (remote.fetch(ACCOUNT, RemoteContactId("healthy-remote")) as GatewayOutcome.Success).value
+        database.withTransaction {
+            RoomRemoteCanonicalReconciliationStore(database).reconcileTargetedVerified(ACCOUNT, remoteHealthy)
+        }
+        assertEquals(setOf(RemoteEmailId("healthy-email")), remote.memberships)
+        assertTrue(database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.any { it.contactId == "healthy" })
+        assertEquals("+33 1 23 45 67 89", repository.getContact(ACCOUNT.value, "healthy")!!.valuesOf(ContactValueKind.PHONE).single().value)
+        assertEquals("Retained private note", repository.getContact(ACCOUNT.value, "healthy")!!.valuesOf(ContactValueKind.NOTE).single().value)
+        assertEquals(DurableMutationState.PARTIAL.name, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.state)
+    }
+
+    @Test fun anEarlierWebRemovalIsNotReassertedByTheEditedContactsPut() = runBlocking {
+        createDeferredOnlyGroup()
+        val healthy = repository.getContact(ACCOUNT.value, "healthy")!!
+        remote.memberships.clear()
+        remote.seedVerifiedContact(healthy.copy(values = healthy.values.map { value ->
+            if (value.kind == ContactValueKind.EMAIL) value.copy(metadata = value.metadata + ("protonGroupIds" to "")) else value
+        }))
+        remote.applyClearCategoriesOnContactPut = true
+        saveContact(healthy.copy(values = healthy.values + ContactValue("phone", ContactValueKind.PHONE, "+33123456789", order = 0)))
+        repeat(2) { repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) } }
+        val fresh = (remote.fetch(ACCOUNT, RemoteContactId("healthy-remote")) as GatewayOutcome.Success).value
+        database.withTransaction { RoomRemoteCanonicalReconciliationStore(database).reconcileTargetedVerified(ACCOUNT, fresh) }
+        assertTrue(remote.memberships.isEmpty())
+        assertEquals(0, remote.assignmentWrites)
+        assertTrue(database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.none { it.contactId == "healthy" })
+        assertTrue(database.remoteGroupAssignmentDependencyDao().edges(ACCOUNT.value, "group")
+            .none { it.contactId == "healthy" && it.isDeferredIntent })
+    }
+
+    @Test fun staleClearCategoryDoesNotUndoWebRemovalBeforeOrAfterTheGroupReturnsClean() = runBlocking {
+        createDeferredOnlyGroup()
+        val healthy = installLinkedCategorySnapshot()
+        remote.memberships = linkedSetOf(RemoteEmailId("external-email"), RemoteEmailId("secondary-email"))
+        remote.seedVerifiedContact(healthy)
+        remote.applyClearCategoriesOnContactPut = true
+        saveContact(healthy.copy(values = healthy.values + ContactValue("phone", ContactValueKind.PHONE, "+33123456789", order = 0)))
+        repeat(4) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        assertEquals(setOf(RemoteEmailId("external-email"), RemoteEmailId("secondary-email")), remote.memberships)
+        val pendingCard = repository.getContact(ACCOUNT.value, "healthy")!!
+        assertEquals(setOf("Unlisted", "Independent"), pendingCard.valuesOf(ContactValueKind.CATEGORY).map { it.value }.toSet())
+        val received = (remote.contactMutations.last() as ContactMutation.Update).contact
+        val encoded = ProtonContactVCardCodec().encode(received)
+        assertFalse(encoded.clear.contains("CATEGORIES:Group"))
+        assertTrue(encoded.clear.contains("ITEM1.CATEGORIES:Unlisted"))
+        assertTrue(encoded.clear.contains("ITEM2.CATEGORIES:Independent"))
+        assertTrue(encoded.signed.contains("X-UNRELATED:preserved"))
+        // drain() covers only the outbox. The following normal verified import models
+        // the next full sync pass that projects the acknowledged card's LabelIDs locally.
+        val fresh = (remote.fetch(ACCOUNT, RemoteContactId("healthy-remote")) as GatewayOutcome.Success).value
+        database.withTransaction { RoomRemoteCanonicalReconciliationStore(database).reconcileTargetedVerified(ACCOUNT, fresh) }
+        assertTrue(database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.none {
+            it.contactId == "healthy" && it.emailValueId == healthy.valuesOf(ContactValueKind.EMAIL).first().id
+        })
+        // Finish the unrelated invalid member, then repeat an ordinary edit in CLEAN mode.
+        adoptRemoteMembership("external", true)
+        val partial = repository.getContact(ACCOUNT.value, "partial")!!
+        saveContact(partial.copy(values = partial.values.map { it.copy(value = "corrected@example.test") }))
+        val execution = RoomMutationExecutionStore(database)
+        val command = execution.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "CONTACT" }
+        assertTrue(execution.claim(command, 1_000))
+        assertTrue(execution.acknowledgeAndFinish(command, RemoteMutationAcknowledgement(partial.remoteContactId,
+            "corrected-version", emailIdsByValueId = mapOf("unfinished" to "corrected-email"))))
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        assertNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        val clean = repository.getContact(ACCOUNT.value, "healthy")!!
+        saveContact(clean.copy(values = clean.values.map { if (it.id == "phone") it.copy(value = "+33987654321") else it }))
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        assertEquals(setOf(RemoteEmailId("external-email"), RemoteEmailId("secondary-email"), RemoteEmailId("corrected-email")), remote.memberships)
+        assertEquals("+33987654321", repository.getContact(ACCOUNT.value, "healthy")!!.valuesOf(ContactValueKind.PHONE).single().value)
+        assertEquals(setOf("Unlisted", "Independent"), repository.getContact(ACCOUNT.value, "healthy")!!
+            .valuesOf(ContactValueKind.CATEGORY).map { it.value }.toSet())
+    }
+
+    @Test fun aFreshPositiveLinkedCategorySurvivesThePutWithoutAnAssignmentWrite() = runBlocking {
+        createDeferredOnlyGroup()
+        val healthy = installLinkedCategorySnapshot()
+        remote.seedVerifiedContact(healthy)
+        remote.applyClearCategoriesOnContactPut = true
+        saveContact(healthy.copy(values = healthy.values + ContactValue("phone", ContactValueKind.PHONE, "+33123456789", order = 0)))
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        assertEquals(setOf(RemoteEmailId("healthy-email")), remote.memberships)
+        assertEquals(0, remote.assignmentWrites)
+        val encoded = ProtonContactVCardCodec().encode((remote.contactMutations.last() as ContactMutation.Update).contact)
+        assertTrue(encoded.clear.contains("ITEM1.CATEGORIES:Group"))
+        assertTrue(encoded.clear.contains("ITEM1.CATEGORIES:Unlisted"))
+        assertTrue(encoded.clear.contains("ITEM2.CATEGORIES:Independent"))
+    }
+
+    @Test fun anExplicitCategoryEditKeepsItsDurableIntentInsteadOfBeingDeletedByNegativeMembershipEvidence() = runBlocking {
+        createDeferredOnlyGroup()
+        val healthy = installLinkedCategorySnapshot()
+        val editedId = healthy.valuesOf(ContactValueKind.CATEGORY).single { it.value == "Unlisted" }.id
+        remote.memberships.clear()
+        remote.seedVerifiedContact(healthy)
+        remote.applyClearCategoriesOnContactPut = true
+        val values = healthy.values.map { if (it.id == editedId) it.copy(value = "Group") else it } +
+            ContactValue("phone", ContactValueKind.PHONE, "+33123456789", order = 0)
+        saveContact(healthy.copy(values = values))
+        val expected = repository.getContact(ACCOUNT.value, "healthy")!!
+        val writes = remote.contactWrites
+        orchestrator().drain(ACCOUNT.value, 1_000)
+        val held = database.outboxDao().get(ACCOUNT.value, "CONTACT", "healthy")!!
+        assertEquals(expected.revision, held.revision)
+        assertEquals(expected.revision, repository.getContact(ACCOUNT.value, "healthy")!!.pendingMutationRevision)
+        assertEquals(expected.values, repository.getContact(ACCOUNT.value, "healthy")!!.values)
+        assertEquals("Group", database.contactDao().getValue(ACCOUNT.value, "healthy", editedId)!!.value)
+        assertEquals(writes, remote.contactWrites)
+        assertTrue(remote.memberships.isEmpty())
+        database.close()
+        database = ContakoDatabase.create(context, DATABASE_NAME)
+        repository = RoomContactRepository(database, clock = { 1_000 }, elapsedRealtimeClock = { 1_000 })
+        repeat(2) { orchestrator().drain(ACCOUNT.value, 90_000) }
+        val retried = database.outboxDao().get(ACCOUNT.value, "CONTACT", "healthy")!!
+        // RECONCILIATION_INCOMPLETE is retryable. One due attempt is retained, then
+        // the second drain at the same time must respect its new backoff deadline.
+        assertTrue(retried.nextAttemptAtEpochMillis > 90_000)
+        assertEquals(held.copy(attemptCount = held.attemptCount + 1,
+            lastAttemptAtEpochMillis = 90_000, nextAttemptAtEpochMillis = retried.nextAttemptAtEpochMillis), retried)
+        assertEquals(expected.revision, repository.getContact(ACCOUNT.value, "healthy")!!.pendingMutationRevision)
+        assertEquals(expected.values, repository.getContact(ACCOUNT.value, "healthy")!!.values)
+        assertEquals(writes, remote.contactWrites)
+
+        // Only an explicit user correction replaces the held intention and permits this PUT.
+        val reviewed = repository.getContact(ACCOUNT.value, "healthy")!!
+        saveContact(reviewed.copy(values = reviewed.values.map { if (it.id == editedId) it.copy(value = "Unlisted") else it }))
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 90_000) }
+        assertNull(database.outboxDao().get(ACCOUNT.value, "CONTACT", "healthy"))
+        assertEquals("Unlisted", database.contactDao().getValue(ACCOUNT.value, "healthy", editedId)!!.value)
+        assertEquals("+33123456789", repository.getContact(ACCOUNT.value, "healthy")!!.valuesOf(ContactValueKind.PHONE).single().value)
+        assertTrue(remote.memberships.isEmpty())
+    }
+
+    @Test fun editedDeliveredMemberReassertsOnlyItsOwnReplacedIdentityAndKeepsWebAdditions() = runBlocking {
+        createDeferredOnlyGroup()
+        val healthy = repository.getContact(ACCOUNT.value, "healthy")!!
+        remote.memberships += RemoteEmailId("external-email")
+        remote.seedVerifiedContact(healthy)
+        remote.applyClearCategoriesOnContactPut = true
+        remote.replaceEmailIdsOnContactPut = true
+        // Several edits before sync must preserve the latest durable fields and one restoration.
+        saveContact(healthy.copy(displayName = "Latest local name"))
+        val edited = repository.getContact(ACCOUNT.value, "healthy")!!
+        saveContact(edited.copy(values = edited.values + ContactValue("phone", ContactValueKind.PHONE, "+33123456789", order = 0)))
+        repeat(4) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        val current = repository.getContact(ACCOUNT.value, "healthy")!!
+        val replacement = current.valuesOf(ContactValueKind.EMAIL).single().metadata.getValue("protonEmailId")
+        assertTrue(replacement != "healthy-email")
+        assertEquals(setOf(RemoteEmailId(replacement), RemoteEmailId("external-email")), remote.memberships)
+        assertEquals(1, remote.assignmentWrites)
+        assertEquals("Latest local name", current.displayName)
+        assertEquals("Retained private note", current.valuesOf(ContactValueKind.NOTE).single().value)
+        assertEquals(setOf(GroupMembership("partial", "unfinished")),
+            RoomPartialGroupMutationStore(database).deferredMemberships(ACCOUNT.value, "group"))
+    }
+
+    @Test fun lostPutAcknowledgementKeepsTheExactRestorationWitnessAcrossRestartAndRetry() = runBlocking {
+        createDeferredOnlyGroup()
+        val healthy = repository.getContact(ACCOUNT.value, "healthy")!!
+        remote.seedVerifiedContact(healthy)
+        remote.memberships += RemoteEmailId("external-email")
+        remote.applyClearCategoriesOnContactPut = true
+        remote.replaceEmailIdsOnContactPut = true
+        remote.dropNextContactPutAcknowledgement = true
+        saveContact(healthy.copy(values = healthy.values + ContactValue("phone", ContactValueKind.PHONE, "+33123456789", order = 0)))
+        orchestrator().drain(ACCOUNT.value, 1_000)
+        val attempt = database.outboxDao().get(ACCOUNT.value, "CONTACT", "healthy")!!
+        assertTrue(attempt.requiresReconciliation)
+        assertTrue(database.remoteGroupAssignmentDependencyDao().edges(ACCOUNT.value, "group")
+            .any { it.contactId == "healthy" && it.isDeferredIntent && it.remoteEmailId == "healthy-email" })
+        database.close()
+        database = ContakoDatabase.create(context, DATABASE_NAME)
+        repository = RoomContactRepository(database, clock = { 1_000 }, elapsedRealtimeClock = { 1_000 })
+        orchestrator().drain(ACCOUNT.value, attempt.nextAttemptAtEpochMillis)
+        val conflicts = RoomContactConflictStore(database)
+        val conflict = conflicts.observe(ACCOUNT.value).first().single { it.contactId == "healthy" }
+        assertTrue(conflicts.choose(ACCOUNT.value, conflict, ContactConflictChoice.LOCAL))
+        repeat(4) { orchestrator().drain(ACCOUNT.value, attempt.nextAttemptAtEpochMillis) }
+        val current = repository.getContact(ACCOUNT.value, "healthy")!!
+        val identity = current.valuesOf(ContactValueKind.EMAIL).single().metadata.getValue("protonEmailId")
+        assertEquals(setOf(RemoteEmailId(identity), RemoteEmailId("external-email")), remote.memberships)
+        assertEquals("+33123456789", current.valuesOf(ContactValueKind.PHONE).single().value)
+        assertNull(database.outboxDao().get(ACCOUNT.value, "CONTACT", "healthy"))
+    }
+
+    @Test fun choosingProtonAfterAnUncertainPutCancelsOnlyTheDeliveredMembersRestoration() = runBlocking {
+        createDeferredOnlyGroup()
+        val healthy = repository.getContact(ACCOUNT.value, "healthy")!!
+        remote.seedVerifiedContact(healthy)
+        remote.applyClearCategoriesOnContactPut = true
+        remote.dropNextContactPutAcknowledgement = true
+        saveContact(healthy.copy(values = healthy.values + ContactValue("phone", ContactValueKind.PHONE, "+33123456789", order = 0)))
+        orchestrator().drain(ACCOUNT.value, 1_000)
+        val attempt = database.outboxDao().get(ACCOUNT.value, "CONTACT", "healthy")!!
+        val remoteAfterPut = (remote.fetch(ACCOUNT, RemoteContactId("healthy-remote")) as GatewayOutcome.Success).value.contact
+        remote.seedVerifiedContact(remoteAfterPut.copy(remoteVersion = "external-edit-version", values = remoteAfterPut.values.map { value ->
+            if (value.kind != ContactValueKind.EMAIL) value else value.copy(value = "remote-replaced@example.test",
+                metadata = mapOf("protonEmailId" to "externally-replaced-email", "protonGroupIds" to ""))
+        }))
+        orchestrator().drain(ACCOUNT.value, attempt.nextAttemptAtEpochMillis)
+        val conflicts = RoomContactConflictStore(database)
+        assertTrue(conflicts.detail(ACCOUNT.value, "healthy")!!.protonChoiceAvailable)
+        assertTrue(conflicts.choose(ACCOUNT.value,
+            conflicts.observe(ACCOUNT.value).first().single { it.contactId == "healthy" }, ContactConflictChoice.PROTON))
+        repeat(3) { orchestrator().drain(ACCOUNT.value, attempt.nextAttemptAtEpochMillis) }
+        assertTrue(remote.memberships.isEmpty())
+        assertEquals(setOf(GroupMembership("partial", "unfinished")),
+            RoomPartialGroupMutationStore(database).deferredMemberships(ACCOUNT.value, "group"))
+        assertTrue(database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.none { it.contactId == "healthy" })
+        assertEquals("remote-replaced@example.test", repository.getContact(ACCOUNT.value, "healthy")!!.valuesOf(ContactValueKind.EMAIL).single().value)
+        assertEquals("unfinished", repository.getContact(ACCOUNT.value, "partial")!!.valuesOf(ContactValueKind.EMAIL).single().value)
+    }
+
+    @Test fun explicitGroupEditDuringContactWriteInvalidatesTheEarlierRestorationScope() = runBlocking {
+        createDeferredOnlyGroup()
+        val healthy = repository.getContact(ACCOUNT.value, "healthy")!!
+        remote.seedVerifiedContact(healthy)
+        remote.applyClearCategoriesOnContactPut = true
+        saveContact(healthy.copy(values = healthy.values + ContactValue("phone", ContactValueKind.PHONE, "+33123456789", order = 0)))
+        val execution = RoomMutationExecutionStore(database)
+        val command = execution.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "CONTACT" }
+        assertTrue(execution.claim(command, 1_000))
+        val partial = RoomPartialGroupMutationStore(database)
+        val scope = partial.contactWriteScopes(command)!!.single()
+        assertTrue(partial.retainContactWriteMemberships(command, scope,
+            (remote.members(ACCOUNT, RemoteGroupId("remote-group")) as GatewayOutcome.Success).value))
+        val group = database.contactGroupDao().get(ACCOUNT.value, "group")!!.toDomain()
+        saveGroup(group.copy(memberships = group.memberships.filterNot { it.contactId == "healthy" }))
+        val result = RoomBackedMutationUploadGateway(ACCOUNT, database, remote, remote, remote, remote).upload(command)
+        assertTrue(result is GatewayOutcome.Success)
+        assertTrue(execution.acknowledgeAndFinish(command, (result as GatewayOutcome.Success).value))
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        assertTrue(remote.memberships.isEmpty())
+        assertEquals(setOf(GroupMembership("partial", "unfinished")), partial.deferredMemberships(ACCOUNT.value, "group"))
+        assertTrue(database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.none { it.contactId == "healthy" })
+    }
+
+    @Test fun rejectedGroupKeepsTheContactWriteRestorationUntilExplicitCapabilityRecovery() = runBlocking {
+        createDeferredOnlyGroup()
+        var capabilityGeneration = 0L
+        val runner = orchestrator(recoveryGeneration = { capabilityGeneration })
+        // Production owns one store/runner. Observe the current epoch before injecting
+        // its refusal; constructing another store would simulate a new capability epoch.
+        runner.drain(ACCOUNT.value, 1_000)
+        val healthy = repository.getContact(ACCOUNT.value, "healthy")!!
+        remote.seedVerifiedContact(healthy)
+        remote.applyClearCategoriesOnContactPut = true
+        saveContact(healthy.copy(values = healthy.values + ContactValue("phone", ContactValueKind.PHONE, "+33123456789", order = 0)))
+        val group = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+        val blocked = group.copy(state = DurableMutationState.ACTION_REQUIRED.name,
+            blockedReason = "GROUP_CAPABILITY_REQUIRED", errorCategory = GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED.name,
+            attemptCount = 4, nextAttemptAtEpochMillis = 80_000)
+        database.outboxDao().upsert(blocked)
+        runner.drain(ACCOUNT.value, 1_000)
+        assertEquals(blocked, database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertTrue(database.remoteGroupAssignmentDependencyDao().edges(ACCOUNT.value, "group")
+            .any { it.contactId == "healthy" && it.isDeferredIntent && it.remoteEmailId == "healthy-email" })
+        val writes = remote.assignmentWrites
+        repeat(3) { runner.drain(ACCOUNT.value, 90_000) }
+        assertEquals(blocked, database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertEquals(writes, remote.assignmentWrites)
+        assertNull(database.outboxDao().get(ACCOUNT.value, "CONTACT", "healthy"))
+        assertEquals("+33123456789", repository.getContact(ACCOUNT.value, "healthy")!!.valuesOf(ContactValueKind.PHONE).single().value)
+        capabilityGeneration++ // A real caller's session/capability invalidation permits one fresh probe.
+        repeat(3) { runner.drain(ACCOUNT.value, 90_000) }
+        assertEquals(setOf(RemoteEmailId("healthy-email")), remote.memberships)
+        assertEquals(4, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.attemptCount)
+        assertEquals(DurableMutationState.PARTIAL.name, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.state)
+        assertEquals(setOf(GroupMembership("partial", "unfinished")),
+            RoomPartialGroupMutationStore(database).deferredMemberships(ACCOUNT.value, "group"))
+    }
+
+    @Test fun correctedDeferredMemberAddsOnlyItsOwnEdgeAfterRestartAndPreservesNewRemoteChoices() = runBlocking {
+        createDeferredOnlyGroup()
+        remote.memberships = linkedSetOf(RemoteEmailId("external-email"))
+        adoptRemoteMembership("healthy", false)
+        adoptRemoteMembership("external", true)
+        database.close()
+        database = ContakoDatabase.create(context, DATABASE_NAME)
+        repository = RoomContactRepository(database, clock = { 1_000 }, elapsedRealtimeClock = { 1_000 })
+        val partial = repository.getContact(ACCOUNT.value, "partial")!!
+        saveContact(partial.copy(values = partial.values.map { it.copy(value = "corrected@example.test") }))
+        val execution = RoomMutationExecutionStore(database)
+        val contactCommand = execution.eligible(ACCOUNT.value, 1_000, 20).single { it.aggregateType == "CONTACT" }
+        assertTrue(execution.claim(contactCommand, 1_000))
+        assertTrue(execution.acknowledgeAndFinish(contactCommand, RemoteMutationAcknowledgement(
+            partial.remoteContactId, "corrected-version", emailIdsByValueId = mapOf("unfinished" to "corrected-email"))))
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        assertEquals(setOf(RemoteEmailId("external-email"), RemoteEmailId("corrected-email")), remote.memberships)
+        assertNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertNull(database.contactGroupDao().get(ACCOUNT.value, "group")!!.group.pendingMutationRevision)
+        assertEquals("corrected@example.test", repository.getContact(ACCOUNT.value, "partial")!!.values.single().value)
+    }
+
+    @Test fun explicitGroupEditReplacesDeferredScopeAndCanRemoveTheDeferredMemberPermanently() = runBlocking {
+        createDeferredOnlyGroup()
+        val group = database.contactGroupDao().get(ACCOUNT.value, "group")!!.toDomain()
+        saveGroup(group.copy(memberships = emptyList()))
+        assertNull(database.remoteGroupAssignmentDependencyDao().baseline(ACCOUNT.value, "group")!!.deferredOnlyRevision)
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        assertTrue(remote.memberships.isEmpty())
+        assertNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertTrue(database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.isEmpty())
+        val partial = repository.getContact(ACCOUNT.value, "partial")!!
+        saveContact(partial.copy(displayName = "Changed unrelated contact name"))
+        RoomPartialGroupMutationStore(database).wakeForContact(ACCOUNT.value, "partial")
+        assertNull(database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+    }
+
+    @Test fun deferredScopeSurvivesTransportFailureAndDoesNotAuthorizeDeletingRemoteMembers() = runBlocking {
+        createDeferredOnlyGroup()
+        val intent = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+        database.outboxDao().upsert(intent.copy(state = DurableMutationState.PENDING.name,
+            errorCategory = GatewayFailureCategory.NETWORK_UNAVAILABLE.name, requiresReconciliation = true))
+        remote.memberships = linkedSetOf(RemoteEmailId("external-email"))
+        repeat(2) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        assertEquals(setOf(RemoteEmailId("external-email")), remote.memberships)
+        assertEquals(DurableMutationState.PARTIAL.name, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.state)
+        assertEquals(intent.revision,
+            database.remoteGroupAssignmentDependencyDao().baseline(ACCOUNT.value, "group")!!.deferredOnlyRevision)
+    }
+
+    @Test fun remotelyDeletedDeferredGroupRetainsItsIntentWithoutRecreatingOrAssigningIt() = runBlocking {
+        createDeferredOnlyGroup()
+        RoomRemoteGroupReconciliationStore(database).commit(ACCOUNT, AvailableContactGroups(emptyList()))
+        val writes = remote.assignmentWrites
+        repeat(2) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        val intent = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+        assertEquals(DurableMutationState.ACTION_REQUIRED.name, intent.state)
+        assertEquals("REMOTE_GROUP_DELETION_RECOVERY_REQUIRED", intent.blockedReason)
+        assertEquals(writes, remote.assignmentWrites)
+        assertEquals(0, remote.groupCreates)
+        assertTrue(database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.any { it.contactId == "partial" })
+    }
+
+    @Test fun aProvedDeferredGroupFollowsRemoteMetadataWithoutReassertingItsDeliveredName() = runBlocking {
+        createDeferredOnlyGroup()
+        val before = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+        val remoteGroup = RemoteContactGroup(RemoteGroupId("remote-group"), "Remote rename", "#654321")
+        RoomRemoteGroupReconciliationStore(database).commit(ACCOUNT, AvailableContactGroups(listOf(remoteGroup)))
+        val after = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+        assertEquals(before.copy(remoteVersion = remoteGroup.fingerprint()), after)
+        assertEquals("Remote rename", database.contactGroupDao().get(ACCOUNT.value, "group")!!.group.name)
+        assertEquals(before.revision, database.contactGroupDao().get(ACCOUNT.value, "group")!!.group.pendingMutationRevision)
+        assertEquals(setOf(GroupMembership("partial", "unfinished")),
+            RoomPartialGroupMutationStore(database).deferredMemberships(ACCOUNT.value, "group"))
+    }
+
+    @Test fun legacyPartialWithoutRemainingOmissionProofWaitsForExplicitReviewAcrossContactEdits() = runBlocking {
+        createDeferredOnlyGroup()
+        val dao = database.remoteGroupAssignmentDependencyDao()
+        dao.upsertBaseline(dao.baseline(ACCOUNT.value, "group")!!.copy(deferredOnlyRevision = null))
+        dao.upsertEdges(dao.edges(ACCOUNT.value, "group").map { it.copy(isDeferredIntent = false) })
+        database.contactEmailUploadOverlayDao().deleteContact(ACCOUNT.value, "partial")
+        RoomPartialGroupMutationStore(database).wakeForContact(ACCOUNT.value, "partial")
+        val blocked = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+        assertEquals(DurableMutationState.ACTION_REQUIRED.name, blocked.state)
+        assertEquals("PARTIAL_GROUP_SCOPE_UNVERIFIED", blocked.blockedReason)
+        val healthy = repository.getContact(ACCOUNT.value, "healthy")!!
+        saveContact(healthy.copy(displayName = "Local unrelated edit"))
+        assertEquals(blocked, database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertTrue(database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.any { it.contactId == "partial" })
+        assertEquals(setOf(RemoteEmailId("healthy-email")), remote.memberships)
+    }
+
+    @Test fun scopedGroupMetadataReadPreservesPermanentFailureAndInterruptedAttemptState() = runBlocking {
+        for (state in listOf(DurableMutationState.ACTION_REQUIRED, DurableMutationState.IN_FLIGHT)) {
+            database.clearAllTables()
+            remote = FakeRemoteMutations()
+            createDeferredOnlyGroup()
+            val original = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.copy(state = state.name,
+                errorCategory = GatewayFailureCategory.PERMISSION_OR_PLAN_DENIED.name,
+                blockedReason = "GROUP_CAPABILITY_REQUIRED", attemptCount = 4, nextAttemptAtEpochMillis = 90_000)
+            database.outboxDao().upsert(original)
+            val remoteGroup = RemoteContactGroup(RemoteGroupId("remote-group"), "New remote name", "#123456")
+            repeat(2) {
+                RoomRemoteGroupReconciliationStore(database).commit(ACCOUNT, AvailableContactGroups(listOf(remoteGroup)))
+                assertEquals(original.copy(remoteVersion = remoteGroup.fingerprint()),
+                    database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+                assertEquals("New remote name", database.contactGroupDao().get(ACCOUNT.value, "group")!!.group.name)
+                assertTrue(RoomPartialGroupMutationStore(database).isDeferredOnly(ACCOUNT.value, "group", original.revision))
+            }
+            assertEquals(0, database.outboxDao().updateDeferredGroupRemoteBaseline(ACCOUNT.value, "group",
+                original.revision + 1, state.name, remoteGroup.fingerprint(), "remote-group", "unproved"))
+            assertEquals(original.copy(remoteVersion = remoteGroup.fingerprint()),
+                database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+            if (state == DurableMutationState.ACTION_REQUIRED) {
+                RoomRemoteGroupReconciliationStore(database).commit(ACCOUNT, AvailableContactGroups(emptyList()))
+                val deleted = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+                assertEquals(DurableMutationState.ACTION_REQUIRED.name, deleted.state)
+                assertEquals("REMOTE_GROUP_DELETION_RECOVERY_REQUIRED", deleted.blockedReason)
+                assertEquals(original.revision, deleted.revision)
+                assertEquals(original.attemptCount, deleted.attemptCount)
+                assertFalse(database.contactGroupDao().get(ACCOUNT.value, "group")!!.group.isDeleted)
+            }
+        }
+    }
+
+    private suspend fun createDeferredOnlyGroup() {
+        saveContact(CanonicalContact(ACCOUNT.value, "partial", displayName = "Partial", values = listOf(
+            ContactValue("unfinished", ContactValueKind.EMAIL, "unfinished", order = 0))))
+        assertEquals(1, orchestrator().drain(ACCOUNT.value, 1_000).uploaded)
+        saveContact(CanonicalContact(ACCOUNT.value, "healthy", displayName = "Healthy", values = listOf(
+            ContactValue("healthy-email-value", ContactValueKind.EMAIL, "healthy@example.test", order = 0,
+                metadata = mapOf("protonEmailId" to "healthy-email", "protonGroupIds" to "remote-group")),
+            ContactValue("note", ContactValueKind.NOTE, "Retained private note", order = 1))))
+        cleanContact("healthy", "healthy-remote")
+        saveContact(CanonicalContact(ACCOUNT.value, "external", displayName = "External", values = listOf(
+            ContactValue("external-email-value", ContactValueKind.EMAIL, "external@example.test", order = 0,
+                metadata = mapOf("protonEmailId" to "external-email")))))
+        cleanContact("external", "external-remote")
+        saveGroup(ContactGroup(ACCOUNT.value, "group", "Group", remoteLabelId = "remote-group",
+            memberships = listOf(GroupMembership("partial", "unfinished"), GroupMembership("healthy", "healthy-email-value"))))
+        remote.memberships = linkedSetOf(RemoteEmailId("healthy-email"))
+        repeat(3) { orchestrator().drain(ACCOUNT.value, 1_000) }
+        val parked = database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!
+        assertEquals(DurableMutationState.PARTIAL.name, parked.state)
+        assertEquals(parked.revision, database.remoteGroupAssignmentDependencyDao().baseline(ACCOUNT.value, "group")!!.deferredOnlyRevision)
+        assertEquals(setOf(GroupMembership("partial", "unfinished")),
+            RoomPartialGroupMutationStore(database).deferredMemberships(ACCOUNT.value, "group"))
+    }
+
+    /** Model a previously hydrated card with real per-email clear-category provenance. */
+    private suspend fun installLinkedCategorySnapshot(): CanonicalContact {
+        val before = repository.getContact(ACCOUNT.value, "healthy")!!
+        fun card(body: String) = "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:linked-category\r\n$body\r\nEND:VCARD\r\n"
+        val decoded = ProtonContactVCardCodec().decode(ACCOUNT.value,
+            me.proton.core.contact.domain.entity.Contact(me.proton.core.domain.entity.UserId("synthetic-user"),
+                me.proton.core.contact.domain.entity.ContactId("healthy-remote"), "Healthy", emptyList()), listOf(
+                ProtonPlainContactCard(me.proton.core.contact.domain.entity.ContactCardType.Signed,
+                    card("FN:Healthy\r\nITEM1.EMAIL:healthy@example.test\r\nITEM2.EMAIL:secondary@example.test\r\nX-UNRELATED:preserved")),
+                ProtonPlainContactCard(me.proton.core.contact.domain.entity.ContactCardType.ClearText,
+                    card("ITEM1.CATEGORIES:Group,Unlisted\r\nITEM2.CATEGORIES:Independent")),
+            ))
+        val values = decoded.values.map { value ->
+            if (value.kind != ContactValueKind.EMAIL) value else value.copy(metadata = value.metadata +
+                ("protonEmailId" to if (value.order == 0) "healthy-email" else "secondary-email") +
+                ("protonGroupIds" to if (value.order == 0) "remote-group" else ""))
+        } + before.valuesOf(ContactValueKind.NOTE)
+        val contact = decoded.copy(id = before.id, revision = before.revision, remoteContactId = before.remoteContactId,
+            remoteVersion = before.remoteVersion, values = values)
+        database.withTransaction {
+            val group = database.contactGroupDao().get(ACCOUNT.value, "group")!!.toDomain()
+            database.contactGroupDao().deleteMemberships(ACCOUNT.value, "group")
+            database.contactDao().upsert(contact.toEntity())
+            database.contactDao().upsertValues(contact.values.map { it.toEntity(contact) })
+            database.contactDao().deleteValuesNotIn(ACCOUNT.value, contact.id, contact.values.map { it.id })
+            database.contactPayloadDao().upsert(contact.preservationEnvelope!!.toEntity(ACCOUNT.value, contact.id))
+            database.contactGroupDao().insertMemberships((group.memberships.filterNot { it.contactId == contact.id } +
+                GroupMembership(contact.id, contact.valuesOf(ContactValueKind.EMAIL).first().id)).map { it.toEntity(group) })
+        }
+        return repository.getContact(ACCOUNT.value, "healthy")!!
+    }
+
+    private suspend fun adoptRemoteMembership(contactId: String, included: Boolean) {
+        val old = repository.getContact(ACCOUNT.value, contactId)!!
+        val changed = old.copy(values = old.values.map { value ->
+            if (value.kind != ContactValueKind.EMAIL) value else value.copy(metadata = value.metadata +
+                ("protonGroupIds" to if (included) "remote-group" else ""))
+        })
+        database.withTransaction {
+            RoomRemoteCanonicalReconciliationStore(database).reconcileTargetedVerified(ACCOUNT,
+                VerifiedContactCard(RemoteContactId(old.remoteContactId!!), RemoteVersion("remote-edited"), changed))
+        }
+    }
+
     @Test
     fun missingEmailIdentityIsDeferredOnlyWithTheExactCurrentOmissionOverlay() = runBlocking {
         saveContact(CanonicalContact(ACCOUNT.value, "partial", displayName = "Partial", values = listOf(
@@ -616,7 +1115,7 @@ class RoomBackedMutationGatewaysDeviceTest {
     }
 
     @Test
-    fun verifiedContactAdoptionWakesItsParkedGroupWithoutResettingDeadlineOrDroppingInvalidInput() = runBlocking {
+    fun verifiedDeliveredContactAdoptionDoesNotWakeDeferredGroupOrRestoreARemoteRemoval() = runBlocking {
         saveContact(CanonicalContact(ACCOUNT.value, "partial", displayName = "Partial", values = listOf(
             ContactValue("unfinished", ContactValueKind.EMAIL, "unfinished", order = 0))))
         assertEquals(1, orchestrator().drain(ACCOUNT.value, 1_000).uploaded)
@@ -637,29 +1136,30 @@ class RoomBackedMutationGatewaysDeviceTest {
         val adopted = healthy.copy(id = "remote-side-healthy", remoteContactId = "healthy-remote", remoteVersion = "new-version",
             values = healthy.values.map { if (it.id == "healthy-email")
                 it.copy(metadata = mapOf("protonEmailId" to "new-healthy-email")) else it })
+        remote.memberships.clear() // The independently read card no longer belongs to this group.
 
         RoomRemoteCanonicalReconciliationStore(database).reconcileTargetedVerified(ACCOUNT,
             com.patmanak.contako.data.gateway.VerifiedContactCard(RemoteContactId("healthy-remote"), RemoteVersion("new-version"), adopted))
 
-        assertEquals(parked.copy(state = DurableMutationState.PENDING.name, requiresReconciliation = true),
-            database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+        assertEquals(parked, database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
         assertEquals("new-healthy-email", repository.getContact(ACCOUNT.value, "healthy")!!.values
             .single { it.id == "healthy-email" }.metadata["protonEmailId"])
         assertEquals("Unchanged private note", repository.getContact(ACCOUNT.value, "healthy")!!.values
             .single { it.id == "unchanged-note" }.value)
         assertEquals("unfinished", repository.getContact(ACCOUNT.value, "partial")!!.values.single().value)
-        assertEquals(2, database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.size)
+        assertEquals(1, database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.size)
         val reads = remote.membershipReads
         assertEquals(0, orchestrator().drain(ACCOUNT.value, 79_999).examined)
         assertEquals(reads, remote.membershipReads)
         repeat(3) { orchestrator().drain(ACCOUNT.value, 80_000) }
-        assertEquals(setOf(RemoteEmailId("new-healthy-email")), remote.memberships)
+        assertTrue(remote.memberships.isEmpty())
+        assertEquals(reads, remote.membershipReads)
         assertEquals(DurableMutationState.PARTIAL.name, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.state)
         assertEquals(4, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.attemptCount)
     }
 
     @Test
-    fun contactAcknowledgementWakesParkedCurrentAndRemovedDependenciesWithoutLosingTheirHistory() = runBlocking {
+    fun unrelatedContactAcknowledgementDoesNotReopenDeliveredGroupAssignments() = runBlocking {
         for (removed in listOf(false, true)) {
             database.clearAllTables()
             remote = FakeRemoteMutations()
@@ -696,18 +1196,17 @@ class RoomBackedMutationGatewaysDeviceTest {
             assertTrue(store.acknowledgeAndFinish(command, RemoteMutationAcknowledgement(
                 "healthy-remote", "ack-version", emailIdsByValueId = mapOf("healthy-email" to "new-healthy-email"))))
 
-            assertEquals(parked.copy(state = DurableMutationState.PENDING.name, requiresReconciliation = true),
-                database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
+            assertEquals(parked, database.outboxDao().get(ACCOUNT.value, "GROUP", "group"))
             assertEquals("new-healthy-email", repository.getContact(ACCOUNT.value, "healthy")!!.values
                 .single { it.id == "healthy-email" }.metadata["protonEmailId"])
             assertEquals("Retained note", repository.getContact(ACCOUNT.value, "healthy")!!.values.single { it.id == "private-note" }.value)
             assertEquals("unfinished", repository.getContact(ACCOUNT.value, "partial")!!.values.single().value)
             assertEquals(if (removed) 1 else 2, database.contactGroupDao().get(ACCOUNT.value, "group")!!.memberships.size)
-            // A remote contact PUT can restore a removed email label. The retained edge
-            // must wake the assignment even though the canonical membership no longer exists.
-            if (removed) remote.memberships = linkedSetOf(RemoteEmailId("new-healthy-email"))
+            // Once a full assignment was delivered, a later remote membership is not owned
+            // by the still-invalid different occurrence's deferred intention.
+            remote.memberships = linkedSetOf(RemoteEmailId("new-healthy-email"))
             repeat(3) { orchestrator().drain(ACCOUNT.value, 80_000) }
-            assertEquals(if (removed) emptySet<RemoteEmailId>() else setOf(RemoteEmailId("new-healthy-email")), remote.memberships)
+            assertEquals(setOf(RemoteEmailId("new-healthy-email")), remote.memberships)
             assertEquals(DurableMutationState.PARTIAL.name, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.state)
             assertEquals(4, database.outboxDao().get(ACCOUNT.value, "GROUP", "group")!!.attemptCount)
         }
@@ -797,8 +1296,8 @@ class RoomBackedMutationGatewaysDeviceTest {
             expectedRemoteIdentity = intent.remoteIdentity, expectedRemoteVersion = intent.remoteVersion)
     }
 
-    private fun orchestrator() = DurableMutationOrchestrator(
-        RoomMutationExecutionStore(database),
+    private fun orchestrator(recoveryGeneration: () -> Long = { 0 }) = DurableMutationOrchestrator(
+        RoomMutationExecutionStore(database, recoveryGeneration = recoveryGeneration),
         RoomBackedMutationPreparationGateway(ACCOUNT, database, remote, remote),
         RoomBackedMutationUploadGateway(ACCOUNT, database, remote, remote, remote, remote),
     )
@@ -837,8 +1336,16 @@ private class FakeRemoteMutations :
     var assignmentWrites = 0
     var membershipReads = 0
     var memberships = linkedSetOf<RemoteEmailId>()
+    var applyClearCategoriesOnContactPut = false
+    var replaceEmailIdsOnContactPut = false
+    var dropNextContactPutAcknowledgement = false
     private val groups = linkedMapOf<RemoteGroupId, RemoteContactGroup>()
     private val contacts = linkedMapOf<RemoteContactId, com.patmanak.contako.data.gateway.VerifiedContactCard>()
+
+    fun seedVerifiedContact(contact: CanonicalContact) {
+        val id = RemoteContactId(requireNotNull(contact.remoteContactId))
+        contacts[id] = VerifiedContactCard(id, RemoteVersion(requireNotNull(contact.remoteVersion)), contact)
+    }
 
     override suspend fun fetch(account: AccountScope, contactId: RemoteContactId) = contacts[contactId]?.let { GatewayOutcome.Success(it) }
         ?: GatewayOutcome.Failure(com.patmanak.contako.data.gateway.GatewayFailureCategory.NOT_FOUND)
@@ -852,12 +1359,48 @@ private class FakeRemoteMutations :
             is ContactMutation.Delete -> mutation.id
         }
         val version = RemoteVersion("version-$contactWrites")
+        var emailIdsByValueId: Map<String, String>? = null
         when (mutation) {
             is ContactMutation.Create -> contacts[id] = com.patmanak.contako.data.gateway.VerifiedContactCard(id, version, mutation.contact.copy(remoteContactId = id.value))
-            is ContactMutation.Update -> contacts[id] = com.patmanak.contako.data.gateway.VerifiedContactCard(id, version, mutation.contact)
+            is ContactMutation.Update -> {
+                var received = mutation.contact
+                if (applyClearCategoriesOnContactPut) {
+                    // This peer models the clear CATEGORIES replacement performed by a PUT,
+                    // independently of the per-email LabelIDs retained in a stale local card.
+                    val emails = received.valuesOf(ContactValueKind.EMAIL)
+                    val ids = emails.mapNotNull { it.metadata["protonEmailId"]?.let(::RemoteEmailId) }.toSet()
+                    memberships -= ids
+                    if (replaceEmailIdsOnContactPut) {
+                        emailIdsByValueId = emails.associate { it.id to "put-email-$contactWrites-${it.id}" }
+                        received = received.copy(values = received.values.map { value ->
+                            if (value.kind != ContactValueKind.EMAIL) value else value.copy(metadata = value.metadata +
+                                ("protonEmailId" to emailIdsByValueId!!.getValue(value.id)))
+                        })
+                    }
+                    val encoded = ProtonContactVCardCodec().encode(received)
+                    val groups = parseSingleCompleteVCard(encoded.clear).getProperties(ezvcard.property.Categories::class.java)
+                        .filter { "Group" in it.values }.mapNotNull { it.group?.uppercase(java.util.Locale.ROOT) }.toSet()
+                    parseSingleCompleteVCard(encoded.signed).getProperties(ezvcard.property.Email::class.java)
+                        .forEachIndexed { index, email ->
+                            if (email.group?.uppercase(java.util.Locale.ROOT) in groups)
+                                received.valuesOf(ContactValueKind.EMAIL).getOrNull(index)?.metadata?.get("protonEmailId")
+                                    ?.let { memberships += RemoteEmailId(it) }
+                        }
+                    received = received.copy(values = received.values.map { value ->
+                        if (value.kind != ContactValueKind.EMAIL) value else value.copy(metadata = value.metadata +
+                            ("protonGroupIds" to if (value.metadata["protonEmailId"]?.let(::RemoteEmailId) in memberships)
+                                "remote-group" else ""))
+                    })
+                }
+                contacts[id] = VerifiedContactCard(id, version, received)
+                if (dropNextContactPutAcknowledgement) {
+                    dropNextContactPutAcknowledgement = false
+                    return GatewayOutcome.Failure(GatewayFailureCategory.NETWORK_UNAVAILABLE)
+                }
+            }
             is ContactMutation.Delete -> contacts.remove(id)
         }
-        return GatewayOutcome.Success(ContactMutationReceipt(id, version))
+        return GatewayOutcome.Success(ContactMutationReceipt(id, version, emailIdsByValueId))
     }
 
     override fun capabilities() = ContactGroupCapabilities.PROTON_CORE_36_6_2_SURFACE
@@ -900,6 +1443,13 @@ private class FakeRemoteMutations :
         when (mutation) {
             is EmailLabelMutation.Assign -> memberships += mutation.emailIds
             is EmailLabelMutation.Remove -> memberships -= mutation.emailIds.toSet()
+        }
+        if (applyClearCategoriesOnContactPut) {
+            contacts.replaceAll { _, card -> card.copy(contact = card.contact.copy(values = card.contact.values.map { value ->
+                if (value.kind != ContactValueKind.EMAIL) value else value.copy(metadata = value.metadata +
+                    ("protonGroupIds" to if (value.metadata["protonEmailId"]?.let(::RemoteEmailId) in memberships)
+                        "remote-group" else ""))
+            })) }
         }
         return GatewayOutcome.Success(Unit)
     }

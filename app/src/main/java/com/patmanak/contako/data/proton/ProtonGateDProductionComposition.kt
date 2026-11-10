@@ -67,6 +67,7 @@ internal data class ProtonGateDComposition(
     val events: ProtonContactEventsGateway,
     val richInventoryUnitStatus: ProtonRichInventoryUnitStatus =
         ProtonRichInventoryUnitStatus.LIVE_VALIDATION_REQUIRED,
+    val eventResources: ProtonContactEventResourceGateway? = null,
 )
 
 /** Source models expose integer fields but do not document their units as a third-party contract. */
@@ -84,6 +85,14 @@ internal interface ProtonGateDWireApi : BaseRetrofitApi {
     @GET("contacts/v6/events/{eventId}")
     @Streaming
     suspend fun contactEvents(@Path("eventId") eventId: String): ResponseBody
+
+    @GET("contacts/v4/contacts/emails/{emailId}")
+    @Streaming
+    suspend fun contactEmail(@Path("emailId") emailId: String): ResponseBody
+
+    @POST("core/v4/labels/by-ids")
+    @Streaming
+    suspend fun contactGroupsByIds(@Body body: RequestBody): ResponseBody
 
     /** Maintained Proton Core Android ContactApi create route. */
     @POST("contacts/v4/contacts")
@@ -135,7 +144,7 @@ internal class ProtonCoreGateDWireClient(
     private val apiProvider: ApiProvider,
 ) : ProtonRichInventoryWireTransport,
     ProtonEmailGroupAssignmentWireTransport,
-    ProtonRawContactCreateTransport, ProtonContactEventsTransport {
+    ProtonRawContactCreateTransport, ProtonContactEventsTransport, ProtonContactEventResourceTransport {
 
     override suspend fun latest(account: AccountScope): String =
         invokeBounded(account, ProtonContactEventReader.MAX_BYTES) { latestContactEvent() }
@@ -143,6 +152,19 @@ internal class ProtonCoreGateDWireClient(
     override suspend fun events(account: AccountScope, cursor: String): String {
         validateContactEventCursor(cursor)
         return invokeBounded(account, ProtonContactEventReader.MAX_BYTES) { contactEvents(cursor) }
+    }
+
+    override suspend fun email(account: AccountScope, id: RemoteEmailId): String =
+        invokeBounded(account, ProtonContactEventResourceReader.MAX_EMAIL_RESPONSE_BYTES) { contactEmail(id.value) }
+
+    override suspend fun groups(account: AccountScope, ids: Set<RemoteGroupId>): String {
+        require(ids.isNotEmpty() && ids.size <= ProtonContactEventResourceReader.GROUP_READ_BATCH_SIZE)
+        val request = buildJsonObject {
+            put("LabelIDs", JsonArray(ids.sortedBy { it.value }.map { JsonPrimitive(it.value) }))
+        }.toString().toRequestBody(JSON_MEDIA_TYPE)
+        return invokeBounded(account, ProtonContactEventResourceReader.MAX_GROUP_RESPONSE_BYTES) {
+            contactGroupsByIds(request)
+        }
     }
 
     override suspend fun create(

@@ -410,6 +410,8 @@
     <string name="sync_issue_unknown">De oorzaak is niet vastgesteld. Open de lokale diagnose voor de technische geschiedenis.</string>
     <string name="sync_issue_saved">De bewerking in behandeling is op dit apparaat opgeslagen.</string>
     <string name="sync_issue_review">Item bekijken</string>
+    <string name="sync_issue_group_review_body">Controleer de leden van deze groep.</string>
+    <string name="sync_issue_group_review_action">Groep controleren</string>
     <string name="sync_issue_diagnostics">Diagnose bekijken</string>
     <string name="targeted_proton_title">Deze Proton-kaart opnieuw controleren</string>
     <string name="targeted_android_title">Deze Android-kopie opnieuw proberen</string>

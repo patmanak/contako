@@ -117,7 +117,7 @@ class RoomRemoteGroupReconciliationStoreDeviceTest {
         assertEquals("REMOTE_GROUP_DELETION_RECOVERY_REQUIRED", blocked.conflictState)
     }
 
-    @Test fun parkedAssignmentKeepsItsIntentAcrossRemoteMetadataChange() = runBlocking {
+    @Test fun legacyParkedAssignmentWithoutOmissionProofRequiresReviewAcrossRemoteMetadataChange() = runBlocking {
         stage().run(ACCOUNT)
         val imported = repository.observeGroups(ACCOUNT.value).first().single()
         save(imported.copy(name = "Retained local name"))
@@ -130,12 +130,15 @@ class RoomRemoteGroupReconciliationStoreDeviceTest {
         assertTrue(stage().run(ACCOUNT) is RemoteGroupStageResult.Success)
 
         val after = database.outboxDao().getAll(ACCOUNT.value).single()
-        assertEquals(original.copy(remoteVersion = remote.single().fingerprint()), after)
+        assertEquals(original.copy(state = DurableMutationState.ACTION_REQUIRED.name, errorCategory = "RECONCILIATION_INCOMPLETE",
+            blockedReason = "PARTIAL_GROUP_SCOPE_UNVERIFIED"), after)
         val retained = database.contactGroupDao().get(ACCOUNT.value, "remote-group")!!.group
         assertEquals("Retained local name", retained.name)
         assertEquals(original.revision, retained.pendingMutationRevision)
-        assertEquals(remote.single().fingerprint(), retained.remoteVersion)
-        assertEquals(0, database.outboxDao().observePendingCount(ACCOUNT.value).first())
+        assertEquals(original.remoteVersion, retained.remoteVersion)
+        assertEquals("PARTIAL_GROUP_SCOPE_UNVERIFIED", after.blockedReason)
+        assertTrue(stage().run(ACCOUNT) is RemoteGroupStageResult.Success)
+        assertEquals(after, database.outboxDao().getAll(ACCOUNT.value).single())
     }
 
     @Test fun remoteDeletionOfParkedAssignmentRequiresRecoveryWithoutErasingIntent() = runBlocking {

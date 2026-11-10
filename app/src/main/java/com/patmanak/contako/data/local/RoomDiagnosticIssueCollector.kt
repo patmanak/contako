@@ -16,7 +16,9 @@ internal class RoomDiagnosticIssueCollector(private val database: ContakoDatabas
         database.outboxDao().getAll(account.value).forEach { item ->
             val state = DiagnosticIssueState.entries.firstOrNull { it.name == item.state }
                 ?: return@forEach
-            if (item.errorCategory == null && item.blockedReason == null && state != DiagnosticIssueState.IN_FLIGHT) return@forEach
+            // A parked partial assignment is current retained work even without a failure code.
+            if (item.errorCategory == null && item.blockedReason == null &&
+                state !in setOf(DiagnosticIssueState.IN_FLIGHT, DiagnosticIssueState.PARTIAL)) return@forEach
             summary.add(if (item.aggregateType == "CONTACT") DiagnosticIssueScope.OUTBOX_CONTACT else DiagnosticIssueScope.OUTBOX_GROUP,
                 if (state == DiagnosticIssueState.PENDING && item.nextAttemptAtEpochMillis > clock()) DiagnosticIssueState.RETRY_WAITING else state,
                 item.errorCategory, item.blockedReason, item.attemptCount, item.remoteOperation())

@@ -197,7 +197,8 @@ internal class RoomBackedMutationPreparationGateway(
             is GatewayOutcome.Success -> {
                 if (current.value.account != expectedAccount || current.value.groupId != groupId) {
                     GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE)
-                } else if (current.value.emailIds.toSet() == projection.emailIds.toSet()) {
+                } else if (if (projection.additiveOnly) current.value.emailIds.containsAll(projection.emailIds)
+                    else current.value.emailIds.toSet() == projection.emailIds.toSet()) {
                     // Accepted members are delivered, but the local membership of an omitted
                     // invalid occurrence is still durable. It is not a group conflict or ACK.
                     if (projection.hasDeferredMembers) return GatewayOutcome.Success(MutationPreparation.WaitingForLocalInput)
@@ -219,7 +220,8 @@ internal class RoomBackedMutationPreparationGateway(
         onMissing: (MutationPreparationActionRequiredReason) -> Unit = {},
     ): List<RemoteEmailId>? = desiredEmailProjection(accountId, groupId, onMissing)?.emailIds
 
-    internal data class GroupEmailProjection(val emailIds: List<RemoteEmailId>, val hasDeferredMembers: Boolean) {
+    internal data class GroupEmailProjection(val emailIds: List<RemoteEmailId>, val hasDeferredMembers: Boolean,
+        val additiveOnly: Boolean = false) {
         override fun toString() = "GroupEmailProjection(REDACTED)"
     }
 
@@ -230,9 +232,14 @@ internal class RoomBackedMutationPreparationGateway(
         onMissing: (MutationPreparationActionRequiredReason) -> Unit = {},
     ): GroupEmailProjection? = database.withTransaction {
         val group = database.contactGroupDao().get(accountId, groupId) ?: return@withTransaction null
+        val partial = com.patmanak.contako.data.local.RoomPartialGroupMutationStore(database)
+        partial.ensureScoped(group)
+        val additive = partial.isDeferredOnly(accountId, groupId, group.group.revision)
+        val deferredMemberships = if (additive) partial.deferredMemberships(accountId, groupId) else emptySet()
         val identities = mutableListOf<RemoteEmailId>()
         var deferred = false
-        for (membership in group.memberships) {
+        for (membership in group.memberships.filter { !additive ||
+                com.patmanak.contako.domain.model.GroupMembership(it.contactId, it.emailValueId) in deferredMemberships }) {
             val value = database.contactDao().getValue(accountId, membership.contactId, membership.emailValueId)
                 ?: run {
                     onMissing(MutationPreparationActionRequiredReason.GROUP_MEMBER_LOCAL_EMAIL_MISSING)
@@ -262,7 +269,7 @@ internal class RoomBackedMutationPreparationGateway(
             }
             identities += RemoteEmailId(remoteId)
         }
-        GroupEmailProjection(identities.distinct(), deferred)
+        GroupEmailProjection(identities.distinct(), deferred, additiveOnly = additive)
     }
 }
 
@@ -295,9 +302,34 @@ internal class RoomBackedMutationUploadGateway(
         }
         val payload = database.contactPayloadDao().get(stored.contact.ownerKey)?.toDomain()
         val local = stored.toDomain().copy(preservationEnvelope = payload)
-        val contact = if (command.operation == RemoteMutationOperation.DELETE) local else
+        var contact = if (command.operation == RemoteMutationOperation.DELETE) local else
             com.patmanak.contako.data.local.RoomContactUploadOverlays(database).wireProjection(local)
                 ?: return GatewayOutcome.Failure(GatewayFailureCategory.RECONCILIATION_INCOMPLETE)
+        if (command.operation == RemoteMutationOperation.UPDATE) {
+            val partial = com.patmanak.contako.data.local.RoomPartialGroupMutationStore(database)
+            val scopes = partial.contactWriteScopes(command)
+                ?: return GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT)
+            val memberships = mutableMapOf<String, com.patmanak.contako.data.proton.AuthoritativeEmailGroupMembership>()
+            for (scope in scopes) {
+                when (val current = membershipReader.members(expectedAccount, RemoteGroupId(scope.remoteLabelId))) {
+                    is GatewayOutcome.Failure -> return current
+                    is GatewayOutcome.Success -> {
+                        if (current.value.account != expectedAccount || current.value.groupId.value != scope.remoteLabelId)
+                            return GatewayOutcome.Failure(GatewayFailureCategory.MALFORMED_RESPONSE)
+                        memberships[scope.groupId] = current.value
+                    }
+                }
+            }
+            contact = partial.reconcileContactWriteCategories(command, contact, scopes,
+                memberships.mapValues { it.value.emailIds.toSet() })
+                ?: return GatewayOutcome.Failure(GatewayFailureCategory.RECONCILIATION_INCOMPLETE)
+            for (scope in scopes) {
+                val current = memberships.getValue(scope.groupId)
+                if (scope.emailIdsByValueId.values.none { it in current.emailIds }) continue
+                if (!partial.retainContactWriteMemberships(command, scope, current))
+                    return GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT)
+            }
+        }
         val mutation = when (command.operation) {
             RemoteMutationOperation.CREATE -> ContactMutation.Create(contact)
             RemoteMutationOperation.UPDATE -> ContactMutation.Update(
@@ -386,10 +418,14 @@ internal class RoomBackedMutationUploadGateway(
             }
         }
         val missing = desired.filterNot(current.toSet()::contains)
-        val extra = current.filterNot(desired.toSet()::contains)
+        // Delivered members are no longer part of a parked intention. Never undo a later
+        // remote add/remove merely because one different member still has invalid input.
+        val extra = if (projection.additiveOnly) emptyList() else current.filterNot(desired.toSet()::contains)
         if (missing.isEmpty() && extra.isEmpty()) {
             if (projection.hasDeferredMembers) return GatewayOutcome.Success(RemoteMutationAcknowledgement(
                 group.remoteLabelId, group.remoteVersion, fullyConverged = false, nextOperation = RemoteMutationOperation.ASSIGNMENTS))
+            if (projection.additiveOnly) return GatewayOutcome.Success(RemoteMutationAcknowledgement(
+                group.remoteLabelId, group.remoteVersion))
             if (!com.patmanak.contako.data.local.RoomRemoteGroupAssignmentDependencies(database).acknowledgeVerifiedMembership(
                     expectedAccount, group.id, group.revision, remoteGroupId, current.toSet()))
                 return GatewayOutcome.Success(RemoteMutationAcknowledgement(group.remoteLabelId, group.remoteVersion,
@@ -414,9 +450,12 @@ internal class RoomBackedMutationUploadGateway(
                         is GatewayOutcome.Failure -> return read
                         is GatewayOutcome.Success -> read.value
                     }
-                    if (confirmed.account != expectedAccount || confirmed.groupId != remoteGroupId || confirmed.emailIds.toSet() != desired.toSet())
+                    if (confirmed.account != expectedAccount || confirmed.groupId != remoteGroupId ||
+                        (if (projection.additiveOnly) !confirmed.emailIds.containsAll(desired)
+                        else confirmed.emailIds.toSet() != desired.toSet()))
                         return GatewayOutcome.Failure(GatewayFailureCategory.CONFLICT)
-                    if (!projection.hasDeferredMembers && !com.patmanak.contako.data.local.RoomRemoteGroupAssignmentDependencies(database).acknowledgeVerifiedMembership(
+                    if (!projection.hasDeferredMembers && !projection.additiveOnly &&
+                        !com.patmanak.contako.data.local.RoomRemoteGroupAssignmentDependencies(database).acknowledgeVerifiedMembership(
                             expectedAccount, group.id, group.revision, remoteGroupId, confirmed.emailIds.toSet()))
                         return GatewayOutcome.Success(RemoteMutationAcknowledgement(group.remoteLabelId, group.remoteVersion,
                             fullyConverged = false, nextOperation = RemoteMutationOperation.ASSIGNMENTS))

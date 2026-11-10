@@ -4,6 +4,15 @@ Features and improvements by version.
 
 ## Unreleased
 
+- Use Proton contact and group events with targeted reads between complete safety
+  reconciliations, avoiding a full directory read on unchanged synchronizations.
+- Avoid rereading healthy cards for intermediate deleted email occurrences, and
+  recover unexpected event-cursor responses through a bounded safety reconciliation.
+- Preserve remote group-member changes while invalid local members await correction;
+  include partially delivered groups in sanitized diagnostics.
+- Keep group memberships consistent during contact updates and offer direct group
+  review when an older partial assignment needs a new explicit selection.
+- Preserve explicit creation confirmations during other queued contacts' verification.
 - Bound import reads during persistent network outages while preserving per-contact
   retry deadlines and healthy progress.
 - Synchronize valid group members while retaining a new invalid email locally.

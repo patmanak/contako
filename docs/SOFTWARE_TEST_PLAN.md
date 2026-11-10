@@ -1,5 +1,18 @@
 # Software integration test plan
 
+## Event checkpoint and group delta persistence
+
+Migrate an existing populated checkpoint without inventing event readiness.
+Cursor, strategy, full-scan time and occurrence/group baselines MUST survive
+restart and share one account-scoped CAS transaction. Inject failures after
+generation update, entry removal and insertion; no partial replacement may survive.
+
+Apply partial group upserts/deletions in real Room transactions. Untouched groups,
+their local drafts and foreign accounts MUST remain unchanged. Replayed tombstones
+MUST NOT increment an already deleted clean group's revision, acknowledge a newer
+intent or leave a partially committed delta. Verify real Proton/physical behavior
+separately through FT-09E and FT-09R.
+
 ## Superseded writes and creation reconciliation
 
 Use real Room transactions and reopen the database after an ambiguous CREATE,
@@ -326,7 +339,31 @@ without resurrecting that email or its old groups. Remote deletion of the whole
 contact MUST retain an accessible draft and require an explicit recovery choice.
 An acknowledgement for an older in-flight revision MAY transfer proven occurrence
 identities, never acknowledge the newer content. Remote group changes MUST remain
-authoritative when no local group intent opposes them. Generated fallback
+authoritative when no local group intent opposes them. A PARTIAL assignment MUST
+retain authority only over its deferred links: after valid-member delivery,
+remove one delivered member and add another remotely, reopen Room, correct the
+invalid local member and verify that only this deferred link is added. A later
+explicit group edit/removal MUST supersede the deferred scope. Cover legacy
+PARTIAL state, revision changes, email identity remapping, group deletion and
+interrupted preparation without resurrecting removed memberships.
+Use a controlled peer that actually applies clear categories in a contact PUT.
+Edit a delivered member before its card refresh, both with and without an
+existing canonical category. Fresh negative membership MUST remove only the
+stale deferred-group category from the outgoing occurrence; unrelated and
+unknown categories MUST survive. Verify exact restoration after lost ACK and
+email identity replacement, cancellation by explicit Proton choice or newer
+group intent, and preservation of permanent refusals across repeated drains.
+Change an imported category to a known partially delivered group's name. An
+unchanged source header alone MUST NOT authorize removing that explicit edit;
+verify retained values and blocked upload across retry and database reopen.
+Initialize the same execution store before injecting a refusal; a new store's
+first capability observation is a different recovery scenario.
+For legacy unverifiable partial scope, cover the actual Room issue mapping,
+concise Compose review action, account-safe navigation and explicit-save-only
+replacement, including stale/deleted/foreign negative controls.
+Migration 28-to-29 MUST retain dependency edges and event cursors with no invented
+deferred-only proof; nullable scope and false edge flags are conservative defaults.
+Generated fallback
 names MUST follow their source after echo without inventing structured names or
 turning an explicit display name into a generated one.
 
@@ -343,6 +380,12 @@ unknown exceptions and schema compatibility. Export MUST exclude contact values,
 private identities, paths, raw errors and credentials. Ignored signature failures
 MUST leave unverified content outside canonical storage, upload and projection;
 source changes MUST reopen the exact obligation.
+Include a retained PARTIAL group and its invalid email as distinct banded current
+causes, even when the group has no error code. Account filtering and cleanup MUST
+remove only their owned evidence.
+An incomplete shared creation scan MUST leave another intent's explicit
+Create-anyway confirmation intact across reopen; concurrent edits, late
+confirmations and UID collisions MUST retain their own revision/identity guards.
 
 Room upgrade coverage MUST include the additive hydration-obligation schema.
 Seed an obligation, reopen the database, verify the retry and remove the account;

@@ -160,6 +160,7 @@ internal class IncrementalRemoteContactStage(
     private val hydrationReadConcurrency: Int = HYDRATION_READ_CONCURRENCY,
     private val importObserver: SyncPassStageObserver = SyncPassStageObserver { },
     private val obligations: RemoteHydrationObligationStore? = null,
+    private val eventSession: EventDrivenRemoteReadSession? = null,
 ) {
     var lastFailureCategory: GatewayFailureCategory? = null
         private set
@@ -184,7 +185,13 @@ internal class IncrementalRemoteContactStage(
     ): RemoteContactStageResult {
         lastFailureCategory = null
         lastExceptionCategory = null
-        val cursor = try { planner.eventCursor(account) } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        val context = when (val result = eventSession?.prepare(account)) {
+            null -> null
+            is GatewayOutcome.Success -> result.value
+            is GatewayOutcome.Failure -> return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result,
+                GatewayDiagnosticBoundary.EVENT_READ)
+        }
+        val cursor = try { if (context != null) context.snapshot?.checkpoint?.eventCursor else planner.eventCursor(account) } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             observeFailure(error)
@@ -192,31 +199,67 @@ internal class IncrementalRemoteContactStage(
         }
         if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
         observe(RemoteImportPhase.EVENT_READ_START)
-        val events = when (val result = eventsGateway?.read(account, cursor)) {
+        val events = when (val result = if (context != null) GatewayOutcome.Success(context.events)
+            else eventsGateway?.read(account, cursor)) {
             null -> null
             is GatewayOutcome.Success -> result.value
             is GatewayOutcome.Failure -> return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result,
                 GatewayDiagnosticBoundary.EVENT_READ)
         }
         observe(RemoteImportPhase.EVENT_READ_DONE)
-        observe(RemoteImportPhase.INVENTORY_READ_START)
-        val inventory = when (val result = inventoryReader.read(account, isCancellationRequested)) {
-            is GatewayOutcome.Success -> result.value
-            is GatewayOutcome.Failure -> return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result)
-        }
-        observe(RemoteImportPhase.INVENTORY_READ_DONE)
+        val repairIds = canonicalStore.identityRepairContacts(account) + obligations?.pending(account).orEmpty()
+        val delta = if (context != null && !context.fullInventory && !forceHydration) {
+            when (val result = requireNotNull(eventSession).contactDelta(account, context, repairIds, isCancellationRequested)) {
+                is ContactEventDeltaResult.Resolved -> result.metadata
+                ContactEventDeltaResult.DeletedEmailOwnerUnknown -> {
+                    context.fullInventory = true
+                    null
+                }
+                is ContactEventDeltaResult.Failure -> {
+                    if (result.failure.category !in EventDrivenRemoteReadSession.RESOURCE_RESCAN_FAILURES)
+                        return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result.failure)
+                    context.fullInventory = true
+                    context.fullHydration = true
+                    null
+                }
+            }
+        } else null
+        val inventory = if (delta == null) {
+            observe(RemoteImportPhase.INVENTORY_READ_START)
+            val result = inventoryReader.read(account, isCancellationRequested)
+            if (result is GatewayOutcome.Failure) return mapFailure(RemoteContactActionRequiredBoundary.INVENTORY, result)
+            observe(RemoteImportPhase.INVENTORY_READ_DONE)
+            (result as GatewayOutcome.Success).value
+        } else null
+        if (context != null && forceHydration) context.fullInventory = true
+        val hydrateAll = forceHydration || context?.fullHydration == true
         if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
         observe(RemoteImportPhase.PLAN_START)
         val plan = try {
-            planner.plan(account, inventory, forceHydration, events,
-                canonicalStore.identityRepairContacts(account) + obligations?.pending(account).orEmpty())
+            val pending = if (delta != null) {
+                planner.planDelta(account, requireNotNull(context?.snapshot), delta,
+                    context.events.deletedContacts, context.events, repairIds)
+            } else if (context != null) {
+                val previous = context.snapshot?.checkpoint?.entries.orEmpty().associateBy { it.id }
+                val membershipChanges = requireNotNull(inventory).contacts.filter { metadata ->
+                    val before = previous[metadata.id]
+                    before != null && (before.groupIds.toSet() != metadata.groupIds.toSet() ||
+                        before.emailGroupMemberships.associate { it.emailId to it.groupIds.toSet() } !=
+                        metadata.emailGroupMemberships.associate { it.emailId to it.groupIds.toSet() })
+                }.map { it.id }.toSet()
+                context.changedContactIds += membershipChanges
+                planner.planSnapshot(account, inventory, context.snapshot, hydrateAll, events, repairIds + membershipChanges)
+            } else {
+                planner.plan(account, requireNotNull(inventory), hydrateAll, events, repairIds)
+            }
+            context?.checkpoint(pending) ?: pending
         } catch (_: StaleContactInventoryPlan) {
             return RemoteContactStageResult.StalePlan
         } catch (_: IllegalArgumentException) {
             return actionRequired(RemoteContactActionRequiredBoundary.PLANNING)
         }
         observe(RemoteImportPhase.PLAN_DONE)
-        if (inventory.snapshotAuthority == ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY) {
+        if (context != null || inventory?.snapshotAuthority == ContactInventorySnapshotAuthority.COMPLETE_PUBLIC_DIRECTORY) {
             for (id in plan.deleted.sortedBy { it.value }) {
                 if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
                 when (val result = existenceGateway.check(account, id)) {
@@ -233,12 +276,13 @@ internal class IncrementalRemoteContactStage(
         val ignoredHydrations = mutableSetOf<RemoteContactId>()
         val baselines = plan.nextCheckpoint.entries.associateBy { it.id }
         val knownEmailIds = baselines.values.flatMap { baseline -> baseline.emailGroupMemberships.map { it.emailId } }.toSet()
-        val unknownEmailEvent = events?.changedEmails.orEmpty().any { it !in knownEmailIds }
+        val unknownEmailEvent = context == null && events?.changedEmails.orEmpty().any { it !in knownEmailIds }
         val readable = mutableListOf<RemoteContactId>()
         for (id in plan.hydrate.sortedBy { it.value }) {
             if (isCancellationRequested()) return RemoteContactStageResult.Cancelled
             val baseline = baselines.getValue(id)
-            val eventChanged = forceHydration || events?.refreshAll == true || unknownEmailEvent ||
+            val eventChanged = hydrateAll || events?.refreshAll == true || unknownEmailEvent ||
+                id in context?.changedContactIds.orEmpty() ||
                 id in events?.changedContacts.orEmpty() ||
                 baseline.emailGroupMemberships.any { it.emailId in events?.changedEmails.orEmpty() }
             when (obligations?.readDisposition(account, baseline, eventChanged) ?: RemoteHydrationReadDisposition.READ) {
@@ -412,7 +456,7 @@ internal class IncrementalRemoteContactStage(
         if (deferredHydrations.isNotEmpty()) return RemoteContactStageResult.Partial(
             deferredHydrations.size, retryHydrations.size, ignoredHydrations.size)
         return RemoteContactStageResult.Success(
-            inventoryCount = inventory.totalCount,
+            inventoryCount = plan.nextCheckpoint.entries.size,
             hydratedCount = plan.hydrate.size,
             labelOnlyCount = plan.labelOnly.size,
             deletedCount = plan.deleted.size,

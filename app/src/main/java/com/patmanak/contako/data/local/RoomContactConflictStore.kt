@@ -46,7 +46,8 @@ internal class RoomContactConflictStore(private val database: ContakoDatabase) {
         ContactConflictDetail(
             summary = row.summary(), local = local, proton = remote,
             protonChoiceAvailable = protonPreview != null &&
-                RoomRemoteCanonicalReconciliationStore(database).canAdoptRemote(remote.copy(accountId = account, id = id)),
+                RoomRemoteCanonicalReconciliationStore(database).canAdoptRemote(remote.copy(accountId = account, id = id),
+                    discardContactWriteMemberships = true),
             localPreview = localPreview, protonPreview = protonPreview,
             groups = database.contactGroupDao().getAll(account).map { it.toDomain() }
                 .filter { it.accountId == account && !it.isDeleted },
@@ -108,12 +109,14 @@ internal class RoomContactConflictStore(private val database: ContakoDatabase) {
         }
         when (ContactConflictChoice.valueOf(conflict.choice)) {
             ContactConflictChoice.PROTON -> {
-                if (!RoomRemoteCanonicalReconciliationStore(database).canAdoptRemote(remote.contact.copy(accountId = account, id = id))) {
+                if (!RoomRemoteCanonicalReconciliationStore(database).canAdoptRemote(remote.contact.copy(accountId = account, id = id),
+                        discardContactWriteMemberships = true)) {
                     dao.upsert(conflict.copy(choice = null))
                     capture(local, intent, remote)
                     return@withTransaction blocked()
                 }
                 RoomContactUploadOverlays(database).clear(account, id)
+                RoomPartialGroupMutationStore(database).discardContactWriteMemberships(account, id)
                 // Reuses value/membership/projection reconciliation; transaction rolls back on an unsafe remap.
                 RoomRemoteCanonicalReconciliationStore(database).adoptRemote(local, remote.contact, remote, null)
                 check(database.outboxDao().deleteRevision(account, AggregateType.CONTACT.name, id, revision) == 1)

@@ -120,14 +120,49 @@ class GatewayAndCurrentIssueDiagnosticsTest {
         assertFalse(LocalDiagnosticSafetyScanner.isSafeReport(report + "current_issue_read=AVAILABLE\n"))
     }
 
+    @Test fun retainedPartialGroupsAndInvalidEmailsRemainDistinctBandedCurrentCauses() {
+        val reducer = DiagnosticIssueReducer()
+        repeat(11) {
+            reducer.add(DiagnosticIssueScope.OUTBOX_GROUP, DiagnosticIssueState.PARTIAL,
+                null, null, operation = RemoteMutationOperation.ASSIGNMENTS)
+        }
+        reducer.add(DiagnosticIssueScope.OUTBOX_CONTACT, DiagnosticIssueState.ACTION_REQUIRED,
+            "VALIDATION_REJECTED", "INVALID_EMAIL")
+        val snapshot = reducer.snapshot()
+        assertEquals(listOf(
+            "OUTBOX_CONTACT.ACTION_REQUIRED.NONE.VALIDATION_REJECTED.INVALID_EMAIL.NONE.small",
+            "OUTBOX_GROUP.PARTIAL.ASSIGNMENTS.NONE.NONE.NONE.medium",
+        ), snapshot.rows)
+        assertFalse(snapshot.truncated)
+        val report = report(snapshot)
+        assertTrue(report.startsWith("contako_diagnostic_schema=4\n"))
+        assertTrue(report.contains("current_issues=" + snapshot.rows.joinToString("|")))
+        assertTrue(LocalDiagnosticSafetyScanner.isSafeReport(report))
+        assertFalse(LocalDiagnosticSafetyScanner.isSafeReport(report.replace(".PARTIAL.", ".PRIVATE_GROUP_NAME.")))
+        assertFalse(LocalDiagnosticSafetyScanner.isSafeReport(report.replace("NONE.medium", "NONE.11")))
+    }
+
+    @Test fun anUnverifiedLegacyPartialGroupHasAClosedDistinctCurrentCause() {
+        val reducer = DiagnosticIssueReducer()
+        reducer.add(DiagnosticIssueScope.OUTBOX_GROUP, DiagnosticIssueState.ACTION_REQUIRED,
+            "RECONCILIATION_INCOMPLETE", "PARTIAL_GROUP_SCOPE_UNVERIFIED", operation = RemoteMutationOperation.ASSIGNMENTS)
+        val snapshot = reducer.snapshot()
+        assertEquals(listOf("OUTBOX_GROUP.ACTION_REQUIRED.ASSIGNMENTS.RECONCILIATION_INCOMPLETE.PARTIAL_GROUP_SCOPE_UNVERIFIED.NONE.small"),
+            snapshot.rows)
+        assertTrue(LocalDiagnosticSafetyScanner.isSafeReport(report(snapshot)))
+    }
+
     @Test fun closedIssueReducerCapsDistinctGroupsAndCountsWithoutPayload() {
         val reducer = DiagnosticIssueReducer()
+        reducer.add(DiagnosticIssueScope.OUTBOX_GROUP, DiagnosticIssueState.PARTIAL,
+            null, null, operation = RemoteMutationOperation.ASSIGNMENTS)
         for (scope in DiagnosticIssueScope.entries) for (category in GatewayFailureCategory.entries) {
             repeat(2) { reducer.add(scope, DiagnosticIssueState.ACTION_REQUIRED, category.name, "UNKNOWN", 4) }
         }
         val snapshot = reducer.snapshot()
         assertEquals(DiagnosticCurrentIssues.MAX_ROWS, snapshot.rows.size)
         assertTrue(snapshot.truncated)
+        assertTrue(snapshot.rows.any { it.startsWith("OUTBOX_GROUP.PARTIAL.ASSIGNMENTS.") })
         assertTrue(LocalDiagnosticSafetyScanner.isSafeReport(report(snapshot)))
     }
 

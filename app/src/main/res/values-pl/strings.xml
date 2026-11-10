@@ -424,6 +424,8 @@
     <string name="sync_issue_unknown">Przyczyna nie została ustalona. Otwórz lokalną diagnostykę, aby zobaczyć historię techniczną.</string>
     <string name="sync_issue_saved">Oczekująca operacja jest zapisana na tym urządzeniu.</string>
     <string name="sync_issue_review">Sprawdź element</string>
+    <string name="sync_issue_group_review_body">Sprawdź członków tej grupy.</string>
+    <string name="sync_issue_group_review_action">Sprawdź grupę</string>
     <string name="sync_issue_diagnostics">Pokaż diagnostykę</string>
     <string name="targeted_proton_title">Sprawdź ponownie tę kartę Proton</string>
     <string name="targeted_android_title">Ponów tę kopię Android</string>

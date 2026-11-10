@@ -141,19 +141,59 @@ an edit. A failed probe MUST preserve intent for a later lifecycle/system retry.
 An unchanged probe alone MUST NOT request a new sync. Background-only timing is
 subject to Android scheduling and requires separate physical evidence.
 
-Ordinary no-change sync MUST use a lightweight complete paged inventory and
-MUST NOT request full cards once per unchanged contact. Hydrate new, changed or
-ambiguous items only. The authenticated contacts-only Proton v6 event feed MUST
-supplement public-directory fingerprints, including for private-only edits.
-Capture the latest event position before the first complete hydration; persist
-the account-scoped cursor with the inventory checkpoint only after all planned
-canonical reconciliations or explicit hydration obligations are durable. Drain
-all event pages before advancing it.
+After a complete baseline, ordinary synchronization MUST use the authenticated
+contacts-only Proton v6 event stream and targeted reads for Contacts,
+ContactEmails and contact-group Labels. An empty delta MUST NOT enumerate the
+contact/email directory, fetch the group catalog or hydrate unchanged cards.
+Notifications contain opaque IDs and actions, not complete contact data.
+Resolve email ownership by current/previous opaque occurrence identities or a
+targeted read, never by address text. Preserve repeated identical occurrences
+and tolerate replacement of their IDs during an ordinary card edit.
+
+Initial import, an older checkpoint strategy, full repair, server Refresh,
+unresolvable resource identity, invalid cursor and a safety scan after seven
+days require complete acquisition. An incoherent scan clock also requires it.
+Capture an event position before acquisition when establishing a new interval;
+hydrate its complete baseline. A periodic safety scan retains the existing event
+interval and reads the lightweight inventories, hydrating only affected contacts
+and eligible obligations. It MUST NOT reopen unchanged ignored cards merely
+because time elapsed. Keep acquisition and hydration bounded.
+An unknown deleted email occurrence MAY have existed only between passes. It
+requires a complete lightweight inventory, not unconditional hydration of every
+card. Preserve active contact/email notifications and fingerprints when selecting
+cards. An unresolved active email event still requires conservative verification.
+Explicit contact tombstones MUST survive this fallback even when a locally
+acknowledged creation is not in the previous checkpoint. Confirm absence before
+deletion; outside a refresh baseline, an inventory contradicting a tombstone MUST
+retain the old cursor.
+Unexpected malformed or unclassified event responses MAY trigger one latest-position
+read when the safety scan is due. A successful read requires complete acquisition
+and the normal verified-card/durable-obligation checkpoint guards before committing
+its cursor. Authentication, permission, rate-limit,
+network, timeout, service and local-budget failures MUST NOT trigger that fallback.
+This recovery does not establish the server's actual expired-cursor response.
+An unknown newly discovered group requires a contact baseline acquisition to
+cover members that may have been assigned during its creation.
+
+Persist the account-scoped cursor and strategy with the contact checkpoint only
+after all planned contact reconciliations or explicit hydration obligations and
+the group reconciliation for that interval are durable. If the group catalog is
+unavailable, advancing the contact cursor MUST atomically retain a durable full
+group-rescan obligation in the checkpoint strategy. This state MUST require a
+complete group catalog and lightweight contact inventory before delta mode can
+resume; it MUST NOT discard group intent or claim the label work completed.
+Retain card obligations and ignore/backoff dispositions independently. Drain all
+event pages before advancing the cursor.
 A failed read, cancellation or failed checkpoint transaction MUST retain the old
-position for replay. Resolve email events through current/previous opaque email
-identities in the directory checkpoint. A server-requested refresh or an unresolved
-email event requires complete hydration; an ordinary empty event delta does
-not. Event positions MUST NOT be treated as contact revisions or logged.
+position for replay. A group deletion can arrive without individual contact or
+email events; reconcile its known members using targeted verified contact reads.
+Replayed group tombstones MUST be idempotent and retain newer local intent.
+Successful delta reconciliation makes the cached group catalog usable; it MUST
+NOT grant LIST or mutation permission. Capability evidence remains scoped to the
+actual server operation and session generation, independently of cached data.
+Targeted group responses MUST cover every requested ID; an omitted label MUST
+trigger complete catalog verification, not an invented empty result.
+Event positions MUST NOT be treated as contact revisions or logged.
 A page or inventory failure cannot establish remote deletion,
 including when a response appears empty. Public pagination is not a server
 snapshot: confirm each absent ID with a targeted structured Proton absence before

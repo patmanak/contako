@@ -5,7 +5,7 @@ enum class SyncIssueScope { ACCOUNT, CONTACT, GROUP, PROTON_IMPORT, ANDROID_COPY
 
 enum class SyncIssueCause {
     AUTHENTICATION, NETWORK, CONFLICT, VALIDATION, CRYPTOGRAPHY,
-    GROUP_CAPABILITY, REMOTE_PERMISSION, ANDROID, VERIFICATION, MATCH_VERIFICATION, UNKNOWN,
+    GROUP_CAPABILITY, GROUP_REVIEW, REMOTE_PERMISSION, ANDROID, VERIFICATION, MATCH_VERIFICATION, UNKNOWN,
 }
 
 enum class SyncIssueAction {
@@ -89,6 +89,9 @@ object SyncIssuePresentationPolicy {
                 advice(SyncIssueCause.CRYPTOGRAPHY, SyncIssueAction.VIEW_DIAGNOSTICS)
             SyncProblem.GROUP_CAPABILITY_REQUIRED ->
                 advice(SyncIssueCause.GROUP_CAPABILITY, SyncIssueAction.RETRY_SYNC)
+            SyncProblem.GROUP_REVIEW_REQUIRED -> advice(SyncIssueCause.GROUP_REVIEW,
+                if (scope == SyncIssueScope.GROUP && canReview) SyncIssueAction.REVIEW_ITEM
+                else SyncIssueAction.VIEW_DIAGNOSTICS)
             SyncProblem.REMOTE_PERMISSION_REQUIRED -> advice(SyncIssueCause.REMOTE_PERMISSION,
                 if (canReview) SyncIssueAction.REVIEW_ITEM else SyncIssueAction.VIEW_DIAGNOSTICS)
             SyncProblem.ANDROID_INTEROPERABILITY_DEGRADED, SyncProblem.ANDROID_CONTACTS_PARTIALLY_PROJECTED ->

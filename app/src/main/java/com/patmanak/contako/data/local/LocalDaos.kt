@@ -171,6 +171,10 @@ internal interface ContactGroupDao {
     @Query("SELECT * FROM contact_groups WHERE account_id = :accountId ORDER BY id")
     suspend fun getAll(accountId: String): List<ContactGroupWithMemberships>
 
+    @Query("SELECT DISTINCT remote_label_id FROM contact_groups " +
+        "WHERE account_id = :accountId AND is_deleted = 0 AND remote_label_id IS NOT NULL")
+    suspend fun knownActiveRemoteIds(accountId: String): List<String>
+
     @Transaction
     @Query("SELECT * FROM contact_groups WHERE account_id = :accountId AND remote_label_id = :remoteLabelId LIMIT 1")
     suspend fun getByRemoteLabelId(accountId: String, remoteLabelId: String): ContactGroupWithMemberships?
@@ -453,6 +457,22 @@ internal interface OutboxDao {
         remoteVersion: String?,
     ): Int
 
+    /** Metadata readback does not retry or acknowledge a revision-scoped deferred link. */
+    @Query("""UPDATE outbox_mutations SET remote_version=:remoteVersion
+        WHERE account_id=:accountId AND aggregate_type='GROUP' AND aggregate_id=:groupId
+        AND operation='ASSIGNMENTS' AND revision=:revision AND state=:expectedState
+        AND state IN ('PENDING','IN_FLIGHT','PARTIAL','ACTION_REQUIRED')
+        AND remote_identity=:remoteIdentity AND remote_version IS :expectedRemoteVersion
+        AND EXISTS (SELECT 1 FROM remote_group_dependency_baselines b
+            WHERE b.account_id=:accountId AND b.group_id=:groupId
+            AND b.remote_label_id=:remoteIdentity AND b.deferred_only_revision=:revision)
+        AND EXISTS (SELECT 1 FROM contact_groups g WHERE g.account_id=:accountId AND g.id=:groupId
+            AND g.revision=:revision AND g.pending_mutation_revision=:revision
+            AND g.remote_label_id=:remoteIdentity AND g.is_deleted=0 AND g.conflict_state IS NULL)
+        """)
+    suspend fun updateDeferredGroupRemoteBaseline(accountId: String, groupId: String, revision: Long,
+        expectedState: String, expectedRemoteVersion: String?, remoteIdentity: String, remoteVersion: String): Int
+
     @Query(
         """
         UPDATE outbox_mutations
@@ -595,7 +615,8 @@ internal interface ContactInventoryCheckpointDao {
     suspend fun insertInitialCheckpoint(checkpoint: ContactInventoryCheckpointEntity): Long
 
     @Query(
-        "UPDATE contact_inventory_checkpoints SET generation = :nextGeneration, event_cursor = :eventCursor " +
+        "UPDATE contact_inventory_checkpoints SET generation = :nextGeneration, event_cursor = :eventCursor, " +
+            "event_strategy_version = :eventStrategyVersion, last_full_scan_at_epoch_millis = :lastFullScanAtEpochMillis " +
             "WHERE account_id = :accountId AND generation = :expectedGeneration",
     )
     suspend fun compareAndSetGeneration(
@@ -603,6 +624,8 @@ internal interface ContactInventoryCheckpointDao {
         expectedGeneration: Long,
         nextGeneration: Long,
         eventCursor: String? = null,
+        eventStrategyVersion: Int = 0,
+        lastFullScanAtEpochMillis: Long? = null,
     ): Int
 
     @Query("DELETE FROM contact_inventory_entries WHERE account_id = :accountId")

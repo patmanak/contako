@@ -180,6 +180,8 @@ internal data class ContactInventoryCheckpointEntity(
     @PrimaryKey @ColumnInfo(name = "account_id") val accountId: String,
     val generation: Long,
     @ColumnInfo(name = "event_cursor") val eventCursor: String? = null,
+    @ColumnInfo(name = "event_strategy_version", defaultValue = "0") val eventStrategyVersion: Int = 0,
+    @ColumnInfo(name = "last_full_scan_at_epoch_millis") val lastFullScanAtEpochMillis: Long? = null,
 ) {
     override fun toString(): String = "ContactInventoryCheckpointEntity(REDACTED, generation=$generation)"
 }

@@ -374,7 +374,8 @@ internal class ContakoSyncPassExecutor(
 
         // A resumed repair still needs a current catalog before draining group intent.
         observe(SyncPassStage.REMOTE_GROUPS)
-        acceptGroups(groupStage?.run(account, ::cancelled))?.let { return it }
+        acceptGroups(groupStage?.run(account, ::cancelled,
+            forceFullBaseline = !repair.progress.completed(FullRepairPhase.REMOTE_ENUMERATION)))?.let { return it }
         if (cancelled()) return SyncPassOutcome.CANCELLED
         mutationOrchestrator.recoverInterrupted(account.value, wallClock())
         if (cancelled()) return SyncPassOutcome.CANCELLED

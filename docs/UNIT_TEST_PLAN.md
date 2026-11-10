@@ -1,5 +1,35 @@
 # Unit test plan
 
+## Event-driven remote reconciliation
+
+Verify Contacts, ContactEmails and Labels create/update/delete actions across
+pages, last-action precedence, malformed payload rejection and bounded acquisition.
+After a committed baseline, an unchanged pass MUST make no contact/email directory,
+group catalog or full-card request. Check targeted owner resolution, recreated and
+duplicate email occurrences, group deletion without per-contact notifications,
+and group deltas that leave unrelated pending drafts untouched.
+
+Exercise old checkpoints, missing identities, incomplete group lookup, Refresh,
+invalid cursor, due safety scan and clock reversal. An unavailable group stage
+MUST retain a durable catalog-rescan obligation before a contact cursor advances;
+the next pass cannot trust deltas until that catalog is available. An unchanged
+ignored card MUST NOT reopen because of the safety scan or denied catalog.
+Contact-only fallback MUST NOT postpone the full-group
+safety scan. Cancellation, canonical failure and checkpoint CAS failure retain
+replay. Ignored/backoff hydration obligations remain guarded; an obligation absent
+from the cache MUST receive targeted verification rather than inferred deletion.
+An explicit repair baseline MUST NOT force complete enumeration on later passes.
+For a 300-card baseline, a contact created then edited between passes MUST read
+only its affected full card after a lightweight fallback; create-then-delete MUST
+read no surviving full cards. Explicit tombstones for locally acknowledged
+creations outside the checkpoint retain targeted absence confirmation. Contradictory
+or failed inventories retain the old cursor. Unknown active occurrences retain
+conservative private-change verification.
+At the safety deadline, malformed/unclassified event failure permits one latest
+attempt and complete hydration; a failed latest attempt cannot advance anything.
+Other authentication, network, quota and service failures retain ordinary handling.
+Delta success MUST NOT change operation-scoped LIST permission evidence.
+
 ## Directory criteria
 
 Cover intersection with ordinary search, including company-name accent/case equivalence,
@@ -53,6 +83,10 @@ unavailable comparison. An authentication banner MUST NOT replace another known
 item cause. Current-issue aggregation MUST preserve independent groups, cards and
 Android failures; ordinary pending work and healed historical events MUST NOT
 become errors. Deleted items remain named without offering a destructive action.
+Unverifiable partial group scope MUST map to group review only for a group item.
+Cover the concise action/body, fallback when review is unavailable and navigation
+to the current owned group outside directory filters. Stale, deleted, foreign
+or closed-account items MUST NOT open an editable group or enqueue work.
 
 ## Generated compatibility sequences
 
