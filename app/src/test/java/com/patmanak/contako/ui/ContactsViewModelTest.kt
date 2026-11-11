@@ -275,9 +275,11 @@ class ContactsViewModelTest {
 
     @Test fun aliasFilterIsReadOnlyAndKeepsAllSyncIssuesAndSearchState() = runTest(dispatcher) {
         val alias = contact("alias", "synthetic@dralias.com", "email", "synthetic@dralias.com").copy(
-            firstName = "", displayName = "synthetic@dralias.com",
+            firstName = "Generated", lastName = "Alias", displayName = "Generated alias",
             pendingMutationRevision = 2, actionRequiredReasons = setOf("NETWORK_ERROR"))
-        val named = contact("named", "Useful name", "email", "other@passmail.net")
+        val named = contact("named", "Useful name", "email", "other@passmail.net").let {
+            it.copy(values = it.values + ContactValue("alias-note", ContactValueKind.NOTE, "Useful note", order = 0))
+        }
         val ordinary = contact("ordinary", "Other name", "email", "person@example.test")
         val repository = FakeRepository(listOf(alias, named, ordinary))
         val recovery = FakeSyncRecoveryDataSource()

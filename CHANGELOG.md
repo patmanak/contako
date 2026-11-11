@@ -2,6 +2,12 @@
 
 Features and improvements by version.
 
+## Unreleased
+
+- Hide otherwise email-only Proton Pass/SimpleLogin contacts even when they have
+  names, group memberships or known technical settings. Keep contacts with other
+  useful data visible and preserve all fields and synchronization state.
+
 ## 1.0.0
 
 Changes since the previous GitHub release, 0.10.2. Intermediate source versions

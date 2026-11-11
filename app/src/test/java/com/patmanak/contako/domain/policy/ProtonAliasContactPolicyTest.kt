@@ -14,7 +14,7 @@ class ProtonAliasContactPolicyTest {
             "8alias.com", "8shield.net", "aleeas.com", "dralias.com", "silomails.com", "simplelogin.co",
             "simplelogin.com", "simplelogin.fr", "simplelogin.io", "slmail.me", "slmails.com").forEach { domain ->
             assertFalse(domain, matches(contact("synthetic@${domain.uppercase(java.util.Locale.ROOT)}")))
-            assertTrue(domain, matches(contact("synthetic@$domain").copy(displayName = "Useful name")))
+            assertFalse(domain, matches(contact("synthetic@$domain").copy(displayName = "Generated name")))
         }
         assertFalse(matches(contact("ra+synthetic@simplelogin.co")))
         assertFalse(matches(contact("reply+synthetic@simplelogin.io")))
@@ -32,12 +32,25 @@ class ProtonAliasContactPolicyTest {
         assertEquals(before, alias)
     }
 
-    @Test fun namesAndEveryNonEmailFieldFamilyKeepTheContactVisible() {
+    @Test fun namesDoNotKeepAnOtherwiseAliasOnlyContactVisible() {
         val alias = contact("first@passmail.net")
-        assertTrue(matches(alias.copy(displayName = "Zoë ß")))
-        assertTrue(matches(alias.copy(firstName = "Ana")))
-        assertTrue(matches(alias.copy(lastName = "Durand")))
-        ContactValueKind.entries.filter { it != ContactValueKind.EMAIL }.forEach { kind ->
+        listOf(alias.copy(displayName = "Zoë ß"), alias.copy(firstName = "Ana"),
+            alias.copy(lastName = "Durand"), alias.copy(firstName = "first@passmail.net"),
+            alias.copy(firstName = "First", lastName = "Alias", displayName = "Generated name")
+        ).forEach { assertFalse(matches(it)) }
+        listOf(ContactValueKind.STRUCTURED_NAME, ContactValueKind.PHONETIC_NAME, ContactValueKind.NICKNAME)
+            .forEach { kind ->
+                assertFalse(kind.name, matches(alias.copy(values = alias.values + value(kind, "Zoë Straße"))))
+                assertFalse(kind.name, matches(alias.copy(values = alias.values +
+                    value(kind, "").copy(components = mapOf("given" to "Élodie", "family" to "Straße", "suffix" to "Jr")))))
+            }
+    }
+
+    @Test fun usefulFieldsAndOpaqueDataKeepEvenNamedAliasesVisible() {
+        val alias = contact("first@passmail.net").copy(firstName = "Zoë", displayName = "Named alias")
+        val nonEnriching = setOf(ContactValueKind.EMAIL, ContactValueKind.STRUCTURED_NAME,
+            ContactValueKind.PHONETIC_NAME, ContactValueKind.NICKNAME, ContactValueKind.CATEGORY)
+        ContactValueKind.entries.filter { it !in nonEnriching }.forEach { kind ->
             assertTrue(kind.name, matches(alias.copy(values = alias.values + value(kind, "Useful field"))))
             assertTrue(kind.name, matches(alias.copy(values = alias.values +
                 value(kind, "").copy(components = mapOf("synthetic" to "Useful component")))))
@@ -46,15 +59,30 @@ class ProtonAliasContactPolicyTest {
         }
     }
 
-    @Test fun emptyImportedStructuredNameDoesNotEnrichTheCardButHiddenComponentsDo() {
+    @Test fun groupsOnlyOrganizeAliasesButDoNotEnrichThem() {
+        val alias = contact("first@passmail.net", "second@simplelogin.io").copy(firstName = "Generated")
+        val grouped = alias.copy(values = alias.values + value(ContactValueKind.CATEGORY, "Family, Friends"))
+        assertFalse(matches(grouped))
+        assertTrue(matches(grouped.copy(values = grouped.values + value(ContactValueKind.NOTE, "Call on Friday"))))
+        assertEquals("Family, Friends", grouped.values.last().value)
+    }
+
+    @Test fun onlyKnownTechnicalPropertiesAreIgnoredWithoutDiscardingThem() {
         val alias = contact("first@passmail.net")
-        val emptyName = value(ContactValueKind.STRUCTURED_NAME, ";;;;").copy(
-            components = mapOf("given" to "", "family" to "", "additional" to "", "prefix" to "", "suffix" to ""))
-        assertFalse(matches(alias.copy(values = alias.values + emptyName)))
-        assertTrue(matches(alias.copy(values = alias.values + emptyName.copy(
-            components = emptyName.components + ("suffix" to "Jr")))))
-        // A malformed scalar without parsed components remains visible, rather than guessing.
-        assertTrue(matches(alias.copy(values = alias.values + emptyName.copy(components = emptyMap()))))
+        listOf("X-PM-SCHEME", "X-PM-SIGN", "X-PM-ENCRYPT", "X-PM-ENCRYPT-UNTRUSTED", "X-PM-MIMETYPE",
+            "X-CONTAKO-AUTO-FN", "X-CONTAKO-EXPLICIT-FN").forEach { property ->
+            val setting = value(ContactValueKind.UNKNOWN_VCARD_PROPERTY, "retained setting").copy(label = property.lowercase(java.util.Locale.ROOT))
+            val withSetting = alias.copy(values = alias.values + setting)
+            assertFalse(property, matches(withSetting))
+            assertEquals(setting, withSetting.values.last())
+            assertTrue(property, matches(withSetting.copy(values = withSetting.values + value(ContactValueKind.PHOTO, "").copy(binaryReference = "synthetic-photo"))))
+            assertTrue(property, matches(alias.copy(values = alias.values + setting.copy(components = mapOf("extra" to "Useful data")))))
+            assertTrue(property, matches(alias.copy(values = alias.values + setting.copy(binaryReference = "synthetic-extra-data"))))
+        }
+        listOf(null, "X-PM-USER-NOTE", "X-CONTAKO-CUSTOM", "X-PM-SIGN-EXTRA", "X-USEFUL").forEach { property ->
+            assertTrue(property, matches(alias.copy(values = alias.values +
+                value(ContactValueKind.UNKNOWN_VCARD_PROPERTY, "Useful data").copy(label = property))))
+        }
     }
 
     @Test fun exactDomainsCaseWhitespaceAndMalformedValuesAreConservative() {
@@ -72,9 +100,9 @@ class ProtonAliasContactPolicyTest {
         val alias = contact("first@passmail.net").copy(pendingMutationRevision = 2,
             actionRequiredReasons = setOf("INVALID_EMAIL"))
         assertFalse(matches(alias))
-        val named = alias.copy(displayName = "Useful name")
-        assertTrue(matches(named, filter.copy(withoutPhone = true)))
-        assertFalse(matches(named, filter.copy(withoutEmail = true)))
+        val enriched = alias.copy(displayName = "Useful name", values = alias.values + value(ContactValueKind.NOTE, "Useful note"))
+        assertTrue(matches(enriched, filter.copy(withoutPhone = true)))
+        assertFalse(matches(enriched, filter.copy(withoutEmail = true)))
         assertEquals(setOf("INVALID_EMAIL"), alias.actionRequiredReasons)
         assertEquals(2L, alias.pendingMutationRevision)
     }

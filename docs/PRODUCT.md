@@ -20,8 +20,9 @@ product target; [known limitations](KNOWN_LIMITATIONS.md) describe current gaps.
   of days (seven by default). Criteria intersect ordinary search, which includes
   company names without a separate company filter. An opt-in alias-only filter MUST
   hide only contacts whose nonblank emails all match known Proton Pass/SimpleLogin
-  domains and which have no distinct name or other nonblank field. Unknown domains
-  and enriched contacts MUST remain visible. Filtering MUST NOT
+  domains and which contain no useful data beyond names, group memberships and
+  recognized technical settings. Names alone MUST NOT keep such a card visible.
+  Unknown domains and cards with other useful data MUST remain visible. Filtering MUST NOT
   change contacts, access peers or restrict Sync work, errors or counts.
 - Contact detail/editing MUST support repeated values, primary selection,
   structured/display names, photos/logos and the advanced fields in

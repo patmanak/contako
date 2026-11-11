@@ -14,9 +14,10 @@ and established labels that Proton cannot represent. Pending delivery alone does
 not make data local-only.
 
 **Hide alias-only contacts** hides cards containing only emails on known Proton
-Pass/SimpleLogin domains. A distinct name, phone, note, photo or other field keeps
-the card visible. An email repeated as the display name, or an empty structured
-name, does not enrich it. This option starts disabled and never deletes anything.
+Pass/SimpleLogin domains, even when they have names or group memberships.
+A phone, note, photo or other useful field keeps the card visible. Known technical
+messaging settings are ignored for this criterion; other unknown fields keep the
+card visible. This option starts disabled and never changes or deletes anything.
 
 The bundled domain set is `pass2mail.com`, `passfwd.com`, `passinbox.com`,
 `passmail.com`, `passmail.net`, `8alias.com`, `8shield.net`, `aleeas.com`,

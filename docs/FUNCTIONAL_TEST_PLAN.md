@@ -65,11 +65,15 @@ successful evidence or declaring an accepted limitation fixed.
 
 ## Cases
 
-For directory filters, also compare alias-only cards with distinct-name, photo,
-phone, note and opaque-field variants; include mixed/unknown domains and
-email-as-display-name cards. Only alias-only cards on recognized exact domains
-MUST disappear when that criterion is applied, without changing peer data or
-Sync issues. Cancel or remove its chip and check the original identities return.
+For directory filters, compare alias-only cards with generated and distinct
+display/given/family names, structured names, nicknames, phonetic names, groups
+and recognized technical messaging settings. These alone MUST NOT prevent hiding.
+Add photo, phone, note and useful opaque-field variants, including unknown
+X-PM-/X-CONTAKO- extensions; they MUST remain visible. Include mixed/unknown
+domains and email-as-display-name cards. Only otherwise alias-only cards on
+recognized exact domains MUST disappear when that criterion is applied, without
+changing encoded cards, canonical names, groups, peer data or Sync issues.
+Cancel or remove its chip and check the original identities and fields return.
 Use rich contacts with duplicate emails, secondary-email
 groups, multiple organizations, blank values, a nonblank invalid phone and a
 local date. Apply/cancel, remove criteria, combine criteria with company-name search, clear
