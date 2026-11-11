@@ -60,11 +60,13 @@ The recipe builds pinned Go 1.27.1 from F-Droid's
 [Go srclib](https://gitlab.com/fdroid/fdroiddata/-/blob/master/srclibs/go.yml),
 then builds the locked Proton cryptography modules using NDK r27c, SDK 36 and
 JDK 21. The official build image configures `trixie-backports`; the recipe
-explicitly selects its `golang-go` bootstrap package because the stable package
-is too old. Bootstrap Go MUST be at least 1.24.6, and the final source-built
-toolchain MUST be exactly 1.27.1; both checks remain mandatory. When changing
-build images, verify their repository provisioning rather than assuming the
-unqualified distro package is sufficient. The native
+selects its `golang-go` bootstrap package with `apt-get -t trixie-backports`
+so its Go dependencies also come from backports; selecting only the package
+with a `/trixie-backports` suffix can leave incompatible stable dependencies.
+The stable bootstrap package is too old. Bootstrap Go MUST be at least 1.24.6,
+and the final source-built toolchain MUST be exactly 1.27.1; both checks remain
+mandatory. When changing build images, verify their repository provisioning
+rather than assuming the unqualified distro package is sufficient. The native
 compilation runs in `build`, after source scanning, rather than `prebuild`.
 After bootstrapping Go, the recipe invokes the versioned
 [native builder](../app/native/golib/README.md) from the selected source commit.
