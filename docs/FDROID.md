@@ -2,8 +2,9 @@
 
 Contako is not yet included in F-Droid. The [draft recipe](../fdroid/metadata/com.patmanak.contako.yml)
 is deliberately disabled at both application and build level. Linux native
-reconstruction, the F-Droid source/dependency scan and APK reproducibility MUST
-pass before enabling it or requesting inclusion.
+reconstruction and APK signature reproduction have been qualified locally.
+The F-Droid build-server run, review of the source-scan exception and a matching
+published APK remain required before enabling it or requesting inclusion.
 
 The native release reference is Linux. Its AAR and canonical LF POM are verified
 across clean builds with distinct source and cache directories, with exact
@@ -16,13 +17,12 @@ including through WSL, rather than selecting a host-specific binary fallback.
 [Fastlane metadata](../fastlane/README.md) supplies English and French text,
 the existing application icon and English screenshots with fictional contacts.
 Maintain changelogs by Android versionCode alongside the central version.
-The draft references the exact published `v1.0.0` commit and its universal APK;
-it does not imply that an older tag contains subsequently added listing files.
-For that initial revision, the recipe supplies fallback text. Do not copy the
-Fastlane directory into fdroiddata: its localized text filenames differ and
-screenshots are not accepted there. Use a future reviewed tag containing the
-Fastlane files for the illustrated listing, updating the recipe and published
-APK together.
+The draft targets `v1.0.1`, whose source contains these listing files. Publish
+that tag only on the reviewed, qualified commit. Its `Binaries` URL expects the
+matching developer-signed universal APK on GitHub; verify the tag and asset
+before enabling the recipe. Do not copy the Fastlane
+directory into fdroiddata: its localized text filenames differ and screenshots
+are not accepted there. Update the source revision and published APK together.
 
 The proposed `TetheredNet` label describes the dependency on the Proton service.
 F-Droid maintainers determine the final classification and inclusion outcome.
@@ -40,20 +40,27 @@ instead of skipping a disabled app. Run there:
 ```sh
 fdroid readmeta
 fdroid lint com.patmanak.contako
-fdroid build --server --verbose com.patmanak.contako:30
+fdroid build --server --verbose com.patmanak.contako:31
 ```
 
 Metadata checks do not qualify a native build. Keep the tracked draft disabled
 until the complete build and comparison below pass. Review source-scanner
-findings individually; do not add blanket `scanignore` exclusions.
+findings individually; do not add blanket `scanignore` exclusions. The draft
+exempts only `app/settings.gradle.kts`: the scanner reports its group-exclusive
+local Maven directory, populated from Proton source during `build`, as unknown.
+An exact canonical SHA-256 check in `prebuild` prevents that exception from
+silently covering changed repository declarations. Dependency declarations and
+all binaries remain scanned. Include this rationale in the submission for
+maintainer review, as required by the
+[scanignore guidance](https://f-droid.org/docs/Build_Metadata_Reference/#scanignore).
 
 The recipe builds pinned Go 1.27.1 from the F-Droid Go srclib, then builds the
 locked Proton cryptography modules using NDK r27c, SDK 36 and JDK 21. Its host
 bootstrap Go MUST be at least 1.24.6; the recipe rejects an older distro package.
 Adjust the build image/bootstrap provision explicitly if necessary. The native
 compilation runs in `build`, after source scanning, rather than `prebuild`.
-The inline commands mirror the existing [native builder](../app/native/golib/README.md)
-without requiring a new helper absent from the selected release commit.
+After bootstrapping Go, the recipe invokes the versioned
+[native builder](../app/native/golib/README.md) from the selected source commit.
 
 The official upstream AAR is downloaded with a fixed SHA-256 solely to compare
 the public Java API. Packaged JNI libraries MUST come from the source build.
@@ -101,7 +108,11 @@ The helper pins the expected signer and rejects identical inputs, signed rebuild
 and comparison-environment overrides. A pass proves comparison of those APKs;
 the operator MUST separately retain the reviewed source commit, clean Linux build
 environment and build logs. Comparing two artifacts from the same build does not
-prove independent reconstruction. Native identity and APK byte equality are
+prove independent reconstruction. Final comparisons MUST use clean Git checkouts
+at the selected commit: Gradle embeds the revision in
+`META-INF/version-control-info.textproto`, so source-archive builds without Git
+are not equivalent to the F-Droid checkout. Preserve that metadata rather than
+discarding it during comparison. Native identity and APK byte equality are
 separate gates. If reproducibility cannot be achieved, F-Droid signing is a
 different distribution choice that MUST be decided before submission.
 
