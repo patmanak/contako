@@ -1,0 +1,1 @@
+Refine the alias-only filter: names, groups and known technical settings no longer keep otherwise email-only aliases visible. Contacts with other useful data remain visible and unchanged. Standardize release cryptography builds on Linux with strict source, API and architecture verification. Add F-Droid listing metadata and reconstruction tools.

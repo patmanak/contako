@@ -8,7 +8,7 @@ milestones. Full notices and source attribution MUST remain with distributed bui
 ## Proton integration
 
 The catalog pins Proton Core 36.8.0 and explicitly constrains
-`com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k`, the
+`com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1`, the
 [source-built Proton bundle](../app/native/golib/README.md). Core's
 [published crypto POM](https://repo.maven.apache.org/maven2/me/proton/core/crypto-android/36.8.0/crypto-android-36.8.0.pom)
 requests golib 2.9.0-2; the build substitutes that request with the same

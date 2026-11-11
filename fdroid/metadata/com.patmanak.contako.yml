@@ -1,0 +1,93 @@
+Disabled: Pending F-Droid build-server verification and matching published APK
+AntiFeatures:
+  TetheredNet:
+    en-US: Synchronization requires an account on the Proton service.
+Categories:
+  - Internet
+License: GPL-3.0-or-later
+AuthorName: Patmanak
+SourceCode: https://github.com/patmanak/contako
+IssueTracker: https://github.com/patmanak/contako/issues
+Changelog: https://github.com/patmanak/contako/blob/HEAD/CHANGELOG.md
+Donate: https://fr.tipeee.com/patmanak/
+
+AutoName: Contako
+Summary: Manage Proton contacts and sync them with Android
+Description: |-
+  Manage Proton contacts on Android and make supported fields available to
+  your contacts, phone, messaging and mail apps. Browse offline, edit contacts
+  and photos, manage email-specific groups and inspect synchronization issues.
+
+  Requires Android 12 or later and a Proton account. One account is supported
+  at a time. Group availability depends on the account. Contako is independent
+  and is not affiliated with Proton. No advertising or analytics.
+
+RepoType: git
+Repo: https://github.com/patmanak/contako.git
+Binaries: https://github.com/patmanak/contako/releases/download/v%v/Contako-%v.apk
+
+Builds:
+  - versionName: 1.0.1
+    versionCode: 31
+    disable: Pending F-Droid build-server verification and matching published APK
+    commit: v1.0.1
+    subdir: app
+    sudo:
+      - apt-get update
+      - apt-get install -y golang-go/trixie-backports openjdk-21-jdk-headless python3 gcc libc6-dev
+    gradle:
+      - yes
+    srclibs:
+      - go@go1.27.1
+      - reproducible-apk-tools@ca728486d42a79f1c9ec0c6ec755c39f251911a8
+    prebuild:
+      - sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - sed -i 's/\r$//' gradlew
+      - test "$(tr -d '\r' < settings.gradle.kts | sha256sum | cut -d' ' -f1)" = 2384bbd68999d1f9ef24b89262b613a843c274fa4ef1816a660b89f384ca8b1d
+    # The scanner flags this source-built, group-exclusive local Maven directory
+    # as unknown. Pin the exact reviewed settings above; no remote custom repo,
+    # dependency declarations, bundled binary or source directory is exempted.
+    # Include this rationale in the fdroiddata MR for maintainer review.
+    scanignore:
+      - app/settings.gradle.kts
+    build: |-
+      set -euo pipefail
+      app_dir="$PWD"
+      export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+      export ANDROID_HOME="$$SDK$$"
+      export ANDROID_NDK_HOME="$$NDK$$"
+      test -x "$JAVA_HOME/bin/javac" || { echo JAVA_21_REQUIRED >&2; exit 1; }
+      grep -Eq 'Pkg.Revision[[:space:]]*=[[:space:]]*27\.2\.12479018([[:space:]]|$)' "$ANDROID_NDK_HOME/source.properties"
+      command -v go >/dev/null || { echo GO_BOOTSTRAP_REQUIRED >&2; exit 1; }
+      bootstrap_version="$(go env GOVERSION)"
+      python3 - "$bootstrap_version" <<'PY'
+      import re, sys
+      match = re.fullmatch(r'go(\d+)\.(\d+)(?:\.(\d+))?', sys.argv[1])
+      if not match or tuple(int(x or 0) for x in match.groups()) < (1, 24, 6):
+          sys.exit('GO_BOOTSTRAP_1_24_6_REQUIRED')
+      PY
+      export GOROOT_BOOTSTRAP="$(go env GOROOT)"
+      export GOTOOLCHAIN=local
+      export GOMAXPROCS=2
+      (cd "$$go$$/src" && ./make.bash)
+      export GOROOT="$$go$$"
+      export PATH="$GOROOT/bin:$JAVA_HOME/bin:$PATH"
+      test "$(go env GOVERSION)" = go1.27.1
+      bash native/golib/build.sh --go-home "$GOROOT" --android-sdk "$ANDROID_HOME" \
+        --android-ndk "$ANDROID_NDK_HOME" --java-home "$JAVA_HOME" \
+        --work "$app_dir/native/build/fdroid-work" --repository "$app_dir/native/build/maven"
+    ndk: 27.2.12479018
+    gradleprops:
+      - contakoTestBuildType=debug
+    postbuild:
+      - python3 $$reproducible-apk-tools$$/zipalign.py --page-size 16 --pad-like-apksigner --replace "$$OUT$$" "$$OUT$$.aligned"
+      - mv "$$OUT$$.aligned" "$$OUT$$"
+
+AllowedAPKSigningKeys:
+  - 2620844332bce89ff471d0c64629f25fe3fabd1d465d01780f7649f4d023f4fb
+
+AutoUpdateMode: None
+UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
+UpdateCheckData: 'app/build.gradle.kts|versionCode\s*=\s*(\d+)|.|val\s+contakoReleaseVersion\s*=\s*"([^"]+)"'
+CurrentVersion: 1.0.1
+CurrentVersionCode: 31

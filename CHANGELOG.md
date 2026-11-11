@@ -2,11 +2,16 @@
 
 Features and improvements by version.
 
-## Unreleased
+## 1.0.1
 
 - Hide otherwise email-only Proton Pass/SimpleLogin contacts even when they have
   names, group memberships or known technical settings. Keep contacts with other
   useful data visible and preserve all fields and synchronization state.
+- Standardize release cryptography builds on Linux, retain exact source/API/ABI
+  verification and normalize Maven metadata and the packaged source notice
+  across checkout platforms.
+- Add F-Droid listing metadata and a guarded reconstruction recipe, with checks
+  for independently rebuilt APKs using the existing developer signature.
 
 ## 1.0.0
 

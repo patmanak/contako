@@ -1,0 +1,14 @@
+Gérez vos contacts Proton sur Android et rendez leurs champs compatibles accessibles aux applications de contacts, de téléphone, de messagerie et de mail.
+
+• Consultez et recherchez vos contacts hors ligne.
+• Créez et modifiez des fiches avec photos et champs multiples.
+• Gérez les groupes Proton pour chaque adresse e-mail.
+• Filtrez les numéros ou e-mails manquants, les champs locaux, les changements récents et les contacts limités aux alias.
+• Consultez les erreurs de synchronisation, comparez les versions en conflit et relancez une fiche concernée.
+• Récupérez les modifications locales après une suppression sur Proton.
+
+Android reçoit les champs compatibles et les groupes de l’adresse e-mail préférée. Les données importées supplémentaires sont conservées lors des modifications compatibles.
+
+Nécessite Android 12 ou plus récent et un compte Proton. Un seul compte est pris en charge à la fois. La disponibilité des groupes dépend du compte. Le rythme de synchronisation en arrière-plan dépend d’Android.
+
+Logiciel libre, sans publicité ni analyse d’usage. Contako est un projet indépendant, sans affiliation à Proton.

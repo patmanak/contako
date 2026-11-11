@@ -242,7 +242,7 @@ function Assert-LegalAndWriteSbom([string[]]$Resolved) {
     $descriptorPaths = @('app/build.gradle.kts', 'app/settings.gradle.kts', 'app/gradle.properties',
         'app/gradle/libs.versions.toml', 'app/gradle/wrapper/gradle-wrapper.properties', 'app/gradle/verification-metadata.xml',
         'app/native/golib/go.mod', 'app/native/golib/go.sum', 'app/native/golib/dependencies.go',
-        'app/native/golib/build.ps1', 'app/native/golib/package-aar.py', 'app/native/golib/golib.pom')
+        'app/native/golib/build.ps1', 'app/native/golib/build.sh', 'app/native/golib/package-aar.py', 'app/native/golib/golib.pom')
     if (@($legal.dependencyDescriptors).Count -ne $descriptorPaths.Count) { throw 'LEGAL_DESCRIPTOR_SET_INVALID' }
     foreach ($relative in $descriptorPaths) {
         $entries = @($legal.dependencyDescriptors | Where-Object { $_.file -ceq $relative })

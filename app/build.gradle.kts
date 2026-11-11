@@ -5,7 +5,7 @@ import java.util.zip.ZipFile
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
 
-val contakoReleaseVersion = "1.0.0"
+val contakoReleaseVersion = "1.0.1"
 val contakoBaseApplicationId = "com.patmanak.contako"
 val contakoCandidatePackageSuffix = providers.gradleProperty("contakoCandidatePackageSuffix")
     .orNull
@@ -42,7 +42,7 @@ android {
         minSdk = 31
         targetSdk = 36
         contakoTargetAbi?.let { targetAbi -> ndk { abiFilters += targetAbi } }
-        versionCode = 30
+        versionCode = 31
         versionName = contakoReleaseVersion
         buildConfigField("String", "PROTON_RELEASE_VERSION", "\"${contakoReleaseVersion.substringBefore('-')}\"")
         buildConfigField("boolean", "SANITIZED_DIAGNOSTICS", "false")
@@ -148,7 +148,7 @@ val sourceBuiltGolib = layout.projectDirectory.file(
     "native/build/maven/com/patmanak/contako/crypto/android-golib/$sourceBuiltGolibVersion/" +
         "android-golib-$sourceBuiltGolibVersion.aar",
 )
-val nativeSourceNames = listOf("go.mod", "go.sum", "dependencies.go", "build.ps1", "package-aar.py", "golib.pom")
+val nativeSourceNames = listOf("go.mod", "go.sum", "dependencies.go", "build.ps1", "build.sh", "package-aar.py", "golib.pom")
 val verifySourceBuiltCrypto = tasks.register("verifySourceBuiltCrypto") {
     group = "verification"
     description = "Reject missing or stale source-built Proton crypto artifacts."
