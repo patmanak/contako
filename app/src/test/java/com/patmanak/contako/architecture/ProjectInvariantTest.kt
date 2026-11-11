@@ -108,7 +108,7 @@ class ProjectInvariantTest {
         assertTrue(catalog.contains("protonCore = \"36.8.0\""))
         assertEquals(23, Regex("module = \"me\\.proton\\.core:").findAll(catalog).count())
         assertEquals(23, Regex("implementation\\(libs\\.proton\\.(?!golib\\))").findAll(build).count())
-        assertTrue(catalog.contains("protonGolib = \"2.10.0-2-go1.27.1-16k-linux1\""))
+        assertTrue(catalog.contains("protonGolib = \"2.10.0-2-go1.27.1-16k-linux2\""))
         assertTrue(catalog.contains("module = \"com.patmanak.contako.crypto:android-golib\""))
         assertTrue(build.contains("requested.group == \"me.proton.crypto\" && requested.name == \"android-golib\""))
         assertTrue(build.contains("strictly(libs.versions.protonGolib.get())"))
