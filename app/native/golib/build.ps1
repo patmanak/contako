@@ -58,9 +58,10 @@ try {
     $packages = @('crypto', 'armor', 'constants', 'models', 'subtle', 'helper') |
         ForEach-Object { 'github.com/ProtonMail/gopenpgp/v2/' + $_ }
     $packages += 'github.com/ProtonMail/go-srp'
+    # Omit Go's location-dependent cache ID; retain a content-derived GNU ID.
     Invoke-NativeTool "$work/bin/gomobile$suffix" (@('bind', '-tags', 'mobile', '-target', 'android',
         '-androidapi', '31', '-javapkg', 'com.proton.gopenpgp', '-trimpath',
-        '-ldflags=-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384',
+        '-ldflags=-s -w -buildid= -linkmode=external -extldflags=-Wl,--build-id=sha1,-z,max-page-size=16384,-z,common-page-size=16384',
         '-o', "$work/raw.aar") + $packages) 'bind.log'
     $after = @('go.mod', 'go.sum', 'dependencies.go') | ForEach-Object {
         (Get-FileHash -LiteralPath (Join-Path $source $_) -Algorithm SHA256).Hash

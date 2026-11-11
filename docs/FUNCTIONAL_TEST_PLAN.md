@@ -15,6 +15,11 @@ minified contact round trip on a physical runtime. Record the device's actual
 page size. ELF/ZIP alignment checks and 4 KiB-device execution MUST remain distinct
 from 16 KiB-device qualification.
 
+Native reproducibility checks MUST also use distinct source, cache and NDK
+installation paths. Compare complete AAR/POM bytes and the final APK without
+discarding native sections. All four ABIs MUST retain their module/API identity
+and 16 KiB ELF/RELRO checks; metadata-only equality does not qualify a rebuild.
+
 Target tests use the real minified Contako app, a physical system contact editor
 and the dedicated Proton Web account when available. This is a reusable procedure,
 not a history of APK installations or old campaign results. Read [QA](QA.md) for

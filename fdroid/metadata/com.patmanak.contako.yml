@@ -29,10 +29,10 @@ Repo: https://github.com/patmanak/contako.git
 Binaries: https://github.com/patmanak/contako/releases/download/v%v/Contako-%v.apk
 
 Builds:
-  - versionName: 1.0.1
-    versionCode: 31
+  - versionName: 1.0.2
+    versionCode: 32
     disable: Pending F-Droid build-server verification and matching published APK
-    commit: v1.0.1
+    commit: v1.0.2
     subdir: app
     sudo:
       - apt-get update
@@ -92,5 +92,5 @@ AllowedAPKSigningKeys:
 AutoUpdateMode: None
 UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
 UpdateCheckData: 'app/build.gradle.kts|versionCode\s*=\s*(\d+)|.|val\s+contakoReleaseVersion\s*=\s*"([^"]+)"'
-CurrentVersion: 1.0.1
-CurrentVersionCode: 31
+CurrentVersion: 1.0.2
+CurrentVersionCode: 32

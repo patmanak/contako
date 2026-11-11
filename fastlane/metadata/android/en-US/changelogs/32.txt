@@ -1,0 +1,1 @@
+Make native cryptography builds reproducible across Android NDK installation paths.

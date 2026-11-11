@@ -122,7 +122,7 @@ Manifest: `runtime-artifact-licenses.json`
 - `com.google.guava:listenablefuture:1.0` / `listenablefuture-1.0.jar` / Apache-2.0
 - `com.googlecode.ez-vcard:ez-vcard:0.11.3` / `ez-vcard-0.11.3.jar` / BSD-2-Clause-FreeBSD
 - `com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0` / `retrofit2-kotlinx-serialization-converter-1.0.0.jar` / Apache-2.0
-- `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar` / GPL-3.0-only
+- `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar` / GPL-3.0-only
 - `com.squareup.okhttp3:logging-interceptor:4.12.0` / `logging-interceptor-4.12.0.jar` / Apache-2.0
 - `com.squareup.okhttp3:okhttp:4.12.0` / `okhttp-4.12.0.jar` / Apache-2.0
 - `com.squareup.okio:okio-jvm:3.6.0` / `okio-jvm-3.6.0.jar` / Apache-2.0
@@ -12499,7 +12499,7 @@ SHA-256: `B06D21D5C87EE245282AB5895813252E61573C99D15323A849ACE309A311FC8B`
     either expressed or implied, of the FreeBSD Project.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/github.com_cloudflare_circl/LICENSE`
 SHA-256: `B0DA1764FE4D13D610B695536FC3F2EBC362482D053A1CD258E36975BC6B97A7`
@@ -12563,7 +12563,7 @@ SHA-256: `B0DA1764FE4D13D610B695536FC3F2EBC362482D053A1CD258E36975BC6B97A7`
     OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/github.com_cronokirby_saferith/LICENSE`
 SHA-256: `6D18204BD2F491153E8AD86767BDCCEDAF238E2A7BC2A1FEE592888DFCFE2735`
@@ -12589,7 +12589,7 @@ SHA-256: `6D18204BD2F491153E8AD86767BDCCEDAF238E2A7BC2A1FEE592888DFCFE2735`
     SOFTWARE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/github.com_pkg_errors/LICENSE`
 SHA-256: `8D427FD87BC9579EA368FDE3D49F9CA22EAC857F91A9DEC7E3004BDFAB7DEE86`
@@ -12619,7 +12619,7 @@ SHA-256: `8D427FD87BC9579EA368FDE3D49F9CA22EAC857F91A9DEC7E3004BDFAB7DEE86`
     OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/github.com_ProtonMail_bcrypt/LICENSE`
 SHA-256: `DA4B77EA67EEA3548AAC445741CD70CFBD87E2A5BCBB03A2BB85ABDA0E2FA3C1`
@@ -12655,7 +12655,7 @@ SHA-256: `DA4B77EA67EEA3548AAC445741CD70CFBD87E2A5BCBB03A2BB85ABDA0E2FA3C1`
     OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/github.com_ProtonMail_go-crypto/LICENSE`
 SHA-256: `2D36597F7117C38B006835AE7F537487207D8EC407AA9D9980794B2030CBC067`
@@ -12689,7 +12689,7 @@ SHA-256: `2D36597F7117C38B006835AE7F537487207D8EC407AA9D9980794B2030CBC067`
     OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/github.com_ProtonMail_go-mime/LICENSE`
 SHA-256: `503BDCB689E2033376CAA35EB66F170920221E96706DA77BE941804BC4F36422`
@@ -12717,7 +12717,7 @@ SHA-256: `503BDCB689E2033376CAA35EB66F170920221E96706DA77BE941804BC4F36422`
     IN THE SOFTWARE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/github.com_ProtonMail_go-srp/LICENSE.txt`
 SHA-256: `3815168F9A124EFFEBB1AC464ED32859988FBDB103699E8D0EE942DD8BDBBB2C`
@@ -12745,7 +12745,7 @@ SHA-256: `3815168F9A124EFFEBB1AC464ED32859988FBDB103699E8D0EE942DD8BDBBB2C`
     THE SOFTWARE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/github.com_ProtonMail_gopenpgp_v2/LICENSE`
 SHA-256: `503BDCB689E2033376CAA35EB66F170920221E96706DA77BE941804BC4F36422`
@@ -12773,7 +12773,7 @@ SHA-256: `503BDCB689E2033376CAA35EB66F170920221E96706DA77BE941804BC4F36422`
     IN THE SOFTWARE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/Go/LICENSE`
 SHA-256: `911F8F5782931320F5B8D1160A76365B83AEA6447EE6C04FA6D5591467DB9DAD`
@@ -12807,7 +12807,7 @@ SHA-256: `911F8F5782931320F5B8D1160A76365B83AEA6447EE6C04FA6D5591467DB9DAD`
     OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/golang.org_x_crypto/LICENSE`
 SHA-256: `911F8F5782931320F5B8D1160A76365B83AEA6447EE6C04FA6D5591467DB9DAD`
@@ -12841,7 +12841,7 @@ SHA-256: `911F8F5782931320F5B8D1160A76365B83AEA6447EE6C04FA6D5591467DB9DAD`
     OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/golang.org_x_mobile/LICENSE`
 SHA-256: `911F8F5782931320F5B8D1160A76365B83AEA6447EE6C04FA6D5591467DB9DAD`
@@ -12875,7 +12875,7 @@ SHA-256: `911F8F5782931320F5B8D1160A76365B83AEA6447EE6C04FA6D5591467DB9DAD`
     OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/golang.org_x_sys/LICENSE`
 SHA-256: `911F8F5782931320F5B8D1160A76365B83AEA6447EE6C04FA6D5591467DB9DAD`
@@ -12909,7 +12909,7 @@ SHA-256: `911F8F5782931320F5B8D1160A76365B83AEA6447EE6C04FA6D5591467DB9DAD`
     OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1` / `android-golib-2.10.0-2-go1.27.1-16k-linux1.aar`
+### `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2` / `android-golib-2.10.0-2-go1.27.1-16k-linux2.aar`
 
 Embedded entry: `legal/golang.org_x_text/LICENSE`
 SHA-256: `911F8F5782931320F5B8D1160A76365B83AEA6447EE6C04FA6D5591467DB9DAD`

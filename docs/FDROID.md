@@ -9,7 +9,7 @@ F-Droid distribution. A draft submission MAY request maintainer-run CI when cont
 account verification prevents all jobs from starting, as described below.
 
 The native release reference is Linux. Its AAR and canonical LF POM are verified
-across clean builds with distinct source and cache directories, with exact
+across clean builds with distinct source, cache and NDK directories, with exact
 checksums, API/module identity and four-ABI ELF checks. Windows-native outputs
 are not assumed identical. Use the [Linux builder](../app/native/golib/README.md),
 including through WSL, rather than selecting a host-specific binary fallback.
@@ -19,7 +19,7 @@ including through WSL, rather than selecting a host-specific binary fallback.
 [Fastlane metadata](../fastlane/README.md) supplies English and French text,
 the existing application icon and English screenshots with fictional contacts.
 Maintain changelogs by Android versionCode alongside the central version.
-The draft targets `v1.0.1`, whose source contains these listing files. Publish
+The draft targets `v1.0.2`, whose source contains these listing files. Publish
 that tag only on the reviewed, qualified commit. Its `Binaries` URL expects the
 matching developer-signed universal APK on GitHub; verify the tag and asset
 before enabling the recipe. Do not copy the Fastlane
@@ -42,7 +42,7 @@ instead of skipping a disabled app. Run there:
 ```sh
 fdroid readmeta
 fdroid lint com.patmanak.contako
-fdroid build --server --verbose com.patmanak.contako:31
+fdroid build --server --verbose com.patmanak.contako:32
 ```
 
 Metadata checks do not qualify a native build. Keep the tracked draft disabled
@@ -78,6 +78,10 @@ ABIs, licenses and 16 KiB ELF layout. Gradle still enforces its exact native
 AAR/POM checksums and source provenance. A Linux hash mismatch MUST stop the
 build; investigate it before reviewing any change to the approved checksums.
 Do not regenerate verification metadata merely to make this recipe pass.
+
+Native rebuilds MUST also vary the NDK installation path. The builders omit
+Go's location-dependent cache build ID and retain a content-derived GNU build
+ID. Do not strip native sections or relax artifact hashes during comparison.
 
 Build-time downloads MUST be disclosed in the fdroiddata submission: the Go
 srclib sources, the `go.mod`/`go.sum`-locked modules from `proxy.golang.org` with

@@ -45,13 +45,17 @@ assembled APK with `zipalign -c -P 16 4` and run the cryptographic journey on a
 physical 16 KB device before claiming runtime qualification for that page size.
 
 Outputs are in ignored `app/native/build/maven/`. Gradle uses this repository
-exclusively for `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1`
+exclusively for `com.patmanak.contako.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2`
 and substitutes Core's transitive upstream golib request. It MUST NOT fall back
 to the upstream binary. The Gradle pre-build guard checks the generated AAR/POM
 against the reviewed verification metadata because local Maven files are otherwise trusted;
 a mismatch MUST be investigated, not accepted by regenerating checksums blindly.
 The approved reference uses Linux x64/Go 1.27.1/JDK 21/NDK r27c. Two builds
-MUST use distinct source and cache directories before approving a new artifact.
+MUST use distinct source, cache and NDK installation directories before approving
+a new artifact. Go's cache build ID can depend on the external compiler location
+even with `-trimpath`. The builders omit that ID and request a content-derived
+GNU build ID instead. Exact artifact checksums and source/API/module/ELF guards
+remain mandatory; do not remove arbitrary native sections during comparison.
 Windows and Linux NDK outputs are not assumed byte-identical. The historical
 PowerShell builder remains available for investigation; its output MUST pass
 the same approved checksums before use. Do not select a host-specific fallback.
@@ -69,7 +73,7 @@ bash native/golib/build.sh --go-home "$GOROOT" --android-sdk "$ANDROID_HOME" --a
 ```
 
 Alternatively, build in a separate Linux checkout and copy only its generated
-`app/native/build/maven/com/patmanak/contako/crypto/android-golib/2.10.0-2-go1.27.1-16k-linux1/`
+`app/native/build/maven/com/patmanak/contako/crypto/android-golib/2.10.0-2-go1.27.1-16k-linux2/`
 directory, including AAR and POM, into the matching path in the Windows checkout.
 Windows Gradle retains the exact AAR/POM and canonical source-descriptor guards;
 a stale or different result MUST fail. This supports Windows application

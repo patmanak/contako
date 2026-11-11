@@ -5,12 +5,12 @@
       <verify-signatures>false</verify-signatures>
    </configuration>
    <components>
-      <component group="com.patmanak.contako.crypto" name="android-golib" version="2.10.0-2-go1.27.1-16k-linux1">
-         <artifact name="android-golib-2.10.0-2-go1.27.1-16k-linux1.aar">
-            <sha256 value="9d9aecb6b9f1281871c5a16d9c5387a7dcb27c56020e37a6a6cebf39bea84dcd" origin="Reviewed matching clean Linux source rebuilds; unchanged Proton API/modules, all four ABI and 16 KiB ELF/RELRO verified"/>
+      <component group="com.patmanak.contako.crypto" name="android-golib" version="2.10.0-2-go1.27.1-16k-linux2">
+         <artifact name="android-golib-2.10.0-2-go1.27.1-16k-linux2.aar">
+            <sha256 value="b5059b8026c79c92f3f0df56dea52037f1d7145159577fe45502f76600fd3565" origin="Reviewed matching Linux rebuilds with distinct source, cache and NDK paths; unchanged Proton API/modules, four ABI and 16 KiB ELF/RELRO verified"/>
          </artifact>
-         <artifact name="android-golib-2.10.0-2-go1.27.1-16k-linux1.pom">
-            <sha256 value="2148de5a460ba4b0504e2812381fdaac0cffbbd88a3088041bea2aacae642e35" origin="Reviewed Linux reference coordinate and canonical LF Maven metadata"/>
+         <artifact name="android-golib-2.10.0-2-go1.27.1-16k-linux2.pom">
+            <sha256 value="e120040d8c611da5129e937280879ad6f56c9fe442406d4181ebe8d8fb1b5298" origin="Reviewed Linux reference coordinate and canonical LF Maven metadata"/>
          </artifact>
       </component>
       <component group="com.patmanak.contako.crypto" name="android-golib" version="2.10.0-2-go1.27.1-16k">

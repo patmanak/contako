@@ -44,8 +44,10 @@ go mod download > "$work/download.log" 2>&1
 go build -mod=readonly -trimpath -o "$work/bin/gomobile" golang.org/x/mobile/cmd/gomobile > "$work/gomobile.log" 2>&1
 go build -mod=readonly -trimpath -o "$work/bin/gobind" golang.org/x/mobile/cmd/gobind > "$work/gobind.log" 2>&1
 gomobile init > "$work/init.log" 2>&1
+# Go's cache build ID varies with the NDK location even with -trimpath.
+# Omit it and retain a content-derived GNU build ID for native diagnostics.
 gomobile bind -tags mobile -target android -androidapi 31 -javapkg com.proton.gopenpgp -trimpath \
-  '-ldflags=-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384' \
+  '-ldflags=-s -w -buildid= -linkmode=external -extldflags=-Wl,--build-id=sha1,-z,max-page-size=16384,-z,common-page-size=16384' \
   -o "$work/raw.aar" \
   github.com/ProtonMail/gopenpgp/v2/crypto github.com/ProtonMail/gopenpgp/v2/armor \
   github.com/ProtonMail/gopenpgp/v2/constants github.com/ProtonMail/gopenpgp/v2/models \

@@ -5,7 +5,7 @@ import java.util.zip.ZipFile
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
 
-val contakoReleaseVersion = "1.0.1"
+val contakoReleaseVersion = "1.0.2"
 val contakoBaseApplicationId = "com.patmanak.contako"
 val contakoCandidatePackageSuffix = providers.gradleProperty("contakoCandidatePackageSuffix")
     .orNull
@@ -42,7 +42,7 @@ android {
         minSdk = 31
         targetSdk = 36
         contakoTargetAbi?.let { targetAbi -> ndk { abiFilters += targetAbi } }
-        versionCode = 31
+        versionCode = 32
         versionName = contakoReleaseVersion
         buildConfigField("String", "PROTON_RELEASE_VERSION", "\"${contakoReleaseVersion.substringBefore('-')}\"")
         buildConfigField("boolean", "SANITIZED_DIAGNOSTICS", "false")

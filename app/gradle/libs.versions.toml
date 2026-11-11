@@ -15,7 +15,7 @@ espresso = "3.7.0"
 testServices = "1.6.0"
 coroutines = "1.10.2"
 protonCore = "36.8.0"
-protonGolib = "2.10.0-2-go1.27.1-16k-linux1"
+protonGolib = "2.10.0-2-go1.27.1-16k-linux2"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }

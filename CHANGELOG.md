@@ -2,6 +2,11 @@
 
 Features and improvements by version.
 
+## 1.0.2
+
+- Make native cryptography builds independent of the Android NDK installation
+  path while retaining source, API, module and artifact verification.
+
 ## 1.0.1
 
 - Hide otherwise email-only Proton Pass/SimpleLogin contacts even when they have

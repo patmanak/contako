@@ -15,7 +15,7 @@ from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 SOURCE = Path(__file__).resolve().parent
 WORK = SOURCE / 'build'
-VERSION = '2.10.0-2-go1.27.1-16k-linux1'
+VERSION = '2.10.0-2-go1.27.1-16k-linux2'
 ABIS = {'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'}
 
 
