@@ -1,12 +1,12 @@
 # F-Droid distribution
 
-Contako is not yet included in F-Droid. The [draft recipe](../fdroid/metadata/com.patmanak.contako.yml)
-is deliberately disabled at both application and build level. Linux native
-reconstruction and APK signature reproduction have been qualified locally.
-The F-Droid build-server run, review of the source-scan exception and a matching
-published APK remain required before enabling the tracked draft or qualifying
-F-Droid distribution. A draft submission MAY request maintainer-run CI when contributor
-account verification prevents all jobs from starting, as described below.
+Contako is not yet included in F-Droid. The
+[inclusion request](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/56879)
+is under review. Its [submission pipeline](https://gitlab.com/Patmanak/fdroiddata/-/pipelines/3055487217)
+passed the complete source build, published APK comparison and APK scan.
+Independent local Linux builds also reproduce the developer-signed APK.
+The [tracked candidate](../fdroid/metadata/com.patmanak.contako.yml) remains
+disabled pending maintainer review, including the narrow source-scan exception.
 
 The native release reference is Linux. Its AAR and canonical LF POM are verified
 across clean builds with distinct source, cache and NDK directories, with exact
@@ -19,9 +19,9 @@ including through WSL, rather than selecting a host-specific binary fallback.
 [Fastlane metadata](../fastlane/README.md) supplies English and French text,
 the existing application icon and English screenshots with fictional contacts.
 Maintain changelogs by Android versionCode alongside the central version.
-The draft targets `v1.0.2`, whose source contains these listing files. Publish
-that tag only on the reviewed, qualified commit. Its `Binaries` URL expects the
-matching developer-signed universal APK on GitHub; verify the tag and asset
+The candidate targets `v1.0.2` and pins its reviewed source commit, which contains
+these listing files. Its `Binaries` URL expects the matching developer-signed
+universal APK on GitHub; verify the tag and asset
 before enabling the recipe. Do not copy the Fastlane
 directory into fdroiddata: its localized text filenames differ and screenshots
 are not accepted there. Update the source revision and published APK together.
@@ -45,8 +45,8 @@ fdroid lint com.patmanak.contako
 fdroid build --server --verbose com.patmanak.contako:32
 ```
 
-Metadata checks do not qualify a native build. Keep the tracked draft disabled
-until the complete build and comparison below pass. Review source-scanner
+Metadata checks do not qualify a native build. Keep the tracked candidate disabled
+until qualification and maintainer review are complete. Review source-scanner
 findings individually; do not add blanket `scanignore` exclusions. The draft
 exempts only `app/settings.gradle.kts`: the scanner reports its group-exclusive
 local Maven directory, populated from Proton source during `build`, as unknown.

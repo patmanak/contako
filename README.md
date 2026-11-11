@@ -62,8 +62,8 @@ Use the checked-in Gradle wrapper and Android SDK. Start with the
 tests have separate plans and shared synthetic regression datasets.
 
 For project work, read the [development guide](docs/DEVELOPMENT.md).
-The [F-Droid preparation guide](docs/FDROID.md) covers the draft build recipe,
-store metadata and reproducibility requirements; inclusion is not yet qualified.
+The [F-Droid guide](docs/FDROID.md) covers the build recipe, store metadata and
+reproducibility requirements. [Inclusion is under review](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/56879).
 [Product scope](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
 [synchronization](docs/SYNCHRONIZATION.md) and
 [field mapping](docs/CONTACTS.md) describe the current contracts.

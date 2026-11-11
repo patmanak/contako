@@ -1,4 +1,4 @@
-Disabled: Pending F-Droid build-server verification and matching published APK
+Disabled: Pending F-Droid maintainer review
 AntiFeatures:
   TetheredNet:
     en-US: Synchronization requires an account on the Proton service.
@@ -31,8 +31,8 @@ Binaries: https://github.com/patmanak/contako/releases/download/v%v/Contako-%v.a
 Builds:
   - versionName: 1.0.2
     versionCode: 32
-    disable: Pending F-Droid build-server verification and matching published APK
-    commit: v1.0.2
+    disable: Pending F-Droid maintainer review
+    commit: 80990313c0c2f6768c5a1e326118db0927fc9a0f
     subdir: app
     sudo:
       - apt-get update
