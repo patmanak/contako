@@ -69,7 +69,7 @@ repeatable checks. An unverified case MUST NOT be presented as passed.
   leaves that detail unknown. New issue-card navigation and accessibility need
   physical qualification separately from the policy and navigation regressions.
 
-- Full TalkBack traversal remains unqualified. It is a non-blocking RC
+- Full TalkBack traversal remains unqualified. It is a non-blocking
   qualification item; this MUST NOT be presented as verified screen-reader
   accessibility.
 - Sync notifications use Android permission/channel settings and durable delivery

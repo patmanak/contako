@@ -38,7 +38,7 @@ Android 12 or later is required. One Proton account is supported at a time.
 See the [changelog](CHANGELOG.md) for source-version changes and the
 [known limitations](docs/KNOWN_LIMITATIONS.md) before use.
 Published signed universal APKs and corresponding sources are available from
-[GitHub releases](https://github.com/patmanak/contako/releases).
+[the latest GitHub release](https://github.com/patmanak/contako/releases/latest).
 Release candidates are testing builds.
 
 ## Using Contako

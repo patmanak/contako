@@ -2,62 +2,36 @@
 
 Features and improvements by version.
 
-## Unreleased
+## 1.0.0
 
-- Add an optional local filter for email-only Proton Pass/SimpleLogin alias contacts,
-  keeping enriched contacts and synchronization work visible.
-- Use Proton contact and group events with targeted reads between complete safety
-  reconciliations, avoiding a full directory read on unchanged synchronizations.
-- Avoid rereading healthy cards for intermediate deleted email occurrences, and
-  recover unexpected event-cursor responses through a bounded safety reconciliation.
-- Preserve remote group-member changes while invalid local members await correction;
-  include partially delivered groups in sanitized diagnostics.
-- Keep group memberships consistent during contact updates and offer direct group
-  review when an older partial assignment needs a new explicit selection.
-- Preserve explicit creation confirmations during other queued contacts' verification.
-- Bound import reads during persistent network outages while preserving per-contact
-  retry deadlines and healthy progress.
-- Synchronize valid group members while retaining a new invalid email locally.
-- Keep partially delivered groups visible without repeated network retries or
-  queued-write counts while their remaining invalid input awaits correction.
-- Verify more uncertain creations per bounded scan, preserve partial email edits
-  after a lost acknowledgement, and offer an explicit duplicate-risk confirmation
-  when exhausted verification cannot establish absence.
-- Share incomplete verification attempts across unchanged eligible creations in
-  the same bounded scan, preserving retry budgets and deadlines.
-- Identify unverified Proton matches separately from content conflicts and allow
-  guarded verification retries without risking another creation.
-- Probe exhausted transient writes approximately daily without resetting retry
-  history or bypassing server delays; retain real failure causes during dependency waits.
+Changes since the previous GitHub release, 0.10.2. Intermediate source versions
+are detailed below.
 
-- Resume imports per contact with durable retry deadlines, without rereading healthy
-  cards after a transient failure; keep independent work eligible.
-- Preserve uncertain-delivery evidence through rate limits, avoid identical-create
-  conflicts and bound complete recovery scans per synchronization pass.
-- Retry exhausted transient writes explicitly, including deletions, without resetting
-  their history; recheck or ignore rejected imports until their source changes.
-- Synchronize other fields while retaining an invalid email locally and its last
-  accepted remote value; distinguish partial synchronization from confirmation.
-- Generate missing display names from available fields and tolerate approved Android
-  formatting changes only with guarded post-write evidence.
-- Accept organization-only contacts on Proton and identify blocked contacts by
-  their resolved display names.
-- Edit company and department independently without reverting imported organization
-  values or losing further units.
-- Recover Android companion bindings after adding or replacing job titles, roles
-  or phonetic names, with verified write and ownership evidence.
-- Keep newer contact versions intact when recovering an interrupted Android copy.
-- Export current failure summaries and bounded protocol codes in sanitized diagnostics;
-  retain failures and transitions separately from repetitive import progress.
-- Preserve ambiguous contact creations and newer edits/deletions when an earlier
-  request finishes; retain the received identity and acknowledged upload baseline.
-- Recheck uncertain creations against verified Proton cards before retrying, while
-  retaining ambiguous matches and unreadable dependencies for safe recovery.
-- Keep dependent group assignments from starving pending contact writes.
-- Rebuild the native cryptographic bundle with 16 KiB ELF alignment and validate
-  its load segments before packaging.
-- Isolate security-test installations and cleanup from existing application data.
-- Complete recent-change plurals and document the investigation build variant.
+- Read Proton contact, email and group events with targeted updates instead of
+  rereading complete directories on healthy unchanged synchronizations.
+- Resume imports and failed writes independently, preserve uncertain delivery
+  after interruptions or lost acknowledgements, and offer guarded recovery actions.
+- Synchronize valid fields and group members while retaining invalid input locally;
+  preserve per-email groups and newer edits during retry and reconciliation.
+- Show actionable synchronization issues and per-contact confirmation details,
+  with targeted Proton/Android recovery and readable conflict comparisons.
+- Recover local edits after a Proton deletion as a retained draft, a new contact
+  or an explicitly discarded change.
+- Simplify first synchronization to its status, contact counts and error summary;
+  keep contact screens concise with an optional Information page.
+- Add offline filters for missing phone/email, local-only fields, recent changes
+  over a configurable period and alias-only contacts, without restricting Sync.
+- Improve Unicode directory sorting and search preparation while retaining complete
+  owner-scoped contact data.
+- Preserve generated names, organization components and verified Android field
+  transformations; recover interrupted companion bindings without losing newer data.
+- Enrich the rotating local diagnostic report with current causes and bounded
+  protocol details, without contact values or automatic uploads.
+- Rebuild the native cryptographic bundle with 16 KiB alignment and expand
+  deterministic compatibility, migration, interruption and recovery coverage.
+
+See [known limitations](docs/KNOWN_LIMITATIONS.md) for remaining interoperability
+and concurrent-edit boundaries.
 
 ## 0.20.0
 

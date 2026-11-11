@@ -310,9 +310,9 @@ removes the scoped local data and Android copies, not the remote Proton contacts
 Removing the Contako account through Android settings also removes scoped local
 data, so it is not a harmless troubleshooting step.
 
-Install a compatible testing APK over the existing app only when its package and
+Install a compatible signed APK over the existing app only when its package and
 signing certificate match. There is no in-app updater; published APKs and sources
-are available from [GitHub releases](https://github.com/patmanak/contako/releases).
+are available from [the latest GitHub release](https://github.com/patmanak/contako/releases/latest).
 A version number or a `release` filename does not establish signing
 compatibility or release qualification. See [build and signing](../app/README.md).
 
