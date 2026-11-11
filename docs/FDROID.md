@@ -4,7 +4,9 @@ Contako is not yet included in F-Droid. The [draft recipe](../fdroid/metadata/co
 is deliberately disabled at both application and build level. Linux native
 reconstruction and APK signature reproduction have been qualified locally.
 The F-Droid build-server run, review of the source-scan exception and a matching
-published APK remain required before enabling it or requesting inclusion.
+published APK remain required before enabling the tracked draft or qualifying
+F-Droid distribution. A draft submission MAY request maintainer-run CI when contributor
+account verification prevents all jobs from starting, as described below.
 
 The native release reference is Linux. Its AAR and canonical LF POM are verified
 across clean builds with distinct source and cache directories, with exact
@@ -146,6 +148,22 @@ scan, remove both disable flags and follow the
 [submission guide](https://f-droid.org/docs/Submitting_to_F-Droid_Quick_Start_Guide/)
 to request inclusion or open a fdroiddata merge request. Preparation alone does
 not publish anything.
+
+In the fdroiddata submission, pin `commit` to the full reviewed release commit,
+and use the tagged upstream Fastlane text and images rather than copying them
+into the recipe. Normalize the YAML with `fdroid rewritemeta`, check it with
+`fdroid lint` and retain LF line endings. Toolchain srclibs, the source-scan
+exception and the initial update policy MUST be explained to reviewers.
+
+If GitLab blocks a contributor's pipeline for account verification before any
+job starts, follow the official
+[new-app merge request template](https://gitlab.com/fdroid/fdroiddata/-/blob/master/.gitlab/merge_request_templates/Default.md).
+Submit an enabled candidate in a **draft** fdroiddata merge request, state the
+actual pipeline failure and ask a maintainer to run F-Droid CI. This exception
+does not qualify the recipe: keep pipeline/build acceptance unchecked and treat
+the unexecuted build as NOT RUN. Leave the tracked upstream draft disabled until
+the complete build and APK comparison pass. Do not change source or verification
+pins merely to work around an account or runner restriction.
 
 Automatic builds remain off (`AutoUpdateMode: None`). The draft's update check
 matches stable `vX.Y.Z` tags and extracts the central version and Android code
