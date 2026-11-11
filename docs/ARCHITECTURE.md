@@ -201,8 +201,12 @@ remote baseline, reconciliation requirement, last attempt, and the complete
 or in-flight command; an acknowledgement for the older revision therefore
 cannot clean the newer canonical edit.
 
-`PENDING`, `IN_FLIGHT`, `ACKNOWLEDGED`, and `ACTION_REQUIRED` are durable Room
-states. Startup recovery changes an interrupted `IN_FLIGHT` command to
+`PENDING`, `IN_FLIGHT`, `ACKNOWLEDGED`, `PARTIAL`, and `ACTION_REQUIRED` are durable
+Room states. `PARTIAL` retains safely omitted invalid group members after the
+valid subset is delivered; it is not a queued network write. Correction or an
+accepted email-identity change can reactivate guarded preparation, and explicit
+group editing replaces the retained scope. Startup recovery changes an interrupted
+`IN_FLIGHT` command to
 `PENDING` with mandatory reconciliation before replay. A multi-step group
 create/update plus email-label change advances the same command durably to an
 assignment operation instead of hiding multiple writes in one gateway call.

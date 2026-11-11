@@ -13,6 +13,22 @@ and invalid values. **Local-only fields** finds custom dates, phonetic names
 and established labels that Proton cannot represent. Pending delivery alone does
 not make data local-only.
 
+**Hide alias-only contacts** hides cards containing only emails on known Proton
+Pass/SimpleLogin domains. A distinct name, phone, note, photo or other field keeps
+the card visible. An email repeated as the display name, or an empty structured
+name, does not enrich it. This option starts disabled and never deletes anything.
+
+The bundled domain set is `pass2mail.com`, `passfwd.com`, `passinbox.com`,
+`passmail.com`, `passmail.net`, `8alias.com`, `8shield.net`, `aleeas.com`,
+`dralias.com`, `silomails.com`, `simplelogin.co`, `simplelogin.com`, `simplelogin.fr`,
+`simplelogin.io`, `slmail.me` and `slmails.com`. These service domains resolve to
+[Proton Pass](https://proton.me/pass) or [SimpleLogin](https://simplelogin.io/).
+Matching is case-insensitive and exact; custom domains, subdomains and future
+domains are not inferred. The domain is a display heuristic, not proof of a
+[reverse alias](https://simplelogin.io/docs/getting-started/reverse-alias/).
+SimpleLogin's [account-specific domain catalogue](https://github.com/simple-login/app/blob/c3625697e30b4c52f5edbf465b664d20cb6b6443/app/api/views/setting.py#L112)
+requires separate authentication; this local filter does not access that API.
+
 **Recently changed** offers a **Days** field, set to seven by default. It uses local observation time of contact
 field changes. It does not claim when a field was edited on Proton. First imports
 and migrated contacts without a known observation date are excluded. An unknown
@@ -92,7 +108,7 @@ Proton available while system synchronization waits.
 
 ## Understanding a synchronization issue
 
-Sync and **Items needing attention** use the same issue cards. Each card names
+Sync and **Items requiring attention** use the same issue cards. Each card names
 its scope: account, contact, group, Proton import or Android copy. Independent
 problems remain visible even while a more urgent account issue heads the page.
 Normal pending copies and edits are waiting work, rather than errors by themselves.
@@ -102,6 +118,12 @@ same account, compare retained versions, review an item, retry through the
 normal engine or open local diagnostics. A saved-operation message appears only
 for known durable intent. The app does not guess which field caused a generic
 validation failure, and an unidentified cause stays unidentified.
+
+**Review group** opens the affected group's members without changing them.
+Use **Edit → Save** to submit a new explicit membership choice.
+**Partially synchronized** can mean an invalid email is retained locally while
+other supported changes are sent. **Create anyway** requires accepting duplicate
+risk when an uncertain creation cannot be verified; it is never automatic.
 
 Opening an issue, viewing a contact or returning from Android settings does not
 resolve the issue. It stays until the relevant operation is verified. Retries
@@ -160,8 +182,9 @@ Cached contacts remain readable offline, and saved edits wait for synchronizatio
   text can be selected and copied. They remain preserved during compatible edits.
 - Save commits the edit locally before upload. A pending indicator does not mean
   that Save lost the edit. Reopen the contact to check the saved values.
-- A blank display name is filled from the entered first and family names. An
-  explicit alias is kept, with structured names shown separately in contact detail.
+- A blank display name is derived from available names, nickname, organization,
+  phone or email, without inventing a first or family name. An explicit alias is
+  kept, with structured names shown separately in contact detail.
 - Groups belong to individual email addresses in Proton. Edit each email's group
   assignments independently. Android projects the preferred email's memberships.
   Deleting a group removes its assignments, not its member contacts.
@@ -288,8 +311,9 @@ Removing the Contako account through Android settings also removes scoped local
 data, so it is not a harmless troubleshooting step.
 
 Install a compatible testing APK over the existing app only when its package and
-signing certificate match. There is no in-app updater or public release channel
-declared yet. A version number or a `release` filename does not establish signing
+signing certificate match. There is no in-app updater; published APKs and sources
+are available from [GitHub releases](https://github.com/patmanak/contako/releases).
+A version number or a `release` filename does not establish signing
 compatibility or release qualification. See [build and signing](../app/README.md).
 
 Contako is independent of Proton. It has no analytics, ads or remote crash

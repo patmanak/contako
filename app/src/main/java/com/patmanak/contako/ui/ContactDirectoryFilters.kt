@@ -115,6 +115,9 @@ internal fun DirectoryFilterSheet(
                 DirectoryFilterOption(stringResource(R.string.directory_without_email), draft.withoutEmail) {
                     onDraftChange(draft.copy(withoutEmail = it))
                 }
+                DirectoryFilterOption(stringResource(R.string.directory_hide_alias_only), draft.hideAliasOnly) {
+                    onDraftChange(draft.copy(hideAliasOnly = it))
+                }
                 DirectoryFilterOption(stringResource(R.string.directory_local_only), draft.localOnly) {
                     onDraftChange(draft.copy(localOnly = it))
                 }
@@ -186,6 +189,11 @@ internal fun DirectoryFilterSummary(
         if (filter.localOnly) item(key = "local") {
             RemovableDirectoryFilter(stringResource(R.string.directory_local_only)) {
                 onFilterChange(filter.copy(localOnly = false))
+            }
+        }
+        if (filter.hideAliasOnly) item(key = "alias") {
+            RemovableDirectoryFilter(stringResource(R.string.directory_hide_alias_only)) {
+                onFilterChange(filter.copy(hideAliasOnly = false))
             }
         }
         if (filter.recentChanges) item(key = "recent") {

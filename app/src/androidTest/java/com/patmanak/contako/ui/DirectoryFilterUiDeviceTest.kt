@@ -26,6 +26,7 @@ import com.patmanak.contako.domain.policy.DirectoryFilter
 import com.patmanak.contako.qa.saveSyntheticUiEvidence
 import com.patmanak.contako.ui.theme.ContakoTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -77,7 +78,7 @@ class DirectoryFilterUiDeviceTest {
                     onApply = { applied = draft }, onDismiss = {})
             }
         }
-        assertEquals(4, compose.onAllNodesWithTag("directory_filter_option").fetchSemanticsNodes().size)
+        assertEquals(5, compose.onAllNodesWithTag("directory_filter_option").fetchSemanticsNodes().size)
         compose.onNodeWithTag("directory_recent_days").assertDoesNotExist()
         compose.onNodeWithText(text(R.string.directory_recent_changes)).performClick()
         listOf("", "0", "2147483648").forEach { invalid ->
@@ -162,4 +163,22 @@ class DirectoryFilterUiDeviceTest {
     }
 
     private fun text(id: Int) = compose.activity.getString(id)
+
+    @Test fun aliasOnlyOptionAppliesAndItsChipCanBeRemovedIndependently() {
+        var draft by mutableStateOf(DirectoryFilter(withoutPhone = true))
+        var applied by mutableStateOf(DirectoryFilter(withoutPhone = true))
+        var open by mutableStateOf(true)
+        compose.setContent { ContakoTheme {
+            if (open) DirectoryFilterSheet(draft, onDraftChange = { draft = it },
+                onApply = { applied = draft; open = false }, onDismiss = { open = false })
+            else DirectoryFilterSummary(applied, 1, onFilterChange = { applied = it })
+        } }
+        compose.onNodeWithText(text(R.string.directory_hide_alias_only)).performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(draft.hideAliasOnly); assertFalse(applied.hideAliasOnly) }
+        compose.onNodeWithText(text(R.string.directory_apply_filters)).performClick()
+        compose.runOnIdle { assertEquals(DirectoryFilter(withoutPhone = true, hideAliasOnly = true), applied) }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.directory_remove_filter,
+            text(R.string.directory_hide_alias_only))).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(DirectoryFilter(withoutPhone = true), applied) }
+    }
 }

@@ -273,6 +273,47 @@ class ContactsViewModelTest {
         subscription.cancel()
     }
 
+    @Test fun aliasFilterIsReadOnlyAndKeepsAllSyncIssuesAndSearchState() = runTest(dispatcher) {
+        val alias = contact("alias", "synthetic@dralias.com", "email", "synthetic@dralias.com").copy(
+            firstName = "", displayName = "synthetic@dralias.com",
+            pendingMutationRevision = 2, actionRequiredReasons = setOf("NETWORK_ERROR"))
+        val named = contact("named", "Useful name", "email", "other@passmail.net")
+        val ordinary = contact("ordinary", "Other name", "email", "person@example.test")
+        val repository = FakeRepository(listOf(alias, named, ordinary))
+        val recovery = FakeSyncRecoveryDataSource()
+        val model = ContactsViewModel(repository, recovery, directoryDispatcher = dispatcher)
+        val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect {} }
+        runCurrent()
+        model.openDirectoryFilters()
+        model.updateDirectoryFilterDraft(DirectoryFilter(hideAliasOnly = true))
+        runCurrent()
+        assertEquals(3, model.uiState.value.directoryContacts.size)
+        model.dismissDirectoryFilters()
+        model.openDirectoryFilters()
+        runCurrent()
+        assertFalse(model.uiState.value.directoryFilterDraft.hideAliasOnly)
+        model.updateDirectoryFilterDraft(DirectoryFilter(hideAliasOnly = true))
+        model.applyDirectoryFilters()
+        runCurrent()
+        assertEquals(setOf("named", "ordinary"), model.uiState.value.directoryContacts.map { it.id }.toSet())
+        model.selectDestination(RootDestination.SYNC)
+        runCurrent()
+        assertEquals(listOf("alias"), model.uiState.value.actionContacts.map { it.id })
+        assertEquals(listOf("alias"), model.uiState.value.pendingContacts.map { it.id })
+        model.selectDestination(RootDestination.CONTACTS)
+        model.updateQuery("synthetic@dralias.com")
+        runCurrent()
+        assertTrue(model.uiState.value.directoryContacts.isEmpty())
+        model.clearDirectoryFilters()
+        runCurrent()
+        assertEquals("synthetic@dralias.com", model.uiState.value.query)
+        assertEquals(listOf("alias"), model.uiState.value.directoryContacts.map { it.id })
+        assertNull(repository.savedContact)
+        assertEquals(0, repository.deleteCount)
+        assertTrue(recovery.syncRequestedAccounts.isEmpty())
+        subscription.cancel()
+    }
+
     @Test fun filteredOutContactKeepsItsDetailAndSecondaryEmailGroupSearch() = runTest(dispatcher) {
         val a = contact("a", "Ana", "secondary", "a@example.invalid")
         val group = ContactGroup(LOCAL_ACCOUNT_ID, "g", "Amis",

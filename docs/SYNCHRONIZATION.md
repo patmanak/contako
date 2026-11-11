@@ -32,9 +32,12 @@ to conflict winner selection. Email-group confirmation remains independent.
 
 ### Ordinary pass
 
-An ordinary pass checks prerequisites and session generation, ingests owned Android changes,
-reads a bounded remote index, reconciles remote changes and durable local intent,
+An ordinary pass checks prerequisites and session generation, ingests owned
+Android changes, reads bounded contact/email/group events and the required
+targeted data, reconciles remote changes and durable local intent,
 drains eligible uploads, then converges Android projection and records outcomes.
+Complete inventories remain required for bootstrap, repair and the documented
+recovery/safety cases below.
 Account/provider context MUST be revalidated after ingestion and reconciliation.
 See [State contracts](SYNC_STATES.md) and [Architecture](ARCHITECTURE.md).
 
@@ -207,16 +210,21 @@ Writes to Proton remain serialized.
 
 ## Conflicts and deletion
 
-Before each existing-contact update or delete of a present remote contact, the serialized engine MUST read
-one verified full card and compare its complete fingerprint with the durable
+Before each existing-contact update or delete of a present remote contact, the
+serialized engine MUST read one verified full card and compare its contact-content
+fingerprint with the durable
 intent baseline. A divergence MUST preserve the local draft and the verified
 Proton version in account-scoped Room storage and block the upload. Full repair
 MUST NOT advance a conflicting upload baseline or choose a winner silently.
+Clear email-group `CATEGORIES` are excluded from that fingerprint and reconciled
+through the separate group-membership path; a group-only change does not by
+itself establish a contact-content conflict.
 
 The Sync panel compares Contako and Proton and queues a whole-contact choice.
 The choice is bound to the conflict generation, local revision and remote version.
 It cannot be changed while engaged. The engine reads Proton again before applying
-it; a new local or remote change invalidates the choice. Offline/cancellation
+it; a new local revision or remote contact-content change invalidates the choice.
+Offline/cancellation
 retains snapshots and intent. A local winner keeps its snapshots until confirmed
 acknowledgement; a Proton winner adopts values, preservation data and projection
 intent atomically with removal of only the selected local mutation.
@@ -235,7 +243,10 @@ or acknowledge the deletion before fresh remote proof. Already blocked deletes
 MAY resume after confirmed absence and revalidation of their exact local revision.
 
 The API has no effective atomic version precondition. A remote change between
-the final GET and PUT remains possible. Public-directory fingerprints alone
+the final GET and PUT remains possible. For partial groups, a removal made after
+the PUT while a positive restoration witness is pending can also be reapplied;
+failure, process interruption or assignment refusal can prolong that interval.
+See [Known limitations](KNOWN_LIMITATIONS.md). Public-directory fingerprints alone
 cannot expose private-only Web changes; ordinary reconciliation uses the contacts
 event feed to identify cards requiring a fresh read.
 Full repair refreshes all cards; it MUST NOT be presented as proof of ordinary

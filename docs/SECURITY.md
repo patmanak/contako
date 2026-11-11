@@ -80,8 +80,8 @@ imports remain supported; lack of a detached signature does not bypass decryptio
 integrity, field validation or bounds. Preserve supported unknown fields.
 
 HTTP responses MUST be bounded before general conversion, closing resources on
-failure. The interceptor covers maintained contacts/v4/contacts and core/v4/labels
-routes, including decompressed/chunked bodies. Directory acquisition separately
+failure. The interceptor covers contacts/v6/events, maintained contacts/v4/contacts
+and core/v4/labels routes, including decompressed/chunked bodies. Directory acquisition separately
 bounds pages, totals, identities, group references and retained strings. The
 Android photo projection checks dimensions before sampled bitmap allocation;
 canonical photo bytes remain unchanged. See [Known limitations](KNOWN_LIMITATIONS.md).

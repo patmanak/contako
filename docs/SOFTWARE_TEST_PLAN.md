@@ -95,7 +95,8 @@ Dates MUST NOT enter conflict selection.
 
 Compose cases MUST cover Apply/Cancel, chips, independent reset actions, day-count
 editing/validation, repeated upward sheet drags, numeric keyboard use and actual
-200% text. View-model cases MUST keep an out-of-filter detail open,
+200% text. Include alias-only draft cancellation, application and independent chip
+removal. View-model cases MUST keep an out-of-filter detail open,
 secondary-email group search and complete Sync issues; distinguish local read
 failures and clear private filter state on owner invalidation. These local cases
 do not establish real Proton or OEM-editor convergence.
@@ -353,6 +354,11 @@ stale deferred-group category from the outgoing occurrence; unrelated and
 unknown categories MUST survive. Verify exact restoration after lost ACK and
 email identity replacement, cancellation by explicit Proton choice or newer
 group intent, and preservation of permanent refusals across repeated drains.
+Separately inject a blocked assignment after the contact PUT is acknowledged,
+remove that member remotely, reopen Room and resume. Compare exact memberships
+through the wait and recovery. This characterizes the documented restoration
+race; the nominal restoration tests MUST NOT count as proof of concurrent-removal
+protection, and a reasserted removal remains a known limitation.
 Change an imported category to a known partially delivered group's name. An
 unchanged source header alone MUST NOT authorize removing that explicit edit;
 verify retained values and blocked upload across retry and database reopen.

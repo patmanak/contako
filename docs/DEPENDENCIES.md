@@ -23,7 +23,8 @@ published source/API and resolved binary graph; matching source files alone does
 not establish binary/resource equivalence. Rich HTTP error bodies exposed by Core
 MUST NOT enter logs or diagnostic exports.
 
-Private-change detection uses the contacts-only v6 routes defined in Proton's
+Contact and group change detection uses the contacts v6 event routes defined in
+Proton's
 [maintained WebClients event adapter](https://github.com/ProtonMail/WebClients/blob/main/packages/shared/lib/api/events.ts),
 through the same authenticated Core client. The event reader handles pagination,
 refresh requests and omitted empty collections. Public-directory fingerprints

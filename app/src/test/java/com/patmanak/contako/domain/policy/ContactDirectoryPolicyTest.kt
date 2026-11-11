@@ -19,7 +19,7 @@ class ContactDirectoryPolicyTest {
         assertFalse(DirectoryFilter().isActive)
         listOf(DirectoryFilter(withoutPhone = true), DirectoryFilter(withoutEmail = true),
             DirectoryFilter(localOnly = true),
-            DirectoryFilter(recentChanges = true)).forEach { assertTrue(it.isActive) }
+            DirectoryFilter(recentChanges = true), DirectoryFilter(hideAliasOnly = true)).forEach { assertTrue(it.isActive) }
         assertTrue(matches(contact(), DirectoryFilter()))
     }
 

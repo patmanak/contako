@@ -505,6 +505,7 @@
     <string name="directory_filters_active">Filtri attivi</string>
     <string name="directory_without_phone">Senza numero di telefono</string>
     <string name="directory_without_email">Senza indirizzo email</string>
+    <string name="directory_hide_alias_only">Nascondi contatti con soli alias</string>
     <string name="directory_local_only">Campi solo locali</string>
     <string name="directory_recent_changes">Modificati di recente</string>
     <string name="directory_recent_days">Giorni</string>

@@ -65,7 +65,12 @@ successful evidence or declaring an accepted limitation fixed.
 
 ## Cases
 
-For directory filters, use rich contacts with duplicate emails, secondary-email
+For directory filters, also compare alias-only cards with distinct-name, photo,
+phone, note and opaque-field variants; include mixed/unknown domains and
+email-as-display-name cards. Only alias-only cards on recognized exact domains
+MUST disappear when that criterion is applied, without changing peer data or
+Sync issues. Cancel or remove its chip and check the original identities return.
+Use rich contacts with duplicate emails, secondary-email
 groups, multiple organizations, blank values, a nonblank invalid phone and a
 local date. Apply/cancel, remove criteria, combine criteria with company-name search, clear
 filters without clearing search, open/back and rotate at normal/200% text.
@@ -510,6 +515,11 @@ untouched values independently on each peer:
   and other email occurrences. Exercise lost PUT acknowledgement, identity
   replacement, explicit Proton choice and a permanent assignment refusal;
   restoration MUST remain exact and retry history MUST remain unchanged.
+  Separately characterize an acknowledged contact PUT whose group restoration
+  is blocked: remove that member on Web during the wait, restart and resume.
+  Compare exact per-email memberships. The current restoration can reapply that
+  removal; record this as the known concurrency limitation, not a passed
+  concurrent-removal guarantee inferred from the nominal cases above.
   For an unverifiable legacy partial scope, use the issue's Review group action.
   It MUST open the affected current group without saving or scheduling writes.
   Only explicit Edit/Save MAY replace that scope. A stale/deleted/foreign group

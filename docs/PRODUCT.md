@@ -18,7 +18,10 @@ product target; [known limitations](KNOWN_LIMITATIONS.md) describe current gaps.
 - Contacts MUST support local filters for no phone/email, locally retained
   fields/labels and observed field changes within a configurable positive number
   of days (seven by default). Criteria intersect ordinary search, which includes
-  company names without a separate company filter. Filtering MUST NOT
+  company names without a separate company filter. An opt-in alias-only filter MUST
+  hide only contacts whose nonblank emails all match known Proton Pass/SimpleLogin
+  domains and which have no distinct name or other nonblank field. Unknown domains
+  and enriched contacts MUST remain visible. Filtering MUST NOT
   change contacts, access peers or restrict Sync work, errors or counts.
 - Contact detail/editing MUST support repeated values, primary selection,
   structured/display names, photos/logos and the advanced fields in
@@ -43,7 +46,8 @@ product target; [known limitations](KNOWN_LIMITATIONS.md) describe current gaps.
 - Successful ready login MUST schedule synchronization. Background work MUST
   respect system eligibility; no exact periodic execution deadline is promised.
 - Persistent actionable blocks MUST follow the notification policy in
-  [Decisions](DECISIONS.md); lack of delivered notifications is a current limitation.
+  [Decisions](DECISIONS.md). Notifications are implemented; permission and physical
+  qualification limits are described in [Known limitations](KNOWN_LIMITATIONS.md).
 - Users MUST be able to generate a sanitized local diagnostic summary explicitly.
   There MUST be no analytics, advertising or remote crash reporting.
 

@@ -512,6 +512,7 @@
     <string name="directory_filters_active">Filtry aktywne</string>
     <string name="directory_without_phone">Bez numeru telefonu</string>
     <string name="directory_without_email">Bez adresu email</string>
+    <string name="directory_hide_alias_only">Ukryj kontakty zawierające tylko aliasy</string>
     <string name="directory_local_only">Pola tylko lokalne</string>
     <string name="directory_recent_changes">Ostatnio zmienione</string>
     <string name="directory_recent_days">Dni</string>

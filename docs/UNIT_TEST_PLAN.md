@@ -4,9 +4,10 @@
 
 Verify Contacts, ContactEmails and Labels create/update/delete actions across
 pages, last-action precedence, malformed payload rejection and bounded acquisition.
-After a committed baseline, an unchanged pass MUST make no contact/email directory,
-group catalog or full-card request. Check targeted owner resolution, recreated and
-duplicate email occurrences, group deletion without per-contact notifications,
+After a committed baseline, a healthy no-change pass without eligible obligations,
+pending writes or a required full acquisition/safety scan MUST make no contact/email
+directory, group catalog or full-card request. Check targeted owner resolution,
+recreated and duplicate email occurrences, group deletion without per-contact notifications,
 and group deltas that leave unrelated pending drafts untouched.
 
 Exercise old checkpoints, missing identities, incomplete group lookup, Refresh,
@@ -39,6 +40,13 @@ Use a fixed clock for configurable positive day windows (seven by default),
 inclusive boundaries, invalid durations, unknown/future dates and clock rollback,
 including large durations without arithmetic overflow. Preserve multiplicity and original values; filters MUST NOT
 mutate contacts, enqueue work or read a peer.
+Alias-only filtering MUST be opt-in, inspect every email and preserve enriched
+cards, mixed/unknown domains, invalid values and lookalike suffixes. Cover case
+and outer whitespace, duplicates, email-as-FN, imported empty N components,
+hidden structured components, opaque properties and binary-only content.
+Verify imported-card preservation through the production codec and keep Sync
+issues/pending work independent in the ViewModel. Executable anchors:
+`ProtonAliasContactPolicyTest`, `ProtonAliasDirectoryMappingTest`, `ContactsViewModelTest`.
 
 ## Performance evidence integrity
 

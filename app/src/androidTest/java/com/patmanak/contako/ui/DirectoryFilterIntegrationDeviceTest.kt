@@ -179,6 +179,41 @@ class DirectoryFilterIntegrationDeviceTest {
         }
     }
 
+    @Test fun aliasFilterHidesOnlyBareAliasesInTheRealDirectoryWithoutPersistentWrites() {
+        val repository = seedAndShow()
+        val model = requireNotNull(shownModel)
+        val db = requireNotNull(database)
+        val alias = CanonicalContact(ACCOUNT, "alias-only", displayName = "synthetic@dralias.com", values = listOf(
+            ContactValue("alias-email-1", ContactValueKind.EMAIL, "synthetic@dralias.com", order = 0),
+            ContactValue("alias-email-2", ContactValueKind.EMAIL, "synthetic@dralias.com", order = 1)))
+        val enriched = alias.copy(id = "alias-named", displayName = "Useful alias name")
+        val mixed = alias.copy(id = "alias-mixed", values = alias.values +
+            ContactValue("ordinary-email", ContactValueKind.EMAIL, "synthetic@example.test", order = 2))
+        val extras = listOf(alias, enriched, mixed)
+        runBlocking { db.withTransaction {
+            extras.forEach { contact ->
+                db.contactDao().upsert(contact.toEntity())
+                db.contactDao().upsertValues(contact.values.map { it.toEntity(contact) })
+            }
+        } }
+        waitForIds(model, allIds() + extras.map { it.id })
+        val before = runBlocking { repository.observeContacts(ACCOUNT).first() }
+        val groupsBefore = runBlocking { repository.observeGroups(ACCOUNT).first() }
+        compose.onNodeWithContentDescription(text(R.string.directory_filter)).performClick()
+        compose.onNodeWithText(text(R.string.directory_hide_alias_only)).performClick()
+        compose.onNodeWithText(text(R.string.directory_apply_filters)).performClick()
+        waitForIds(model, allIds() + setOf(enriched.id, mixed.id))
+        compose.runOnIdle { model.clearDirectoryFilters() }
+        waitForIds(model, allIds() + extras.map { it.id })
+        runBlocking {
+            assertEquals(before, repository.observeContacts(ACCOUNT).first())
+            assertEquals(groupsBefore, repository.observeGroups(ACCOUNT).first())
+            assertEquals(foreign, repository.getContact(FOREIGN, foreign.id))
+            assertTrue(db.outboxDao().getAll(ACCOUNT).isEmpty())
+            assertTrue(db.contactContentChangesDao().observeActive(ACCOUNT).first().isEmpty())
+        }
+    }
+
     private fun seedAndShow(): RoomContactRepository {
         val name = "directory-filter-integration-${SystemClock.elapsedRealtimeNanos()}.db"
         databaseName = name

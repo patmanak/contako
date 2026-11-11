@@ -9,11 +9,12 @@ data class DirectoryFilter(
     val localOnly: Boolean = false,
     val recentChanges: Boolean = false,
     val recentDays: Int = 7,
+    val hideAliasOnly: Boolean = false,
 ) {
     init { require(recentDays > 0) }
 
     val isActive: Boolean
-        get() = withoutPhone || withoutEmail || localOnly || recentChanges
+        get() = withoutPhone || withoutEmail || localOnly || recentChanges || hideAliasOnly
 
     override fun toString(): String = "DirectoryFilter(redacted)"
 }
@@ -27,6 +28,7 @@ object ContactDirectoryPolicy {
         nowEpochMillis: Long,
     ): Boolean {
         if (contact.isDeleted) return false
+        if (filter.hideAliasOnly && ProtonAliasContactPolicy.isAliasOnly(contact)) return false
         if (filter.withoutPhone && contact.values.any { it.kind == ContactValueKind.PHONE && it.value.isNotBlank() }) return false
         if (filter.withoutEmail && contact.values.any { it.kind == ContactValueKind.EMAIL && it.value.isNotBlank() }) return false
         if (filter.localOnly && contact.values.none {

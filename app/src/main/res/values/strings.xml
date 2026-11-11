@@ -498,6 +498,7 @@
     <string name="directory_filters_active">Filters active</string>
     <string name="directory_without_phone">Without a phone number</string>
     <string name="directory_without_email">Without an email address</string>
+    <string name="directory_hide_alias_only">Hide alias-only contacts</string>
     <string name="directory_local_only">Local-only fields</string>
     <string name="directory_recent_changes">Recently changed</string>
     <string name="directory_recent_days">Days</string>

@@ -79,8 +79,9 @@ active:
 | --- | --- | --- |
 | `Draft` | Locally visible but not valid for upload | Correction -> `Pending`; discard only by explicit user deletion/sign-out discard |
 | `Pending` | Canonical revision and command are atomically durable | Eligibility/classification -> `InFlight`, `Superseded`, or `ActionRequired` |
-| `InFlight` | One serialized request attempt is active | Valid ack -> `Acknowledged`; transient/no ack -> `Pending`; blocking result -> `ActionRequired` |
+| `InFlight` | One serialized request attempt is active | Valid ack -> `Acknowledged`; delivered valid group subset with omitted local input -> `Partial`; transient/no ack -> `Pending`; blocking result -> `ActionRequired` |
 | `Acknowledged` | Remote outcome observed, awaiting canonical/baseline commit | Atomic reconcile -> `Clean`; process death -> reconciliation repeats safely |
+| `Partial` | Valid group links are delivered; safely omitted invalid local memberships remain durable | Correction or accepted identity change -> guarded `Pending`; explicit group Save -> new `Pending` scope; unverified legacy scope -> `ActionRequired`. Not queued network work. |
 | `Clean` | No pending local intent for the acknowledged baseline | New edit -> new `Pending` revision |
 | `Superseded` | A later durable local revision contains or dominates this intent | Retained only as audit/reconciliation metadata, then compacted safely |
 | `ActionRequired` | Automatic progress is unsafe or impossible | User correction/re-auth/explicit conflict choice -> new `Pending` or resolved `Clean` |
@@ -205,6 +206,12 @@ the affected owned group. Opening it MUST NOT mutate intent; only an explicit
 save MAY replace its scope with the user's current selection.
 Sanitized current-issue reports MUST include PARTIAL group work independently
 of the contact validation cause, without exporting group/contact identities.
+
+Current implementation limit: a later Proton removal can be reasserted while a
+positive contact-write restoration witness remains pending, including after
+failure or restart. This does not satisfy general concurrent-removal protection;
+see [Known limitations](KNOWN_LIMITATIONS.md).
+
 Exhausted network, timeout, rate-limit, service and unknown transient failures
 MUST remain visible while permitting at most one automatic probe approximately
 daily through ordinary synchronization. The daily and manual paths MUST share

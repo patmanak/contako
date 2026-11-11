@@ -98,7 +98,10 @@ installation. `qa/test-security-boundaries.ps1` checks these guards without a de
 
 ## Dependency and release tools
 
-The QA scripts are documented in [QA](../docs/QA.md). License maintenance uses:
+The QA scripts are documented in [QA](../docs/QA.md). The notices generator below
+is cache-only and invokes Gradle offline. First complete the normal verified
+dependency resolution, including required parent POMs and
+the source-built native artifact; a fresh empty cache cannot run this step.
 
 ```powershell
 $reviewedHead = git rev-parse HEAD

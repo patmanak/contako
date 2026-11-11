@@ -498,6 +498,7 @@
     <string name="directory_filters_active">Filters actief</string>
     <string name="directory_without_phone">Zonder telefoonnummer</string>
     <string name="directory_without_email">Zonder e-mailadres</string>
+    <string name="directory_hide_alias_only">Contacten met alleen aliassen verbergen</string>
     <string name="directory_local_only">Alleen lokale velden</string>
     <string name="directory_recent_changes">Onlangs gewijzigd</string>
     <string name="directory_recent_days">Dagen</string>

@@ -4,6 +4,8 @@ Features and improvements by version.
 
 ## Unreleased
 
+- Add an optional local filter for email-only Proton Pass/SimpleLogin alias contacts,
+  keeping enriched contacts and synchronization work visible.
 - Use Proton contact and group events with targeted reads between complete safety
   reconciliations, avoiding a full directory read on unchanged synchronizations.
 - Avoid rereading healthy cards for intermediate deleted email occurrences, and
