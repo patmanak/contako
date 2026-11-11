@@ -126,6 +126,10 @@ replaying the full contact campaign.
    known limitations. No build from retired history may be relabeled as a clean
    public release.
 
+For F-Droid packaging, listing metadata and independent APK reconstruction, see
+[F-Droid distribution](FDROID.md). A version/tag does not implicitly enable that
+draft recipe or establish reproducibility.
+
 ## Targeted synchronization diagnostics
 
 All builds expose the local schema-4 report in Sync. Its bounded, app-private

@@ -77,5 +77,17 @@ class ElfPageAlignmentTest(unittest.TestCase):
             packaging.elf_page_layout(bytes(data), 'arm64-v8a')
 
 
+class CanonicalPackagingTest(unittest.TestCase):
+    def test_pom_and_source_text_have_identical_bytes_after_windows_or_linux_checkout(self):
+        linux = '<name>Proton — Café Straße</name>\n<version>1</version>\n'.encode()
+        windows = linux.replace(b'\n', b'\r\n')
+        self.assertEqual(linux, packaging.canonical_text(windows))
+        self.assertEqual(linux, packaging.canonical_text(linux))
+
+    def test_archive_order_and_input_insertion_order_do_not_change_identity(self):
+        self.assertEqual(packaging.normalized_zip({'z': b'last', 'a': b'first'}),
+                         packaging.normalized_zip({'a': b'first', 'z': b'last'}))
+
+
 if __name__ == '__main__':
     unittest.main()

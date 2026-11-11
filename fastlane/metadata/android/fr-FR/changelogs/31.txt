@@ -1,0 +1,1 @@
+Uniformisation des compilations cryptographiques de publication sous Linux, avec vérification stricte des sources, de l’API et des architectures. Ajout des métadonnées et outils de reconstruction F-Droid. La gestion des contacts reste inchangée.

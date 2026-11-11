@@ -372,6 +372,7 @@ try {
         'app/native/golib/go.sum',
         'app/native/golib/dependencies.go',
         'app/native/golib/build.ps1',
+        'app/native/golib/build.sh',
         'app/native/golib/package-aar.py',
         'app/native/golib/golib.pom'
     )

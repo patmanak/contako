@@ -1,0 +1,1 @@
+Standardize release cryptography builds on Linux with strict source, API and architecture verification. Add F-Droid listing metadata and reconstruction tools. Contact-management behavior is unchanged.

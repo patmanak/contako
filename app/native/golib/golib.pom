@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.patmanak.contako.crypto</groupId>
   <artifactId>android-golib</artifactId>
-  <version>2.10.0-2-go1.27.1-16k</version>
+  <version>2.10.0-2-go1.27.1-16k-linux1</version>
   <packaging>aar</packaging>
   <name>Contako source rebuild of Proton android-golib</name>
   <description>Unmodified Proton cryptographic packages, rebuilt with Go 1.27.1, maintained Go mobile bindings and 16 KB ELF segment alignment. Not an upstream Proton release.</description>

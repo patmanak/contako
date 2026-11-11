@@ -207,6 +207,10 @@ require their own physical evidence and remain NOT RUN when not exercised.
 | gate-c-broker/GateCBroker.cs | Credential-transport support for retained opt-in probes; never routine login/reset |
 | verify-offline-rebuild.ps1 | Existing checksum/offline rebuild utility; requires expected HEAD |
 
+For Linux release reconstruction and pinned-signer APK comparison, see
+[F-Droid distribution](FDROID.md). Native host regressions and independent
+build comparisons do not replace the physical cryptographic/contact journey.
+
 ProtonNominalRemoteFixturePreparationDeviceTest and the corresponding candidate
 cleanup helper remain legacy opt-in tools with their own fixed fixture scope.
 They are NOT the shared dataset importer and MUST NOT be run as automatic setup:

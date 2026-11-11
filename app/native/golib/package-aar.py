@@ -15,7 +15,7 @@ from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 SOURCE = Path(__file__).resolve().parent
 WORK = SOURCE / 'build'
-VERSION = '2.10.0-2-go1.27.1-16k'
+VERSION = '2.10.0-2-go1.27.1-16k-linux1'
 ABIS = {'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'}
 
 
@@ -79,6 +79,11 @@ def command(arguments):
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def canonical_text(data):
+    """Use the same LF source representation on every checkout host."""
+    return data.replace(b'\r\n', b'\n')
 
 
 def api(aar, label, java_home):
@@ -184,8 +189,8 @@ def main():
         'upstream_reference_sha256': sha((WORK / 'official.aar').read_bytes()),
         'public_java_api_sha256': sha(rebuilt_api.encode()), 'native': native,
         'modules': sorted(modules.values(), key=lambda m: m['path']),
-        'source_descriptors': {f: sha((SOURCE / f).read_bytes().replace(b'\r\n', b'\n'))
-                               for f in ('go.mod', 'go.sum', 'dependencies.go', 'build.ps1', 'package-aar.py', 'golib.pom')},
+        'source_descriptors': {f: sha(canonical_text((SOURCE / f).read_bytes()))
+                               for f in ('go.mod', 'go.sum', 'dependencies.go', 'build.ps1', 'build.sh', 'package-aar.py', 'golib.pom')},
     }
     contents['META-INF/contako-native-provenance.json'] = (json.dumps(provenance, indent=2) + '\n').encode()
     output = normalized_zip(contents)
@@ -197,7 +202,7 @@ def main():
     temporary.write_bytes(output)
     temporary.replace(artifact)
     pom = repository / ('android-golib-' + VERSION + '.pom')
-    pom.write_bytes((SOURCE / 'golib.pom').read_bytes())
+    pom.write_bytes(canonical_text((SOURCE / 'golib.pom').read_bytes()))
     print(json.dumps({'aar_sha256': sha(output), 'pom_sha256': sha(pom.read_bytes()),
                       'public_api_equal': True, 'native_architectures': len(native), 'go': '1.27.1'}))
 

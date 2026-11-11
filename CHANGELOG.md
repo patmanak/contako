@@ -2,6 +2,13 @@
 
 Features and improvements by version.
 
+## 1.0.1
+
+- Standardize release cryptography builds on Linux, retain exact source/API/ABI
+  verification and normalize generated Maven metadata across checkout platforms.
+- Add F-Droid listing metadata and a guarded reconstruction recipe, with checks
+  for independently rebuilt APKs using the existing developer signature.
+
 ## 1.0.0
 
 Changes since the previous GitHub release, 0.10.2. Intermediate source versions

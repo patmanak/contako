@@ -38,6 +38,8 @@ update needs the existing signing identity and authorization to update that inst
 Before the first Gradle build, generate the checksum-locked native dependency
 using [the Proton source-rebuild instructions](native/golib/README.md).
 This requires Go 1.27.1 and NDK r27c in addition to the Android/JDK toolchain.
+Release native artifacts are rebuilt on Linux (including WSL), with the same
+strict verification for subsequent Gradle builds on any host.
 Gradle MUST fail if this local artifact is absent or its checksum differs.
 
 ```powershell

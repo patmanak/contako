@@ -1,0 +1,118 @@
+Disabled: Linux native build and APK reproducibility require qualification
+AntiFeatures:
+  TetheredNet:
+    en-US: Synchronization requires an account on the Proton service.
+Categories:
+  - Internet
+License: GPL-3.0-or-later
+AuthorName: Patmanak
+SourceCode: https://github.com/patmanak/contako
+IssueTracker: https://github.com/patmanak/contako/issues
+Changelog: https://github.com/patmanak/contako/blob/HEAD/CHANGELOG.md
+Donate: https://fr.tipeee.com/patmanak/
+
+AutoName: Contako
+Summary: Manage Proton contacts and sync them with Android
+Description: |-
+  Manage Proton contacts on Android and make supported fields available to
+  your contacts, phone, messaging and mail apps. Browse offline, edit contacts
+  and photos, manage email-specific groups and inspect synchronization issues.
+
+  Requires Android 12 or later and a Proton account. One account is supported
+  at a time. Group availability depends on the account. Contako is independent
+  and is not affiliated with Proton. No advertising or analytics.
+
+RepoType: git
+Repo: https://github.com/patmanak/contako.git
+Binaries: https://github.com/patmanak/contako/releases/download/v%v/Contako-%v.apk
+
+Builds:
+  - versionName: 1.0.0
+    versionCode: 30
+    disable: Linux native build and APK reproducibility require qualification
+    commit: 2c3eed4344363ae1b582ee14249b91d15041b650
+    subdir: app
+    sudo:
+      - apt-get update
+      - apt-get install -y golang-go openjdk-21-jdk-headless python3 gcc libc6-dev
+    gradle:
+      - yes
+    srclibs:
+      - go@go1.27.1
+      - reproducible-apk-tools@ca728486d42a79f1c9ec0c6ec755c39f251911a8
+    prebuild:
+      - sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - sed -i 's/\r$//' gradlew
+    build: |-
+      set -euo pipefail
+      app_dir="$PWD"
+      export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+      export ANDROID_HOME="$$SDK$$"
+      export ANDROID_NDK_HOME="$$NDK$$"
+      test -x "$JAVA_HOME/bin/javac" || { echo JAVA_21_REQUIRED >&2; exit 1; }
+      grep -Eq 'Pkg.Revision[[:space:]]*=[[:space:]]*27\.2\.12479018([[:space:]]|$)' "$ANDROID_NDK_HOME/source.properties"
+      command -v go >/dev/null || { echo GO_BOOTSTRAP_REQUIRED >&2; exit 1; }
+      bootstrap_version="$(go env GOVERSION)"
+      python3 - "$bootstrap_version" <<'PY'
+      import re, sys
+      match = re.fullmatch(r'go(\d+)\.(\d+)(?:\.(\d+))?', sys.argv[1])
+      if not match or tuple(int(x or 0) for x in match.groups()) < (1, 24, 6):
+          sys.exit('GO_BOOTSTRAP_1_24_6_REQUIRED')
+      PY
+      export GOROOT_BOOTSTRAP="$(go env GOROOT)"
+      export GOTOOLCHAIN=local
+      export GOMAXPROCS=2
+      (cd "$$go$$/src" && ./make.bash)
+      export GOROOT="$$go$$"
+      export PATH="$GOROOT/bin:$JAVA_HOME/bin:$PATH"
+      test "$(go env GOVERSION)" = go1.27.1
+      work="$app_dir/native/build/fdroid-work"
+      mkdir -p "$work/bin"
+      export GOPATH="$work/gopath"
+      export GOMODCACHE="$work/modcache"
+      export GOCACHE="$work/gocache"
+      export GOPROXY=https://proxy.golang.org
+      export GOSUMDB=sum.golang.org
+      export PATH="$work/bin:$PATH"
+      cd "$app_dir/native/golib"
+      sha256sum go.mod go.sum dependencies.go > "$work/source-lock.sha256"
+      go mod download
+      go build -mod=readonly -trimpath -o "$work/bin/gomobile" golang.org/x/mobile/cmd/gomobile
+      go build -mod=readonly -trimpath -o "$work/bin/gobind" golang.org/x/mobile/cmd/gobind
+      gomobile init
+      gomobile bind -tags mobile -target android -androidapi 31 -javapkg com.proton.gopenpgp -trimpath \
+        '-ldflags=-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384' \
+        -o "$work/raw.aar" \
+        github.com/ProtonMail/gopenpgp/v2/crypto github.com/ProtonMail/gopenpgp/v2/armor \
+        github.com/ProtonMail/gopenpgp/v2/constants github.com/ProtonMail/gopenpgp/v2/models \
+        github.com/ProtonMail/gopenpgp/v2/subtle github.com/ProtonMail/gopenpgp/v2/helper \
+        github.com/ProtonMail/go-srp
+      go list -m -json all > "$work/modules.json"
+      sha256sum -c "$work/source-lock.sha256"
+      python3 - "$work/official.aar" <<'PY'
+      import hashlib, pathlib, sys, urllib.request
+      url = 'https://repo.maven.apache.org/maven2/me/proton/crypto/android-golib/2.10.0-2/android-golib-2.10.0-2.aar'
+      with urllib.request.urlopen(url, timeout=120) as response:
+          data = response.read()
+      if hashlib.sha256(data).hexdigest() != 'f64705f4ae14dde5c619d03a3a7fc2e8d747fb2803c4b5da01b0c38dac7884c9':
+          sys.exit('OFFICIAL_REFERENCE_HASH_MISMATCH')
+      pathlib.Path(sys.argv[1]).write_bytes(data)
+      PY
+      python3 package-aar.py --go "$GOROOT/bin/go" --java-home "$JAVA_HOME" \
+        --work "$work" --repository "$app_dir/native/build/maven"
+      cd "$app_dir"
+    ndk: 27.2.12479018
+    gradleprops:
+      - contakoTestBuildType=debug
+    postbuild:
+      - python3 $$reproducible-apk-tools$$/zipalign.py --page-size 16 --pad-like-apksigner --replace "$$OUT$$" "$$OUT$$.aligned"
+      - mv "$$OUT$$.aligned" "$$OUT$$"
+
+AllowedAPKSigningKeys:
+  - 2620844332bce89ff471d0c64629f25fe3fabd1d465d01780f7649f4d023f4fb
+
+AutoUpdateMode: None
+UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
+UpdateCheckData: 'app/build.gradle.kts|versionCode\s*=\s*(\d+)|.|val\s+contakoReleaseVersion\s*=\s*"([^"]+)"'
+CurrentVersion: 1.0.0
+CurrentVersionCode: 30
