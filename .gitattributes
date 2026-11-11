@@ -1,3 +1,4 @@
 /app/gradlew text eol=lf
 /app/native/golib/*.sh text eol=lf
 /app/native/golib/golib.pom text eol=lf
+/app/src/main/assets/legal/NOTICE.txt text eol=lf

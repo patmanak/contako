@@ -102,6 +102,9 @@ not contact data or application payloads; the final signature comparison remains
 mandatory. The [upstream explanation](https://github.com/obfusk/apksigcopier#what-about-signatures-made-by-apksigner-from-build-tools--3500-rc1)
 describes this signing-tool compatibility issue.
 
+The packaged source notice is LF-locked through `.gitattributes`; preserve that
+checkout normalization when preparing source archives or builds on Windows.
+
 This requires `apksigner` on PATH and the
 [apksigcopier tool referenced by F-Droid](https://f-droid.org/docs/Reproducible_Builds/).
 The helper pins the expected signer and rejects identical inputs, signed rebuilds
@@ -109,10 +112,10 @@ and comparison-environment overrides. A pass proves comparison of those APKs;
 the operator MUST separately retain the reviewed source commit, clean Linux build
 environment and build logs. Comparing two artifacts from the same build does not
 prove independent reconstruction. Final comparisons MUST use clean Git checkouts
-at the selected commit: Gradle embeds the revision in
-`META-INF/version-control-info.textproto`, so source-archive builds without Git
-are not equivalent to the F-Droid checkout. Preserve that metadata rather than
-discarding it during comparison. Native identity and APK byte equality are
+at the selected commit. Gradle can embed revision metadata in
+`META-INF/version-control-info.textproto`; archive-only comparisons do not test
+that behavior. Preserve the actual metadata rather than discarding it during
+comparison. Native identity and APK byte equality are
 separate gates. If reproducibility cannot be achieved, F-Droid signing is a
 different distribution choice that MUST be decided before submission.
 
